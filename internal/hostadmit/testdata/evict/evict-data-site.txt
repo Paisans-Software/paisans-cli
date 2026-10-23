@@ -1,14 +1,14 @@
 evict f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 as paisans-f2a9 on fake (ubuntu 24.04)
 
 step 1: stop paisans-f2a9's manager
-  evict: expire paisans-f2a9 so no login starts it again, disable linger, and stop user@1001.service, which stops its Docker daemon and every container
+  evict: expire paisans-f2a9 so no login starts it again, disable linger, and stop user@1001.service, which stops its Docker daemon and every container, disarming the watchdog its Patroni held as soon as it lets go
   run:
-    $ usermod --expiredate 1 paisans-f2a9 && loginctl disable-linger paisans-f2a9 && systemctl stop user@1001.service && { loginctl terminate-user paisans-f2a9 2>/dev/null || true; }
+    $ usermod --expiredate 1 paisans-f2a9 && loginctl disable-linger paisans-f2a9 && { w=/sys/class/watchdog/watchdog0; armed() { [ "$(cat $w/state 2>/dev/null)" = active ]; }; disarm() { if armed; then { printf V > /dev/watchdog; } 2>/dev/null; fi; true; }; p=$$; ( n=0; while kill -0 $p 2>/dev/null && [ $n -lt 1200 ]; do disarm; sleep 0.5; n=$((n+1)); done ) & d=$!; trap 'kill $d 2>/dev/null' EXIT INT TERM HUP; systemctl stop user@1001.service; s=$?; i=0; while armed && [ $i -lt 20 ]; do disarm; sleep 0.5; i=$((i+1)); done; kill $d 2>/dev/null; trap - EXIT INT TERM HUP; [ $s -eq 0 ]; } && { loginctl terminate-user paisans-f2a9 2>/dev/null || true; }
 
 step 2: kill paisans-f2a9's processes
-  evict: expire paisans-f2a9, kill every process of uid 1001 or of its subordinate range and check that none is left, before anything that fences it goes
+  evict: expire paisans-f2a9, kill every process of uid 1001 or of its subordinate range and check that none is left, before anything that fences it goes, disarming the watchdog a Patroni among them held as soon as it lets go
   run:
-    $ usermod --expiredate 1 paisans-f2a9 && { procs() { ps -eo pid=,ruid=,euid=,suid= | awk '$2 == 1001 || $3 == 1001 || $4 == 1001 || $2 >= 165536 && $2 < 231072 || $3 >= 165536 && $3 < 231072 || $4 >= 165536 && $4 < 231072 { print $1 }'; }; n=0; while [ -n "$(procs)" ] && [ $n -lt 10 ]; do procs | xargs -r kill -KILL 2>/dev/null; n=$((n+1)); sleep 0.5; done; [ -z "$(procs)" ] || { echo 'processes of uid 1001 or its subordinate range survived SIGKILL:'; procs | xargs -r ps -o pid=,uid=,args= -p; false; }; }
+    $ { w=/sys/class/watchdog/watchdog0; armed() { [ "$(cat $w/state 2>/dev/null)" = active ]; }; disarm() { if armed; then { printf V > /dev/watchdog; } 2>/dev/null; fi; true; }; p=$$; ( n=0; while kill -0 $p 2>/dev/null && [ $n -lt 1200 ]; do disarm; sleep 0.5; n=$((n+1)); done ) & d=$!; trap 'kill $d 2>/dev/null' EXIT INT TERM HUP; usermod --expiredate 1 paisans-f2a9 && { procs() { ps -eo pid=,ruid=,euid=,suid= | awk '$2 == 1001 || $3 == 1001 || $4 == 1001 || $2 >= 165536 && $2 < 231072 || $3 >= 165536 && $3 < 231072 || $4 >= 165536 && $4 < 231072 { print $1 }'; }; n=0; while [ -n "$(procs)" ] && [ $n -lt 10 ]; do procs | xargs -r kill -KILL 2>/dev/null; n=$((n+1)); sleep 0.5; done; [ -z "$(procs)" ] || { echo 'processes of uid 1001 or its subordinate range survived SIGKILL:'; procs | xargs -r ps -o pid=,uid=,args= -p; false; }; }; s=$?; i=0; while armed && [ $i -lt 20 ]; do disarm; sleep 0.5; i=$((i+1)); done; kill $d 2>/dev/null; trap - EXIT INT TERM HUP; [ $s -eq 0 ]; }
 
 step 3: stop the mesh
   evict: stop and disable wg-quick@psns-f2a9, the deployment's mesh interface
@@ -157,8 +157,6 @@ step 27: remove the registry entry
     $ }
     $ ' /var/lib/paisans/registry.json > "$tmp"; chmod 600 "$tmp"; mv "$tmp" /var/lib/paisans/registry.json
 
-warning: watchdog: stopping paisans-f2a9's manager stops its Patroni, which holds the watchdog
-  A Patroni that does not stop within Docker's stop timeout is killed with the watchdog armed, and the host reboots. Have the operators stop the deployment's stacks first, or expect a reboot.
 warning: firewall: the deployment's SSH allow on 22 is kept
   It may be the rule your own login arrives by. Delete it yourself once nothing else needs it.
 warning: br_netfilter: stays loaded until the next boot

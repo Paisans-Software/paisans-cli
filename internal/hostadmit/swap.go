@@ -5,11 +5,12 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/hostmem"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // swapPath is where --swapfile makes the host's swapfile.
-const swapPath = "/swapfile"
+const swapPath = hostmem.Swapfile
 
 // SwapMax is the largest swapfile admit makes, whatever the host's RAM.
 const SwapMax = 16 << 30
@@ -33,45 +34,44 @@ func swapSize(mem int64) int64 {
 func GiB(n int64) string { return fmt.Sprintf("%d GiB", n>>30) }
 
 // SwapNeeded is why a host with no swap should have some.
-const SwapNeeded = "Without swap, a host that runs short of memory has the kernel kill a process, which may be the database, instead of slowing down."
+const SwapNeeded = hostmem.SwapNeeded
 
-// planSwap warns about a host with no swap, and with --swapfile makes it
-// one: twice its RAM up to 16 GiB, at /swapfile, on at boot through
-// /etc/fstab. Swap the host has in any form, on or not, is left alone and
-// never sized: a partition, a zram configuration or a swap line in fstab
-// that is not on is the owner's to turn on, and admit offers nothing
-// beside it, refusing --swapfile. It runs before Docker's packages, so the
+// planSwap warns about a host with no swap, or zram alone, and with
+// --swapfile makes it one: twice its RAM up to 16 GiB, at /swapfile, on at
+// boot through /etc/fstab. Swap the host has in any other form, on or not,
+// is left alone and never sized: a partition or a swap line in fstab that
+// is not on is the owner's to turn on, and admit offers nothing beside it,
+// refusing --swapfile. zram is no such form, since it keeps what it holds
+// in RAM (hostmem.Facts.Configured). It runs before Docker's packages, so the
 // space it checks is read before admit's own installs take any, and a
 // host short of memory has its swap while they install.
 func planSwap(p *planner) error {
 	s := p.f.Swap
-	if s.Active {
+	if s.CountsOn() {
 		p.present("swap: on")
 		return nil
 	}
-	var configured []string
-	for _, c := range []struct {
-		has  bool
-		what string
-	}{{s.Partition, "a swap partition"}, {s.FSTab, "a swap line in /etc/fstab"}, {s.ZRAM, "a zram-generator configuration"}, {s.File, swapPath + " exists"}} {
-		if c.has {
-			configured = append(configured, c.what)
-		}
-	}
-	if len(configured) > 0 {
+	if configured := s.Configured(); len(configured) > 0 {
 		what := strings.Join(configured, ", ")
 		if p.in.Flags.Swapfile {
-			return fmt.Errorf("--swapfile: this host has swap that is not on (%s), and admit makes no swapfile beside it. Turn it on (swapon -a, or the zram service), or remove it, and admit again. Nothing was changed", what)
+			return fmt.Errorf("--swapfile: this host has swap that is not on (%s), and admit makes no swapfile beside it. Turn it on (swapon -a), or remove it, and admit again. Nothing was changed", what)
 		}
 		p.warn("swap: configured but not on ("+what+")",
-			SwapNeeded+" Turn it on (swapon -a, or the zram service), or remove it and admit again to be offered a swapfile. Admit makes no swapfile beside swap the host already has.")
+			SwapNeeded+" Turn it on (swapon -a), or remove it and admit again to be offered a swapfile. Admit makes no swapfile beside swap the host already has.")
 		return nil
+	}
+	// zram keeps what it holds in RAM, so a host whose only swap is zram,
+	// on or not, is offered a swapfile as one with none is, and the
+	// warning says why zram is not enough.
+	none, needed := "swap: none on this host", SwapNeeded
+	if s.HasZRAM() {
+		none, needed = "swap: only zram on this host", SwapNeeded+" "+hostmem.ZRAMNotEnough
 	}
 	if s.MemTotal == 0 {
 		if p.in.Flags.Swapfile {
 			return fmt.Errorf("--swapfile: admit could not read the host's RAM to size a swapfile. Make one yourself, and admit again without --swapfile. Nothing was changed")
 		}
-		p.warn("swap: none on this host", SwapNeeded+" Admit could not read the host's RAM to size a swapfile, so make one yourself.")
+		p.warn(none, needed+" Admit could not read the host's RAM to size a swapfile, so make one yourself.")
 		return nil
 	}
 	size := swapSize(s.MemTotal)
@@ -79,14 +79,15 @@ func planSwap(p *planner) error {
 		if p.in.Flags.Swapfile {
 			return fmt.Errorf("--swapfile: %s. Nothing was changed", why)
 		}
-		p.warn("swap: none on this host", SwapNeeded+" Admit cannot make a swapfile here: "+why+".")
+		p.warn(none, needed+" Admit cannot make a swapfile here: "+why+".")
 		return nil
 	}
 	if !p.in.Flags.Swapfile {
 		p.plan.SwapOffer = size
-		p.warn("swap: none on this host; --swapfile makes a swapfile of "+GiB(size), fmt.Sprintf("%s --swapfile makes it at %s, twice the host's RAM up to %s, and admit asks at a terminal with --execute.", SwapNeeded, swapPath, GiB(SwapMax)))
+		p.warn(none+"; --swapfile makes a swapfile of "+GiB(size), fmt.Sprintf("%s --swapfile makes it at %s, twice the host's RAM up to %s, and admit asks at a terminal with --execute.", needed, swapPath, GiB(SwapMax)))
 		return nil
 	}
+	p.swapMade = size
 	p.step(Step{
 		Title:    "create a swapfile of " + GiB(size),
 		Describe: fmt.Sprintf("swap: %s, %s, twice the host's RAM up to %s, on at boot through /etc/fstab", swapPath, GiB(size), GiB(SwapMax)),

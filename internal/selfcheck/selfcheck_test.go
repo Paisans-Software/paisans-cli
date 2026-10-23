@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"syscall"
 	"testing"
@@ -104,3 +105,30 @@ func TestSelfCheckNamesTheSilentPort(t *testing.T) {
 		t.Errorf("80 refused: %v", err)
 	}
 }
+
+// How a port stayed silent is told apart: a refusal, a timeout, and
+// anything else the check cannot place.
+func TestSelfCheckClassifiesTheSilence(t *testing.T) {
+	for name, c := range map[string]struct {
+		err  error
+		want selfcheck.Silence
+	}{
+		"refused":      {refused.err, selfcheck.Refused},
+		"dial timeout": {&net.OpError{Op: "dial", Net: "tcp", Err: timeoutError{}}, selfcheck.TimedOut},
+		"deadline":     {fmt.Errorf("get: %w", context.DeadlineExceeded), selfcheck.TimedOut},
+		"unreachable":  {fmt.Errorf("dial: %w", syscall.EHOSTUNREACH), selfcheck.Unexplained},
+	} {
+		w := &answers{https: []result{ours}, http: []result{{err: c.err}}}
+		err := selfcheck.Check(context.Background(), probe(w), target)
+		var u *selfcheck.Unanswered
+		if !errors.As(err, &u) || u.Why != c.want {
+			t.Errorf("%s: %v, %+v", name, err, u)
+		}
+	}
+}
+
+type timeoutError struct{}
+
+func (timeoutError) Error() string   { return "i/o timeout" }
+func (timeoutError) Timeout() bool   { return true }
+func (timeoutError) Temporary() bool { return true }

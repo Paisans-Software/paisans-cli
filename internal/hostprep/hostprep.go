@@ -30,6 +30,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -283,7 +284,7 @@ func Build(site string, cfg *config.Config, t Transport, rec admission.Record) (
 		return nil, fmt.Errorf("site prepare: no site %q is declared", site)
 	}
 	if diff := rec.Differences(cfg, site); len(diff) > 0 {
-		return nil, fmt.Errorf("site prepare: %s's admission does not match %s:\n- %s\nSend the host's owner a new request, paisans site request --site %s > %s.admit, and ask them to run sudo paisans site admit --request %s.admit", site, config.FileName, strings.Join(diff, "\n- "), site, site, site)
+		return nil, fmt.Errorf("site prepare: %s's admission does not match %s:\n- %s\nSend the host's owner a new request, %s site request --site %s > %s.admit, and ask them to run sudo %s site admit --request %s.admit", site, config.FileName, strings.Join(diff, "\n- "), progname.Cmd(), site, site, progname.Default, site)
 	}
 	content, found, err := t.ReadFile("/etc/os-release")
 	if err != nil {
@@ -304,7 +305,7 @@ func Build(site string, cfg *config.Config, t Transport, rec admission.Record) (
 		return nil, err
 	}
 	plan.add(watchdog)
-	swap, err := checkSwap(t)
+	swap, err := checkSwap(site, t)
 	if err != nil {
 		return nil, err
 	}

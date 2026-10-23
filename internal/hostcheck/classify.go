@@ -2,10 +2,11 @@ package hostcheck
 
 import (
 	"fmt"
-	"github.com/paisans-software/paisans-cli/internal/config"
 	"net"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -122,8 +123,11 @@ func (o owners) socket(s Socket) holder {
 	if o.inv.Self.Owns(s.UID) {
 		return holder{ours: true, desc: "this deployment's user"}
 	}
-	if s.UID == 0 && s.Proto == "udp" && o.port != 0 && s.Port == o.port && o.inv.ManifestWireGuard && contains(o.inv.Links, o.iface) {
-		return holder{ours: true, desc: "WireGuard (" + o.iface + ")"}
+	if s.UID == 0 && s.Proto == "udp" && o.port != 0 && s.Port == o.port && contains(o.inv.Links, o.iface) {
+		if o.inv.ManifestWireGuard {
+			return holder{ours: true, desc: "WireGuard (" + o.iface + ")"}
+		}
+		return holder{base: true, desc: "WireGuard on " + o.iface + ", the interface named below"}
 	}
 	if s.UID == 0 {
 		return holder{base: true, desc: "a listener of root's"}
@@ -176,11 +180,15 @@ func Classify(claims Claims, inv *Inventory) *Report {
 		}
 	}
 
+	// The interface carries this deployment's name, but with no manifest
+	// entry nothing says what it runs, and apply's start would leave it
+	// running that. Its helper's down clears it, as site remove does.
 	if contains(inv.Links, claims.Interface) && !inv.ManifestWireGuard {
 		conflict(Conflict{
 			Resource: "interface " + claims.Interface,
 			Key:      "mesh",
-			Holder:   "an interface this deployment did not write (" + inv.ManifestPath + " records no " + claims.Deployment.WireGuardConf() + ")",
+			Holder: fmt.Sprintf("an interface named for this deployment that no manifest records (%s records no %s); take it down as the deployment's user with `%s`, and run again",
+				inv.ManifestPath, claims.Deployment.WireGuardConf(), apply.WGHelper{Iface: claims.Interface}.CommandLine("down")),
 		})
 	}
 

@@ -192,3 +192,18 @@ func TestExtraGroupsDropTheClientsOwnGroups(t *testing.T) {
 		t.Errorf("ExtraGroups = %s", got)
 	}
 }
+
+// The account service links to nothing of its own on the dashboard: its
+// client has no launch URL, and says so.
+func TestTheAccountClientHasNoLaunchURL(t *testing.T) {
+	spec, ok := blueprints.OIDCClient(config.BlueprintAccount, "account.example.org", "account")
+	if !ok {
+		t.Fatal("the toolkit does not know an account client")
+	}
+	if spec.LaunchURL != "" {
+		t.Errorf("launch URL %s, want none", spec.LaunchURL)
+	}
+	if !spec.NoLaunch {
+		t.Error("the spec does not say the blueprint has no launch URL")
+	}
+}

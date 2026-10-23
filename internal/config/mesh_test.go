@@ -235,3 +235,67 @@ func TestCheckMeshSubnet(t *testing.T) {
 		}
 	}
 }
+
+// endpointFile is a declaration with one site whose port init moves:
+// edge, with a public address and no endpoint, and comments around it.
+const endpointFile = `version: 1
+id: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01   # never changes
+sites:
+  edge:
+    # the router forwards nothing; this is the VPS
+    public_address: 203.0.113.10   # the provider's address
+    address: 10.44.0.1
+  vm:
+    address: 10.44.0.3
+    endpoint: ":51820"   # beside public_address
+    public_address: 203.0.113.30
+`
+
+// SetEndpoint replaces an endpoint where it stands, in its quoting, and
+// adds one under a site that has none, after its public_address, keeping
+// every comment.
+func TestSetEndpointKeepsEveryOtherByte(t *testing.T) {
+	path := write(t, endpointFile)
+	if err := config.SetEndpoint(path, "vm", ":51827"); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SetEndpoint(path, "edge", ":51825"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(path)
+	want := strings.NewReplacer(
+		`endpoint: ":51820"`, `endpoint: ":51827"`,
+		"   # the provider's address\n", "   # the provider's address\n    endpoint: \":51825\"\n",
+	).Replace(endpointFile)
+	if string(got) != want {
+		t.Errorf("SetEndpoint wrote:\n%s\nwant:\n%s", got, want)
+	}
+	var cfg config.Config
+	if err := yaml.Unmarshal(got, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Sites["edge"].ListenPort() != 51825 || cfg.Sites["vm"].ListenPort() != 51827 {
+		t.Errorf("listen ports %d and %d", cfg.Sites["edge"].ListenPort(), cfg.Sites["vm"].ListenPort())
+	}
+}
+
+// A site's listen port is init's to move only when nothing outside the
+// host is set up for it: a public_address with no endpoint, or an
+// endpoint written as a port alone beside it.
+func TestListenPortMovable(t *testing.T) {
+	for _, tc := range []struct {
+		site config.Site
+		want bool
+	}{
+		{config.Site{PublicAddress: "203.0.113.10"}, true},
+		{config.Site{PublicAddress: "203.0.113.10", Endpoint: ":51820"}, true},
+		{config.Site{PublicAddress: "203.0.113.10", Endpoint: "edge.example.org:51820"}, false},
+		{config.Site{PublicAddress: "203.0.113.10", Endpoint: "198.51.100.7:51820"}, false},
+		{config.Site{Endpoint: "edge.example.org:51820"}, false},
+		{config.Site{}, false},
+	} {
+		if got := tc.site.ListenPortMovable(); got != tc.want {
+			t.Errorf("%+v: ListenPortMovable = %v, want %v", tc.site, got, tc.want)
+		}
+	}
+}

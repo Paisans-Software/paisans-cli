@@ -12,6 +12,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -101,7 +102,7 @@ func runCatalogAdd(args []string) error {
 		return err
 	}
 	if _, ok := cfg.Catalogs[name]; ok {
-		return &ui.Problem{Hint: "catalogs." + name + " is already declared", Explain: "Move its pin with `paisans catalog update " + name + "`."}
+		return &ui.Problem{Hint: "catalogs." + name + " is already declared", Explain: "Move its pin with `" + progname.Cmd() + " catalog update " + name + "`."}
 	}
 	r := reporter()
 	r.Section("catalog " + name)
@@ -129,7 +130,7 @@ func runCatalogAdd(args []string) error {
 // github.com/<owner>/paisans-<name>, as `brew tap user/repo` is
 // github.com/user/homebrew-repo.
 func catalogAddArgs(pos []string) (string, string, error) {
-	usage := &ui.Problem{Hint: "catalog add takes a URL, or <owner>/<name>, with a name before it if you want another", Explain: "paisans catalog add https://github.com/example/paisans-blueprints\npaisans catalog add example/blueprints\npaisans catalog add notes https://github.com/example/paisans-blueprints"}
+	usage := &ui.Problem{Hint: "catalog add takes a URL, or <owner>/<name>, with a name before it if you want another", Explain: progname.Cmd() + " catalog add https://github.com/example/paisans-blueprints\n" + progname.Cmd() + " catalog add example/blueprints\n" + progname.Cmd() + " catalog add notes https://github.com/example/paisans-blueprints"}
 	switch len(pos) {
 	case 2:
 		if !config.ValidCatalogName(pos[0]) {
@@ -178,7 +179,7 @@ func runCatalogUpdate(args []string) error {
 		return err
 	}
 	if len(pos) > 1 || (*tag != "" && len(pos) != 1) {
-		return &ui.Problem{Hint: "catalog update takes at most one catalog, and --tag only with one", Explain: "paisans catalog update [<name>] [--tag <tag>]"}
+		return &ui.Problem{Hint: "catalog update takes at most one catalog, and --tag only with one", Explain: progname.Cmd() + " catalog update [<name>] [--tag <tag>]"}
 	}
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -254,7 +255,7 @@ func runCatalogRemove(args []string) error {
 		return err
 	}
 	if len(pos) != 1 {
-		return &ui.Problem{Hint: "catalog remove takes one catalog", Explain: "paisans catalog remove <name>"}
+		return &ui.Problem{Hint: "catalog remove takes one catalog", Explain: progname.Cmd() + " catalog remove <name>"}
 	}
 	name := pos[0]
 	cfg, err := config.Load(*configPath)
@@ -271,7 +272,7 @@ func runCatalogRemove(args []string) error {
 		}
 	}
 	if len(users) > 0 {
-		return &ui.Problem{Hint: "catalogs." + name + " is in use", Explain: "Its blueprints run " + strings.Join(users, ", ") + ". Remove those apps first (`paisans app remove`), then the catalog."}
+		return &ui.Problem{Hint: "catalogs." + name + " is in use", Explain: "Its blueprints run " + strings.Join(users, ", ") + ". Remove those apps first (`" + progname.Cmd() + " app remove`), then the catalog."}
 	}
 	r := reporter()
 	s := r.Step("remove catalogs." + name + " from " + *configPath)
@@ -382,7 +383,7 @@ func runBlueprintShow(args []string, stdout io.Writer) error {
 		return err
 	}
 	if len(pos) != 1 {
-		return &ui.Problem{Hint: "blueprint show takes one blueprint", Explain: "paisans blueprint show <name>, or <catalog>/<name>"}
+		return &ui.Problem{Hint: "blueprint show takes one blueprint", Explain: progname.Cmd() + " blueprint show <name>, or <catalog>/<name>"}
 	}
 	catalog, name := config.SplitBlueprint(config.Blueprint(pos[0]))
 	if catalog == "" {

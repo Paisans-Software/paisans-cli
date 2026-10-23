@@ -2,6 +2,7 @@ package apply_test
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -110,17 +111,21 @@ func newContainerHost(h *fakeHost, recreates ...string) *containerHost {
 
 func (c *containerHost) Run(command string) (string, error) {
 	const compose = "docker compose -f /srv/paisans/f2a9/infra/compose.yaml "
-	switch command {
-	case compose + "ps --all --format json":
+	switch {
+	case command == compose+"ps --all --format json":
 		c.commands = append(c.commands, command)
 		var b strings.Builder
 		for _, s := range []string{"caddy", "etcd", "garage", "haproxy", "patroni"} {
 			fmt.Fprintf(&b, `{"ID":%q,"Service":%q,"State":"running","Health":""}`+"\n", c.ids[s], s)
 		}
 		return b.String(), nil
-	case compose + "up -d":
+	case strings.HasPrefix(command, compose+"up -d"):
+		// A narrowed up names its services, quoted, and replaces only those.
 		c.gen++
 		for s := range c.recreates {
+			if strings.Contains(command, "--no-deps") && !strings.Contains(command, "'"+s+"'") {
+				continue
+			}
 			c.ids[s] = fmt.Sprintf("%s-%d", s, c.gen)
 		}
 	}
@@ -150,7 +155,7 @@ func TestABindMountChangedBesideAnUpIsRestartedAfterIt(t *testing.T) {
 	if up < 0 || restart < up {
 		t.Errorf("haproxy was not restarted after `up -d` (up %d, restart %d): %v", up, restart, host.commands)
 	}
-	if host.ran("restart garage") || host.ran("restart patroni") {
+	if restarted(host.commands, "garage") || restarted(host.commands, "patroni") {
 		t.Errorf("a service `up -d` replaced was restarted again: %v", host.commands)
 	}
 }
@@ -169,4 +174,15 @@ func TestNothingIsRestartedWhenUpReplacedIt(t *testing.T) {
 	if host.ran("compose.yaml restart") {
 		t.Errorf("a container `up -d` replaced was restarted: %v", host.commands)
 	}
+}
+
+// restarted is whether any of commands restarts the infrastructure stack's
+// service, alone or among others, with or without a stop timeout.
+func restarted(commands []string, service string) bool {
+	for _, c := range commands {
+		if _, rest, ok := strings.Cut(c, "/infra/compose.yaml restart"); ok && slices.Contains(strings.Fields(rest), service) {
+			return true
+		}
+	}
+	return false
 }

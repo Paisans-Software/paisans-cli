@@ -22,6 +22,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/preflight"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -105,6 +106,13 @@ type Plan struct {
 	// control is a site whose etcd is a running voter, where every etcdctl
 	// command runs.
 	control string
+	// removed is every etcd member removal this deployment's hosts record
+	// (apply.EtcdRemoved), read from every site's host when a joiner's data
+	// needs it.
+	removed []apply.EtcdRemoved
+	// clusterID is the ID of the cluster control's etcd answers for, 0 when
+	// its answer carries none.
+	clusterID uint64
 	// patroni is a site whose Patroni answers, where every patronictl
 	// command runs.
 	patroni string
@@ -234,6 +242,23 @@ func Build(cfg *config.Config, secrets *config.Secrets, newSite string, transpor
 	if err != nil {
 		return nil, err
 	}
+	// A member that has not started is given the membership as it stands,
+	// so a record its host keeps from an earlier member is not rendered: see
+	// joinInitial.
+	for name := range p.initial {
+		if !startedMember(p.cfg, live, name) {
+			delete(p.initial, name)
+		}
+	}
+	// Stage 3 clears every joiner whose member has not started; data not
+	// shown to be this cluster's is refused before any stage runs.
+	for _, j := range p.joiners(live) {
+		if !startedMember(p.cfg, live, j) {
+			if err := p.planEtcdData(j, live); err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	// Preflight checks a blank host, and once stage 2 has run the new site is
 	// not one: its own mesh interface holds its endpoint's port, which the
@@ -310,10 +335,10 @@ func checkScope(cfg *config.Config, newSite string, transports map[string]apply.
 		return fmt.Errorf("site add: the configuration declares no site %q. Declare it at its end state first, Eg: roles [data], an address, an endpoint and an ssh section", newSite)
 	}
 	if site.Has(config.RoleWitness) && !site.Has(config.RoleData) {
-		return fmt.Errorf("site add %s: a witness has no replica, so it has no site add of its own. It joins in the site add of the data site that joins with it, whose etcd stage adds every member not yet a voter, witnesses first: run `paisans site add <data site>`, or `paisans deployment apply`, which plans it. A witness joining with no data site makes the voters even, which validate refuses", newSite)
+		return fmt.Errorf("site add %s: a witness has no replica, so it has no site add of its own. It joins in the site add of the data site that joins with it, whose etcd stage adds every member not yet a voter, witnesses first: run `%s site add <data site>`, or `%s deployment apply`, which plans it. A witness joining with no data site makes the voters even, which validate refuses", newSite, progname.Cmd(), progname.Cmd())
 	}
 	if len(site.Roles) != 1 || !site.Has(config.RoleData) {
-		return fmt.Errorf("site add %s: the site's roles must be exactly [data]. site add's stages start no app stacks, so join it as [data], then give it the apps role and run site prepare and apply on it, and apply on the gateway (Pocket ID stands by there while another site is active); a second gateway is a separate change. For a site declared [data, apps], `paisans deployment apply` with no --site does all of this in one run", newSite)
+		return fmt.Errorf("site add %s: the site's roles must be exactly [data]. site add's stages start no app stacks, so join it as [data], then give it the apps role and run site prepare and apply on it, and apply on the gateway (Pocket ID stands by there while another site is active); a second gateway is a separate change. For a site declared [data, apps], `%s deployment apply` with no --site does all of this in one run", newSite, progname.Cmd())
 	}
 	if !contains(cfg.Cluster.Sites, newSite) {
 		return fmt.Errorf("site add %s: cluster.sites is written and does not list it, so there is no replica to add. List it there, or leave the key out so it is derived from the roles, every data site", newSite)

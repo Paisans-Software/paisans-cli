@@ -7,7 +7,7 @@ require (
 	filippo.io/age v1.3.1
 	github.com/getsops/sops/v3 v3.13.3
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
-	github.com/paisans-software/pocketid-go v0.1.0
+	github.com/paisans-software/pocketid-go v0.4.0
 	golang.org/x/crypto v0.55.0
 	golang.org/x/net v0.57.0
 	golang.org/x/term v0.45.0
@@ -134,6 +134,6 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20260720171339-e059f2f05d78 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260720171339-e059f2f05d78 // indirect
 	google.golang.org/grpc v1.82.1 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
+	google.golang.org/protobuf v1.36.11
 	gopkg.in/ini.v1 v1.67.3 // indirect
 )

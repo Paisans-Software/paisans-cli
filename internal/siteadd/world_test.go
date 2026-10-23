@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/apply/applytest"
+	"github.com/paisans-software/paisans-cli/internal/apply/etcdwaltest"
 	"github.com/paisans-software/paisans-cli/internal/apply/meshfake"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/patronitest"
@@ -80,6 +82,28 @@ type world struct {
 	// unhealthy names an app stack whose container has exited, once it has
 	// been started.
 	unhealthy string
+	// clusterID is the cluster ID every etcd's member list reports in its
+	// header; every world sets one, as etcd always does, and a test clears
+	// it to model an answer without one.
+	clusterID uint64
+	// otherCluster is, by site, the ID of another cluster whose etcd runs on
+	// that host and answers for it.
+	otherCluster map[string]uint64
+	// probeOut is, by site, what asking that host's etcd for its member
+	// list prints, and the error it exits with when the second is set: Eg a
+	// warning line before the answer, or a timeout from an etcd without a
+	// quorum.
+	probeOut map[string][2]string
+	// restarting is each site whose etcd container restarts in a loop: it
+	// is never seen running, and removing it ends the loop.
+	restarting map[string]bool
+	// dataUnreadable is each site whose etcd data directory cannot be
+	// listed.
+	dataUnreadable map[string]bool
+	// dataLink is each site whose etcd data path is a symbolic link.
+	dataLink map[string]bool
+	// unreadable is, by site, a file reading it fails on.
+	unreadable map[string]string
 }
 
 type host struct {
@@ -92,11 +116,17 @@ type host struct {
 	// wgRun is the mesh file the running interface was last handed, by the
 	// helper's up, restart or sync, which is what its show answers from.
 	wgRun string
+	// dataDir is whether the host has an etcd data directory when no file
+	// is in it: an empty one rather than none.
+	dataDir bool
 }
 
 func (h *host) Describe() string { return h.name }
 
 func (h *host) ReadFile(path string) (string, bool, error) {
+	if h.w.unreadable[h.name] == path {
+		return "", false, fmt.Errorf("%s: cat: %s: Permission denied", h.name, path)
+	}
 	c, ok := h.files[path]
 	return c, ok, nil
 }
@@ -114,6 +144,14 @@ func (h *host) RunInput(command, stdin string) (string, error) {
 	}
 	return out, err
 }
+
+// etcdData is a host's etcd data directory, and etcdDB a file etcd keeps
+// in it once its member has started.
+const (
+	etcdData = "/srv/paisans/f2a9/infra/etcd"
+	etcdDB   = etcdData + "/member/snap/db"
+	etcdWAL  = etcdData + "/member/wal/0000000000000000-0000000000000000.wal"
+)
 
 // wgHelper is the start of every command sent to the WireGuard helper for
 // the fixture's interface, and wgInstalled is where its put installs the
@@ -134,9 +172,13 @@ func (h *host) ran(sub string) int {
 }
 
 var (
-	memberAdd = regexp.MustCompile(`member add (\S+) --peer-urls=(\S+) --learner`)
-	promote   = regexp.MustCompile(`member promote ([0-9a-f]+)`)
-	serverRe  = regexp.MustCompile(`(?m)^\s+server (\S+) `)
+	memberAdd       = regexp.MustCompile(`member add (\S+) --peer-urls=(\S+) --learner`)
+	memberRemove    = regexp.MustCompile(`member remove ([0-9a-f]+)`)
+	etcdRemovedLine = regexp.MustCompile(`grep -qxF '([^']+)'`)
+	promote         = regexp.MustCompile(`member promote ([0-9a-f]+)`)
+	emptyLoop       = regexp.MustCompile(`for f in '([^']+)'/\*`)
+	initialRe       = regexp.MustCompile(`--initial-cluster=(\S+)`)
+	serverRe        = regexp.MustCompile(`(?m)^\s+server (\S+) `)
 )
 
 func (h *host) Run(command string) (string, error) {
@@ -251,7 +293,31 @@ func (h *host) Run(command string) (string, error) {
 			return *w.handshakesFail, fmt.Errorf("exit status 1")
 		}
 		return w.handshakes(h), nil
+	case strings.Contains(command, "/.paisans/etcd-removed'; touch"):
+		line := etcdRemovedLine.FindStringSubmatch(command)[1]
+		f := "/srv/paisans/f2a9/.paisans/etcd-removed"
+		if !strings.Contains("\n"+h.files[f], "\n"+line+"\n") {
+			h.files[f] += line + "\n"
+		}
+		return "", nil
+	case strings.HasPrefix(command, "ids=$(docker ps -aq") && !strings.Contains(command, "rootlesskit"):
+		// The etcd container stopped and removed, alone.
+		w.running[h.name] = false
+		delete(w.restarting, h.name)
+		return "", nil
+	case strings.HasPrefix(command, "rootlesskit sh -c ") && strings.Contains(command, "paisans-etcd-data"):
+		return h.etcdDataAnswer(), nil
 	case strings.Contains(command, "--quiet etcd"):
+		if r, ok := w.probeOut[h.name]; ok {
+			if r[1] != "" {
+				return r[0], fmt.Errorf("%s", r[1])
+			}
+			return r[0], nil
+		}
+		if id, ok := w.otherCluster[h.name]; ok {
+			data, _ := json.Marshal(map[string]any{"header": map[string]any{"cluster_id": id}, "members": []apply.EtcdMember{{ID: 0xabc, Name: h.name, PeerURLs: []string{render.EtcdPeerURL(w.cfg.Sites[h.name].Address)}}}})
+			return string(data), nil
+		}
 		if !w.running[h.name] {
 			return "__PAISANS_NO_ETCD__\n", nil
 		}
@@ -261,16 +327,57 @@ func (h *host) Run(command string) (string, error) {
 	case memberAdd.MatchString(command) && w.addRefusals > 0:
 		w.addRefusals--
 		return "Error: etcdserver: unhealthy cluster", fmt.Errorf("exit status 1")
+	case memberRemove.MatchString(command):
+		id := memberRemove.FindStringSubmatch(command)[1]
+		kept := w.etcd[:0]
+		for _, m := range w.etcd {
+			if m.HexID() != id {
+				kept = append(kept, m)
+			}
+		}
+		w.etcd = kept
+		return "Member removed\n", nil
 	case memberAdd.MatchString(command):
 		m := memberAdd.FindStringSubmatch(command)
 		w.nextID++
 		w.etcd = append(w.etcd, apply.EtcdMember{ID: w.nextID, PeerURLs: []string{m[2]}, IsLearner: true})
 		return "Member added\n", nil
+	case strings.Contains(command, `rootlesskit rm -rf -- "$f"`):
+		// The etcd container stopped and removed, when the command says
+		// so, and every file under each directory a loop empties deleted.
+		if strings.Contains(command, "docker stop $ids") {
+			w.running[h.name] = false
+			delete(w.restarting, h.name)
+		}
+		for _, m := range emptyLoop.FindAllStringSubmatch(command, -1) {
+			for p := range h.files {
+				if strings.HasPrefix(p, m[1]+"/") {
+					delete(h.files, p)
+				}
+			}
+		}
+		return "", nil
 	case strings.HasSuffix(command, "up -d etcd"):
 		w.running[h.name] = true
+		// etcd starts as the member its data records, and the cluster
+		// refuses one it removed: it exits and restarts in a loop, and the
+		// learner never starts. With no data it joins only when
+		// --initial-cluster is the membership as it stands.
+		if db, ok := h.files[etcdDB]; ok && db != w.memberRecord(h.name) {
+			return "", nil
+		}
+		if _, ok := h.files[etcdDB]; !ok {
+			m := initialRe.FindStringSubmatch(h.files["/srv/paisans/f2a9/infra/compose.yaml"])
+			if m == nil || m[1] != w.membership() {
+				return "", nil
+			}
+		}
 		for i := range w.etcd {
 			if w.etcd[i].PeerURLs[0] == render.EtcdPeerURL(w.cfg.Sites[h.name].Address) {
 				w.etcd[i].Name = h.name
+				w.etcd[i].ClientURLs = []string{"http://" + w.cfg.Sites[h.name].Address + ":2379"}
+				h.files[etcdDB] = w.memberRecord(h.name)
+				h.files[etcdWAL] = string(etcdwaltest.Head(w.etcd[i].ID, w.clusterID))
 			}
 		}
 		return "", nil
@@ -310,7 +417,7 @@ func (h *host) Run(command string) (string, error) {
 			return "service \"patroni\" is not running", fmt.Errorf("exit status 1")
 		}
 		return w.etcdHosts[h.name] + "\n", nil
-	case strings.HasSuffix(command, "up -d --no-deps --force-recreate patroni"):
+	case strings.HasSuffix(command, "up -d --no-deps --force-recreate --timeout 60 patroni"):
 		w.recreated = append(w.recreated, h.name)
 		w.etcdHosts[h.name] = envLine(h.files["/srv/paisans/f2a9/infra/patroni.env"], "ETCD3_HOSTS")
 		// The member key keeps what the old process wrote until it expires,
@@ -369,8 +476,99 @@ func envLine(content, key string) string {
 	return ""
 }
 
+// etcdDataAnswer is what apply.EtcdDataProbe prints on this host, read from
+// its files: what its etcd data path is, every path under it with its type
+// and size, the directories those paths imply among them, and the head of
+// every write-ahead log as od prints it.
+func (h *host) etcdDataAnswer() string {
+	const mark = "paisans-etcd-data: "
+	w := h.w
+	switch {
+	case w.dataLink[h.name]:
+		return mark + "link\n"
+	case w.dataUnreadable[h.name]:
+		return mark + "unreadable\n"
+	}
+	if _, ok := h.files[etcdData]; ok {
+		return mark + "notdir\n"
+	}
+	entries := map[string]string{}
+	for p, content := range h.files {
+		rest, ok := strings.CutPrefix(p, etcdData+"/")
+		if !ok {
+			continue
+		}
+		if link, ok := strings.CutPrefix(content, "symlink:"); ok && link != "" {
+			entries[rest] = "l 0 " + rest
+		} else {
+			entries[rest] = fmt.Sprintf("f %d %s", len(content), rest)
+		}
+		for d := path.Dir(rest); d != "."; d = path.Dir(d) {
+			entries[d] = "d 0 " + d
+		}
+	}
+	if len(entries) == 0 && !h.dataDir {
+		return mark + "absent\n"
+	}
+	names := make([]string, 0, len(entries))
+	for n := range entries {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	b.WriteString("[rootlesskit:parent] a line the probe ignores\n" + mark + "listing\npaisans-list-begin\n")
+	for _, n := range names {
+		b.WriteString(entries[n] + "\n")
+	}
+	b.WriteString("paisans-list-end\n")
+	for _, n := range names {
+		name, ok := strings.CutPrefix(n, "member/wal/")
+		if !ok || !strings.HasSuffix(name, ".wal") || strings.HasPrefix(entries[n], "l ") {
+			continue
+		}
+		head := []byte(h.files[etcdData+"/"+n])
+		if len(head) > 4096 {
+			head = head[:4096]
+		}
+		fmt.Fprintf(&b, "paisans-wal-begin %s\n", name)
+		for i := 0; i < len(head); i += 16 {
+			for _, c := range head[i:min(i+16, len(head))] {
+				fmt.Fprintf(&b, " %02x", c)
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("paisans-wal-end\n")
+	}
+	return b.String()
+}
+
+// memberRecord is what a site's etcd data holds once its member has
+// started: the ID etcd knows it by.
+func (w *world) memberRecord(site string) string {
+	for _, m := range w.etcd {
+		if apply.EtcdMemberSite(w.cfg, m) == site {
+			return "member " + m.HexID()
+		}
+	}
+	return ""
+}
+
+// membership is etcd's members as an --initial-cluster value.
+func (w *world) membership() string {
+	var parts []string
+	for _, m := range w.etcd {
+		parts = append(parts, apply.EtcdMemberSite(w.cfg, m)+"="+m.PeerURLs[0])
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ",")
+}
+
 func (w *world) memberList() string {
-	data, _ := json.Marshal(map[string]any{"header": map[string]any{}, "members": w.etcd})
+	header := map[string]any{}
+	if w.clusterID != 0 {
+		header["cluster_id"] = w.clusterID
+	}
+	data, _ := json.Marshal(map[string]any{"header": header, "members": w.etcd})
 	return string(data)
 }
 
@@ -501,7 +699,7 @@ func endState(t *testing.T) (*config.Config, *config.Secrets) {
 func newWorld(t *testing.T) *world {
 	t.Helper()
 	cfg, secrets := endState(t)
-	w := &world{t: t, cfg: cfg, secrets: secrets, hosts: map[string]*host{}, nextID: 1,
+	w := &world{t: t, cfg: cfg, secrets: secrets, hosts: map[string]*host{}, clusterID: 0xc1a5, nextID: 1,
 		running: map[string]bool{"home-a": true}, patroni: map[string]bool{"home-a": true},
 		served: map[string]string{}, syncMode: false, etcdHosts: map[string]string{}, starting: map[string]int{}}
 	for _, name := range cfg.SiteNames() {

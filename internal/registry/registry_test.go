@@ -450,6 +450,21 @@ func TestRoleConflicts(t *testing.T) {
 		}
 	})
 
+	// A listen port clash beside a gateway role clash is advised on for the
+	// role alone: another port does not free the host, so its advice would
+	// send the operator to a change that is refused again.
+	t.Run("a gateway on the same listen port", func(t *testing.T) {
+		e := roleEntry("f2a9", "example.org", 51820, "10.45.0.0/24", "gateway")
+		c := Conflict{ID: other, Entry: theirsEntry, Clashes: clashes(theirsEntry, e)}
+		if !c.Holds("WireGuard listen port") || !c.Holds("the gateway role") {
+			t.Fatalf("clashes %q, want the listen port and the gateway role", c.Clashes)
+		}
+		msg := refused(fakeHost{}, e, c).Error()
+		if !strings.Contains(msg, "ports 80 and 443 to one deployment") || strings.Contains(msg, "listen port") || strings.Contains(msg, "another port") {
+			t.Errorf("the refusal %q does not advise on the gateway role alone", msg)
+		}
+	})
+
 	// Each clash is its own short sentence, naming the other deployment by
 	// its id and, with no domain in its entry, its site.
 	t.Run("each clash said on its own", func(t *testing.T) {

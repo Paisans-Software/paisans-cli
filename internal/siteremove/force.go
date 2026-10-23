@@ -9,6 +9,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
@@ -33,13 +34,13 @@ func BuildForced(cfg *config.Config, secrets *config.Secrets, site string, dest 
 	}
 	declared, isDeclared := cfg.Sites[site]
 	p := &Plan{Site: site, Options: o, secrets: secrets, transports: map[string]apply.Transport{site: t}, forced: true, declared: isDeclared}
-	p.Current = isDeclared && declared.Destination() == dest
+	p.Current = isDeclared && declared.Destination().Same(dest)
 
 	if err := answers(site, dest, t); err != nil {
 		return nil, err
 	}
 	s := declared
-	s.SSH.User, s.SSH.Host, s.SSH.Port = dest.User, dest.Host, dest.Port
+	s.SSH.User, s.SSH.Host, s.SSH.Port = dest.User, dest.SSHHost(), dest.Port
 	rec, err := admission.Read(t, cfg.Deployment().Token())
 	switch {
 	case errors.Is(err, admission.ErrNotAdmitted):
@@ -53,7 +54,7 @@ func BuildForced(cfg *config.Config, secrets *config.Secrets, site string, dest 
 		// proof of whose host this is, whatever --ssh spelled.
 		if rec.Site != site {
 			if _, live := cfg.Sites[rec.Site]; live {
-				return nil, fmt.Errorf("site remove %s: %s is %s's host, which "+config.FileName+" still declares, by this deployment's admission record on it. Nothing was changed. To clean it, name that site: paisans site remove %s --force", site, dest, rec.Site, rec.Site)
+				return nil, fmt.Errorf("site remove %s: %s is %s's host, which "+config.FileName+" still declares, by this deployment's admission record on it. Nothing was changed. To clean it, name that site: %s site remove %s --force", site, dest, rec.Site, progname.Cmd(), rec.Site)
 			}
 		}
 		p.Current = isDeclared && rec.Site == site
@@ -75,7 +76,7 @@ func BuildForced(cfg *config.Config, secrets *config.Secrets, site string, dest 
 		p.notePocketID(host)
 	}
 	if p.Current && len(host.Steps) > 0 {
-		host.Steps = append([]Step{{Site: site, Verb: "note", Title: "note the cluster", Text: fmt.Sprintf("%s is still declared and this is its host: its etcd member, Patroni replica and Garage node, and its place in every other site's mesh, stay in the cluster until a full `paisans site remove %s`, and its next `paisans deployment apply --site %s` deploys it again", site, site, site)}}, host.Steps...)
+		host.Steps = append([]Step{{Site: site, Verb: "note", Title: "note the cluster", Text: fmt.Sprintf("%s is still declared and this is its host: its etcd member, Patroni replica and Garage node, and its place in every other site's mesh, stay in the cluster until a full `%s site remove %s`, and its next `%s deployment apply --site %s` deploys it again", site, progname.Cmd(), site, progname.Cmd(), site)}}, host.Steps...)
 	}
 	p.Stages = []*Stage{host}
 	// A site paisans-stack.yaml still declares keeps its records, which are still
@@ -149,7 +150,7 @@ func BuildForcedByID(dest config.Destination, t apply.Transport, ref string, o O
 	}
 
 	s := config.Site{Roles: recordRoles(rec)}
-	s.SSH.User, s.SSH.Host, s.SSH.Port = dest.User, dest.Host, dest.Port
+	s.SSH.User, s.SSH.Host, s.SSH.Port = dest.User, dest.SSHHost(), dest.Port
 	cfg := &config.Config{ID: d.ID, Sites: map[string]config.Site{rec.Site: s}}
 	p := &Plan{Site: rec.Site, Options: o, transports: map[string]apply.Transport{rec.Site: t}, forced: true, byID: true, dest: dest, cfg: cfg}
 	host, err := p.buildHost()
@@ -172,7 +173,7 @@ func byRef(dest config.Destination, t apply.Transport, ref string, notMine error
 	rec, err := admission.Read(t, token)
 	switch {
 	case errors.Is(err, admission.ErrNotAdmitted):
-		return rec, fmt.Errorf("%s: %v, and none is for %s, so nothing says who the deployment's user is, and site remove cleans a host only as that user. Nothing was changed. If the deployment's user is still there, the host's owner removes it and everything root's with sudo paisans site evict --deployment %s --user <the deployment's user> --execute", dest, notMine, ref, evictID)
+		return rec, fmt.Errorf("%s: %v, and none is for %s, so nothing says who the deployment's user is, and site remove cleans a host only as that user. Nothing was changed. If the deployment's user is still there, the host's owner removes it and everything root's with sudo %s site evict --deployment %s --user <the deployment's user> --execute", dest, notMine, ref, progname.Default, evictID)
 	case err != nil:
 		return rec, fmt.Errorf("%s: %w. Nothing was changed", dest, err)
 	}

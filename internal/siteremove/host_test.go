@@ -1,6 +1,7 @@
 package siteremove_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/siteremove"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // Cleaning a host deletes the deployment's configuration store: the
@@ -63,6 +65,10 @@ func TestCleaningAHostDeletesItsConfigurationStore(t *testing.T) {
 			t.Errorf("another deployment's %s was deleted", path)
 		}
 	}
+	// The directories the store was in go once empty: nothing else names them.
+	if !hasStepIn(stageNamed(p, "clean the host"), "vm", "remove", "the configuration store were in") || vm.ran("'"+hostprep.ConfigDir(dep)+"'") == 0 || vm.ran("'"+dep.StateDir()+"'") == 0 {
+		t.Errorf("the store's directories were not removed once empty:\n%s", strings.Join(vm.commands, "\n"))
+	}
 	if vm.ran(hostprep.UserSystemctl+" disable --now") != 1 || vm.ran(hostprep.UserSystemctl+" daemon-reload") != 1 {
 		t.Errorf("the units were not stopped through the user's manager:\n%s", strings.Join(vm.commands, "\n"))
 	}
@@ -70,7 +76,9 @@ func TestCleaningAHostDeletesItsConfigurationStore(t *testing.T) {
 
 // The host stage reaches only what the deployment's user owns: no ufw, no
 // registry, no system unit, no WireGuard unit, and no path outside its root
-// or its user's home.
+// or its user's home. Its one root action is the WireGuard helper's down,
+// the command site admit lets the user run; it reads the mesh unit's state,
+// which needs no root.
 func TestTheHostStageIsTheUsersOwn(t *testing.T) {
 	w := setup(t)
 	p := w.mustBuild("home-b", siteremove.Options{DeleteData: true})
@@ -78,6 +86,11 @@ func TestTheHostStageIsTheUsersOwn(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range w.hosts["home-b"].commands {
+		if c == wgHelper+"down" || strings.HasPrefix(c, "u='wg-quick@") {
+			// The helper's down, and reading whether the mesh unit is
+			// enabled or active, which needs no root.
+			continue
+		}
 		for _, root := range []string{"ufw ", "registry.json", "/etc/systemd/system", "wg-quick@", "sudo "} {
 			if strings.Contains(c, root) {
 				t.Errorf("site remove ran %q: %s", root, c)
@@ -387,5 +400,165 @@ func TestThePlanCarriesTheEvictLine(t *testing.T) {
 	dest, _ := config.ParseDestination("ubuntu@192.0.2.12")
 	if p := forced(t, w, w.cfg, "home-b", dest, siteremove.Options{}); p.Evict != siteremove.EvictLine(dep, "ubuntu") {
 		t.Errorf("--force: Evict = %q", p.Evict)
+	}
+}
+
+// Cleaning a host takes the deployment's mesh interface down through the
+// WireGuard helper, once, which deletes the installed conf too, so a site
+// added back later finds its listen port and interface name free. A run
+// that resumes after it plans no second down.
+func TestCleaningAHostTakesTheMeshDown(t *testing.T) {
+	w := setup(t)
+	b := w.hosts["home-b"]
+	p := w.mustBuild("home-b", siteremove.Options{})
+	if !hasStepIn(stageNamed(p, "clean the host"), "home-b", "stop", dep.Interface()) {
+		t.Fatalf("no step takes %s down:\n%s", dep.Interface(), printed(p))
+	}
+	if err := siteremove.Execute(p); err != nil {
+		t.Fatal(err)
+	}
+	if b.wgUp || b.ran(wgHelper+"down") != 1 {
+		t.Errorf("the mesh is up (%v) after %d down(s)", b.wgUp, b.ran(wgHelper+"down"))
+	}
+	if _, ok := b.files[wgInstalled]; ok {
+		t.Errorf("%s is still on the host", wgInstalled)
+	}
+	again := w.mustBuild("home-b", siteremove.Options{})
+	if hasStepIn(stageNamed(again, "clean the host"), "home-b", "stop", dep.Interface()) {
+		t.Errorf("a second run takes the mesh down again:\n%s", printed(again))
+	}
+	if remains := strings.Join(p.Remains(), "\n"); !strings.Contains(remains, "paisans site prepare --site home-b --execute") {
+		t.Errorf("the report does not say how the site is added back:\n%s", remains)
+	}
+}
+
+// A helper site admit installed before it had down answers with its usage.
+// The stage stops there and says the host's owner upgrades paisans there
+// and admits the deployment again, from a new request, which installs the
+// current helper; the interface stays up and the
+// gate does not pass.
+func TestAHelperWithoutDownStopsTheHostStage(t *testing.T) {
+	w := setup(t)
+	b := w.hosts["home-b"]
+	w.failOnce = wgHelper + "down"
+	w.failOut = "usage: /usr/local/libexec/paisans/wg-psns-f2a9 put | up | restart | sync | show peers|latest-handshakes|public-key|allowed-ips|persistent-keepalive|listen-port | log\n"
+	err := siteremove.Execute(w.mustBuild("home-b", siteremove.Options{}))
+	if err == nil || !strings.Contains(err.Error(), "stopped at stage 3") {
+		t.Fatalf("err = %v", err)
+	}
+	var problem *ui.Problem
+	if !errors.As(err, &problem) || !strings.Contains(err.Error(), "has no down") || !strings.Contains(err.Error(), "upgrades paisans on the host") || !strings.Contains(err.Error(), "sudo paisans site admit --request home-b.admit") || !strings.Contains(err.Error(), "site request --site home-b > home-b.admit") {
+		t.Errorf("err = %v; want the problem naming site admit", err)
+	}
+	if !b.wgUp {
+		t.Error("the mesh went down")
+	}
+	again := w.mustBuild("home-b", siteremove.Options{})
+	if !hasStepIn(stageNamed(again, "clean the host"), "home-b", "stop", dep.Interface()) {
+		t.Errorf("the resumed plan does not take the mesh down:\n%s", printed(again))
+	}
+	if err := siteremove.Execute(again); err != nil {
+		t.Fatal(err)
+	}
+	if b.wgUp {
+		t.Error("the resumed run left the mesh up")
+	}
+}
+
+// The gate finds an interface the down left up.
+func TestTheHostGateFindsTheMeshUp(t *testing.T) {
+	w := setup(t)
+	w.downLeavesUp = true
+	err := siteremove.Execute(w.mustBuild("home-b", siteremove.Options{}))
+	if err == nil || !strings.Contains(err.Error(), "still on the host: interface "+dep.Interface()) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// A mesh unit enabled at boot with its interface down, as one whose start
+// failed at the last boot is, still holds the conf and comes back at the
+// next boot: it is taken down too, and the gate checks the unit.
+func TestCleaningAHostTakesAnEnabledMeshDownWhileItIsDown(t *testing.T) {
+	w := setup(t)
+	b := w.hosts["home-b"]
+	b.wgUp, b.wgEnabled = false, true
+	again := w.mustBuild("home-b", siteremove.Options{})
+	if !hasStepIn(stageNamed(again, "clean the host"), "home-b", "stop", dep.Interface()) {
+		t.Fatalf("no step takes the enabled unit down:\n%s", printed(again))
+	}
+	if err := siteremove.Execute(again); err != nil {
+		t.Fatal(err)
+	}
+	if b.wgEnabled || b.ran(wgHelper+"down") != 1 {
+		t.Errorf("the unit is enabled (%v) after %d down(s)", b.wgEnabled, b.ran(wgHelper+"down"))
+	}
+}
+
+// The gate finds a mesh unit the down left enabled.
+func TestTheHostGateFindsTheMeshUnitEnabled(t *testing.T) {
+	w := setup(t)
+	w.downLeavesUp = true
+	b := w.hosts["home-b"]
+	p := w.mustBuild("home-b", siteremove.Options{})
+	b.wgUp, b.wgEnabled = false, true
+	err := siteremove.Execute(p)
+	if err == nil || !strings.Contains(err.Error(), "wg-quick@psns-f2a9 enabled or active") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// systemctl that cannot say what the mesh unit is, such as one with no bus
+// to ask, is an error, never a unit that is gone: the plan refuses, and so
+// does the gate, so an enabled unit and its conf are never passed over.
+func TestAnUnknownMeshUnitAnswerIsAnError(t *testing.T) {
+	for _, answer := range []string{
+		"is-enabled Failed to connect to bus: No such file or directory\nis-active Failed to connect to bus: No such file or directory\n",
+		"is-enabled disabled\nis-active \n",
+		"is-enabled \nis-active inactive\n",
+		"is-enabled disabled\nSystem has not been booted with systemd as init system (PID 1). Can't operate.\nis-active inactive\n",
+		"\n",
+		// The systemd 249 line, but for another unit or another failure.
+		"is-enabled Failed to get unit file state for wg-quick@psns-0c1d.service: No such file or directory\nis-active inactive\n",
+		"is-enabled Failed to get unit file state for wg-quick@psns-f2a9.service: Permission denied\nis-active inactive\n",
+	} {
+		w := setup(t)
+		b := w.hosts["home-b"]
+		b.wgUp = false
+		w.unitAnswer = answer
+		if _, err := w.build("home-b", siteremove.Options{}); err == nil || !strings.Contains(err.Error(), "systemctl did not say whether wg-quick@psns-f2a9 is enabled and active") {
+			t.Errorf("answer %q: build err = %v", answer, err)
+		}
+		w.unitAnswer = ""
+		p := w.mustBuild("home-b", siteremove.Options{})
+		w.unitAnswer = answer
+		if err := siteremove.Execute(p); err == nil || !strings.Contains(err.Error(), "systemctl did not say") {
+			t.Errorf("answer %q: the gate passed: %v", answer, err)
+		}
+	}
+}
+
+// Every state systemctl names is read, and only an enabled or running unit
+// is one down has left to take away.
+func TestEveryKnownMeshUnitStateIsRead(t *testing.T) {
+	for answer, left := range map[string]bool{
+		"is-enabled disabled\nis-active inactive\n":        false,
+		"is-enabled not-found\nis-active inactive\n":       false,
+		"is-enabled static\nis-active failed\n":            false,
+		"is-enabled enabled\nis-active failed\n":           true,
+		"is-enabled enabled-runtime\nis-active inactive\n": true,
+		"is-enabled disabled\nis-active activating\n":      true,
+		// systemd 249, on Ubuntu 22.04, for a unit with no unit file.
+		"is-enabled Failed to get unit file state for wg-quick@psns-f2a9.service: No such file or directory\nis-active inactive\n": false,
+	} {
+		w := setup(t)
+		w.hosts["home-b"].wgUp = false
+		w.unitAnswer = answer
+		p, err := w.build("home-b", siteremove.Options{})
+		if err != nil {
+			t.Fatalf("answer %q: %v", answer, err)
+		}
+		if got := hasStepIn(stageNamed(p, "clean the host"), "home-b", "stop", dep.Interface()); got != left {
+			t.Errorf("answer %q: down planned %v, want %v", answer, got, left)
+		}
 	}
 }

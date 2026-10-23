@@ -69,3 +69,97 @@ func TestSelfCheckGivesUpOnAHandshakeThatNeverSucceeds(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// listen is a port on 127.0.0.1 that serve answers, used for https.
+func listen(t *testing.T, serve func(net.Conn)) {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go serve(c)
+		}
+	}()
+	_, port, _ := net.SplitHostPort(l.Addr().String())
+	restore := selfcheck.UsePorts(port, port)
+	t.Cleanup(func() { restore(); _ = l.Close() })
+}
+
+// Another server that accepts the connection on 443 and answers in
+// anything but TLS holds the port: that is a Conflict, named at once and
+// not waited for, since no certificate makes it speak TLS.
+func TestSelfCheckNamesAServerThatDoesNotSpeakTLS(t *testing.T) {
+	for name, c := range map[string]struct {
+		serve  func(t *testing.T)
+		detail string
+	}{
+		"plain HTTP": {func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("hello")) }))
+			srv.Config.ErrorLog = log.New(io.Discard, "", 0)
+			_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+			restore := selfcheck.UsePorts(port, port)
+			t.Cleanup(func() { restore(); srv.Close() })
+		}, "plain HTTP rather than TLS"},
+		"another protocol": {func(t *testing.T) {
+			listen(t, func(c net.Conn) { _, _ = c.Write([]byte("SSH-2.0-OpenSSH_9.6\r\n")); _ = c.Close() })
+		}, "a protocol other than TLS"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c.serve(t)
+			p := realProbe()
+			asked := 0
+			fetch := p.Fetch
+			p.Fetch = func(ctx context.Context, scheme, address, host, path string) (selfcheck.Answer, error) {
+				asked++
+				return fetch(ctx, scheme, address, host, path)
+			}
+			err := selfcheck.Check(context.Background(), p, local)
+			var conflict *selfcheck.Conflict
+			if !errors.As(err, &conflict) || conflict.Port != 443 || conflict.Detail != c.detail {
+				t.Fatalf("got %v", err)
+			}
+			if asked != 1 {
+				t.Errorf("asked %d times, want once", asked)
+			}
+		})
+	}
+}
+
+// A closed port refuses the connection, and the check says so.
+func TestSelfCheckNamesARefusedConnection(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, port, _ := net.SplitHostPort(l.Addr().String())
+	_ = l.Close()
+	defer selfcheck.UsePorts(port, port)()
+	p := realProbe()
+	p.Wait = 0
+	err = selfcheck.Check(context.Background(), p, local)
+	var u *selfcheck.Unanswered
+	if !errors.As(err, &u) || u.Port != 443 || u.Why != selfcheck.Refused {
+		t.Fatalf("got %v", err)
+	}
+}
+
+// A connection that nothing answers in time, here a listener that accepts
+// and never speaks, timed out, and the check says so.
+func TestSelfCheckNamesATimeout(t *testing.T) {
+	listen(t, func(c net.Conn) { _, _ = io.Copy(io.Discard, c) })
+	p := realProbe()
+	p.Wait = 0
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	err := selfcheck.Check(ctx, p, local)
+	var u *selfcheck.Unanswered
+	if !errors.As(err, &u) || u.Port != 443 || u.Why != selfcheck.TimedOut {
+		t.Fatalf("got %v", err)
+	}
+}

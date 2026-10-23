@@ -3,7 +3,11 @@ package configstore
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
+	"strings"
+
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // Graph is every version the workstation holds, with a way to read each
@@ -11,13 +15,41 @@ import (
 type Graph struct {
 	Versions  map[string]Version
 	Operators func(sha string) (map[string]string, error) // fingerprint -> operator id, from that version's paisans-stack.yaml
+	// Served is the versions the sites answered with in this gather. The
+	// cache keeps every version any gather saw, so whether the sites hold a
+	// pinned root's history is read from Served alone. Nil or empty is no
+	// evidence either way.
+	Served map[string]bool
 }
 
 // Anchor is what the operator holds that nobody else can forge: their own
-// signing key, a pinned root, or both.
+// signing keys, a pinned root, or both. Signers is a set of fingerprints:
+// the key .paisans/signing-key records, or, with Named, the key the operator
+// names with --key on a workstation that records none. Signers never come
+// from the sites or the ssh-agent.
+//
+// A recorded key is the operator's by their own choice, on a workstation
+// that also pins the root its history grew from, so its newest version
+// anchors whatever its history. A named key comes with no such pin: it may
+// be one a later version removed, and an empty workstation cannot tell this
+// deployment's history from one the key signed before a redeploy under the
+// same id, whose other operators may have written more since. So a named key
+// anchors only on versions it signed itself, under one root, where the trust
+// rules trust them already.
 type Anchor struct {
-	Signer string // the operator's key fingerprint, from .paisans/signing-key; may be empty
-	Root   string // a pinned root sha; may be empty
+	Signers []string // the operator's key fingerprints; may be empty
+	Named   bool     // Signers is the key --key names, not a recorded one
+	Root    string   // a pinned root sha; may be empty
+}
+
+// PinNotServedError is a gather from a pinned root none of whose history the
+// sites serve: they hold another incarnation of the deployment, or a site
+// serves one it should not. It names no root the sites served, since a hash
+// from them is not one to pin.
+type PinNotServedError struct{ Root string }
+
+func (e *PinNotServedError) Error() string {
+	return fmt.Sprintf("the sites serve no version of the pinned root %s's history", e.Root)
 }
 
 // Verdict is what Judge decides about a Graph.
@@ -68,10 +100,21 @@ func (e *UnreadableOperatorsError) Unwrap() error { return e.Err }
 // Judge decides which versions to trust, starting from the operator's anchor,
 // by the spec's "Which versions the workstation trusts":
 //
-//   - The anchor is the operator's newest version that passes shape, or else
-//     the pinned root. With both, the signed anchor must descend from the
-//     pin. The anchor and every ancestor of it are trusted whatever their
-//     shape, because the operator signed after them.
+//   - The anchor is the operator's newest version that passes shape, signed
+//     by any of the anchor's keys, or else the pinned root. With both, the
+//     signed anchor must descend from the pin. A pin the sites serve none
+//     of the history of, when they serve anything, is a *PinNotServedError.
+//     The anchor and every ancestor of it are trusted whatever their shape,
+//     because the operator signed after them.
+//   - A named key anchors only with no root pinned, and Judge refuses the
+//     two together. The key must have
+//     signed versions under exactly one good root, which is judged by these
+//     rules as if pinned. The versions the key signed that this trusts are
+//     the candidates, and the newest of those not in another's history is
+//     the anchor. Each such version is judged as the anchor in turn; when
+//     their heads differ, the verdict is a fork of every head any of them
+//     trusts. Every head must be signed by the named key and list it under an
+//     operator; otherwise the operator pins --root.
 //   - Removals in that history always stand, and bar the versions signed by
 //     each removed key that are not ancestors of the removal.
 //   - Every other version is a candidate when it passes shape, is not a root,
@@ -96,10 +139,29 @@ func Judge(g Graph, a Anchor) (Verdict, error) {
 	j := &judgement{g: g, operators: map[string]operatorsResult{}, anc: map[string]map[string]bool{}}
 	order, cyclic := j.topo()
 
+	if a.Named && a.Root != "" {
+		return Verdict{}, errors.New("a key named with --key anchors only a workstation with no root pinned; with a root, the root anchors alone")
+	}
+	// A root that is not held is answered by the pin's own checks, which
+	// name it, rather than by what the sites serve.
+	if _, held := j.g.Versions[a.Root]; a.Root != "" && held {
+		if err := j.pinServed(a, order); err != nil {
+			return Verdict{}, err
+		}
+	}
+	if a.Named {
+		return j.named(a, order, cyclic)
+	}
 	anchor, err := j.anchor(a, order)
 	if err != nil {
 		return Verdict{}, err
 	}
+	return j.from(anchor, order, cyclic)
+}
+
+// from judges every version with trust starting at anchor.
+func (j *judgement) from(anchor string, order, cyclic []string) (Verdict, error) {
+	g := j.g
 	history := map[string]bool{anchor: true}
 	for sha := range j.ancestors(anchor) {
 		history[sha] = true
@@ -321,19 +383,17 @@ func (j *judgement) operatorsOf(sha string) operatorsResult {
 	return j.operators[sha]
 }
 
-// anchor picks where trust starts.
+// anchor picks where trust starts from a recorded key: the newest version
+// it signed that passes shape, or the pinned root.
 func (j *judgement) anchor(a Anchor, order []string) (string, error) {
 	signed := ""
-	if a.Signer != "" {
-		for _, sha := range order {
-			v := j.g.Versions[sha]
-			if v.SignerFP != a.Signer || j.shape(sha) != "" {
-				continue
-			}
-			if signed == "" || v.Revision > j.g.Versions[signed].Revision ||
-				(v.Revision == j.g.Versions[signed].Revision && sha < signed) {
-				signed = sha
-			}
+	for _, sha := range order {
+		v := j.g.Versions[sha]
+		if !slices.Contains(a.Signers, v.SignerFP) || j.shape(sha) != "" {
+			continue
+		}
+		if signed == "" || j.newer(sha, signed) {
+			signed = sha
 		}
 	}
 	if a.Root != "" {
@@ -351,6 +411,156 @@ func (j *judgement) anchor(a Anchor, order []string) (string, error) {
 		return signed, nil
 	}
 	return "", ErrNoAnchor
+}
+
+// pinServed refuses a pinned root none of whose history the sites serve in
+// this gather, when they serve anything, rather than judge from what this
+// workstation's cache holds.
+func (j *judgement) pinServed(a Anchor, order []string) error {
+	if len(j.g.Served) == 0 {
+		return nil
+	}
+	for _, sha := range order {
+		if j.g.Served[sha] && (sha == a.Root || j.ancestors(sha)[a.Root]) {
+			return nil
+		}
+	}
+	return &PinNotServedError{Root: a.Root}
+}
+
+// named judges from the key --key names, with no root pinned, by the rule in
+// Judge's comment: the key anchors only on versions it signed itself, under
+// one root, that the trust rules trust already.
+func (j *judgement) named(a Anchor, order, cyclic []string) (Verdict, error) {
+	key := strings.Join(a.Signers, ", ")
+	signed := func(sha string) bool {
+		return slices.Contains(a.Signers, j.g.Versions[sha].SignerFP) && j.shape(sha) == ""
+	}
+	var roots []string
+	for _, root := range order {
+		if len(j.g.Versions[root].Parents) > 0 || j.goodRoot(root) != "" {
+			continue
+		}
+		for _, sha := range order {
+			if signed(sha) && (sha == root || j.ancestors(sha)[root]) {
+				roots = append(roots, root)
+				break
+			}
+		}
+	}
+	switch len(roots) {
+	case 0:
+		return Verdict{}, &anchorError{fmt.Sprintf("no version the trust rules trust is signed by the key --key names, %s, and no root is pinned", key)}
+	case 1:
+	default:
+		return Verdict{}, &anchorError{fmt.Sprintf("the key --key names, %s, signed versions under more than one root, and which is this deployment's is not for a key to say: get the current root from another operator, the full hash in their .paisans/config-root or on a root's line of their %s deployment log, and recover with --root <sha>. A root may be held only in this workstation's own cache, .paisans/store.git, from an earlier run; on a workstation recovering from nothing, removing .paisans/ clears it", key, progname.Cmd())}
+	}
+	v, err := j.from(roots[0], order, cyclic)
+	if err != nil {
+		return Verdict{}, err
+	}
+	var cands []string
+	for _, sha := range order {
+		if v.Trusted[sha] && signed(sha) {
+			cands = append(cands, sha)
+		}
+	}
+	tips := j.newest(cands)
+	if len(tips) == 0 {
+		return Verdict{}, &anchorError{fmt.Sprintf("no version the trust rules trust is signed by the key --key names, %s, and no root is pinned", key)}
+	}
+	verdicts := make([]Verdict, 0, len(tips))
+	agree := true
+	for _, tip := range tips {
+		v, err := j.from(tip, order, cyclic)
+		if err != nil {
+			return Verdict{}, err
+		}
+		verdicts = append(verdicts, v)
+		agree = agree && slices.Equal(v.Heads, verdicts[0].Heads)
+	}
+	out := verdicts[0]
+	if !agree {
+		out = j.union(verdicts)
+	}
+	for _, h := range out.Heads {
+		ops := j.operatorsOf(h)
+		listed := ops.err == nil
+		for _, fp := range a.Signers {
+			if _, ok := ops.m[fp]; !ok {
+				listed = false
+			}
+		}
+		if !listed {
+			return Verdict{}, &anchorError{fmt.Sprintf("the key --key names, %s, is not a key of an operator the newest version %s lists", key, h)}
+		}
+		if !slices.Contains(a.Signers, j.g.Versions[h].SignerFP) {
+			return Verdict{}, &anchorError{fmt.Sprintf("the newest version %s is signed by %s, not by the key --key names, %s; a key alone cannot tell this deployment's history from one it signed before a redeploy, so it trusts only versions it signed: get the current root from another operator, the full hash in their .paisans/config-root or on a root's line of their %s deployment log, and pin it with --root <sha>", h, j.g.Versions[h].SignerFP, key, progname.Cmd())}
+		}
+	}
+	return out, nil
+}
+
+// newest is the versions among shas that are in no other's history, newest
+// first.
+func (j *judgement) newest(shas []string) []string {
+	var out []string
+	for _, sha := range shas {
+		below := false
+		for _, other := range shas {
+			if other != sha && j.ancestors(other)[sha] {
+				below = true
+				break
+			}
+		}
+		if !below {
+			out = append(out, sha)
+		}
+	}
+	sort.Slice(out, func(x, y int) bool { return j.newer(out[x], out[y]) })
+	return out
+}
+
+// newer orders versions by revision, highest first, then by lowest hash.
+func (j *judgement) newer(x, y string) bool {
+	vx, vy := j.g.Versions[x], j.g.Versions[y]
+	if vx.Revision != vy.Revision {
+		return vx.Revision > vy.Revision
+	}
+	return x < y
+}
+
+// union is a fork of verdicts that disagree: every version any of them
+// trusts, and as heads those of their heads that are in no other's history.
+// Which line goes on is the operator's to say, by merging them.
+func (j *judgement) union(verdicts []Verdict) Verdict {
+	out := Verdict{Trusted: map[string]bool{}, Reasons: map[string]string{}, Fork: true}
+	var heads []string
+	for _, v := range verdicts {
+		for sha, ok := range v.Trusted {
+			out.Trusted[sha] = out.Trusted[sha] || ok
+		}
+		for _, h := range v.Heads {
+			if !slices.Contains(heads, h) {
+				heads = append(heads, h)
+			}
+		}
+	}
+	for sha := range j.g.Versions {
+		if out.Trusted[sha] {
+			continue
+		}
+		out.Trusted[sha] = false
+		for _, v := range verdicts {
+			if r := v.Reasons[sha]; r != "" {
+				out.Reasons[sha] = r
+				break
+			}
+		}
+	}
+	out.Heads = j.newest(heads)
+	out.Fork = len(out.Heads) > 1
+	return out
 }
 
 // goodRoot says why sha cannot anchor as a pinned root, or "" when it can.
@@ -387,9 +597,9 @@ func (j *judgement) shape(sha string) string {
 	case v.BuildNewer:
 		return fmt.Sprintf("it was published by paisans %q, a version this paisans cannot order, so a newer paisans may have published it; upgrade paisans (shape)", v.Build.Version)
 	case !v.BuildOK && len(v.Parents) == 0:
-		return "it is a root that does not say which build of paisans published it, so no version can be published on it and the sites keep it: redeploy, by each host's owner running `paisans site evict` and admitting the deployment again, then `paisans deployment apply --execute` publishes a new first version (shape)"
+		return "it is a root that does not say which build of paisans published it, so no version can be published on it and the sites keep it: redeploy, by each host's owner running `" + progname.Default + " site evict` and admitting the deployment again, then `" + progname.Cmd() + " deployment apply --execute` publishes a new first version (shape)"
 	case !v.BuildOK:
-		return "it does not say which build of paisans published it; publish the configuration again, with `paisans deployment publish --execute` (shape)"
+		return "it does not say which build of paisans published it; publish the configuration again, with `" + progname.Cmd() + " deployment publish --execute` (shape)"
 	}
 	want := 1
 	for _, p := range v.Parents {

@@ -34,7 +34,7 @@ services:
         recreates the stack for that. */}}
       - --initial-cluster={{ .EtcdInitialCluster }}
       - --initial-cluster-state={{ .EtcdInitialState }}
-      - --initial-cluster-token={{ .Scope }}
+      - --initial-cluster-token={{ .EtcdInitialToken }}
       # Measured from real round trip through the tunnel, not guessed. The
       # defaults assume one datacenter and produce phantom elections every
       # time a home connection hiccups.
@@ -56,6 +56,13 @@ services:
       {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
     image: {{ yamlquote .SpiloImage }}
     restart: unless-stopped
+    # A Patroni that leads disarms the watchdog when its Postgres reaches the
+    # shutdown's safepoint, once the clients are gone; one Docker kills before
+    # then, at its default 10 s, leaves it armed and the host reboots. The
+    # rest of the 60 s lets the shutdown finish and hand the leader key over.
+    # It stays under the 120 s systemd gives user@.service to stop, and a stop
+    # that ends sooner returns sooner.
+    stop_grace_period: 60s
     network_mode: host
     env_file:
       - patroni.env

@@ -39,6 +39,10 @@ var searchParam = regexp.MustCompile(`search=([A-Za-z0-9_-]*)`)
 // inside curl's configuration.
 var groupNameParam = regexp.MustCompile(`\\"name\\":\\"([^\\"]+)\\"`)
 
+// launchURLParam is the launch URL in a client update's body, as it appears
+// quoted inside curl's configuration.
+var launchURLParam = regexp.MustCompile(`\\"launchURL\\":\\"([^\\"]*)\\"`)
+
 func newIDPFake() *idpFake {
 	// members and newcomers carry the IDs the fixture secrets record under
 	// pocket_id_groups, so the signup group step finds nothing to do unless
@@ -51,7 +55,7 @@ func newIDPFake() *idpFake {
 		"blog": {ID: "fixture-not-a-secret-blog-id", Name: "blog", CallbackURLs: []string{"https://blog.example.org/oauth/callback/generic"},
 			IsGroupRestricted: true, AllowedUserGroups: groups[:2], LaunchURL: launch("https://blog.example.org"), SkipConsent: true},
 		"account": {ID: "fixture-not-a-secret-account-id", Name: "account", CallbackURLs: []string{"https://account.example.org/auth/callback"},
-			PkceEnabled: true, IsGroupRestricted: true, AllowedUserGroups: groups[:2], LaunchURL: launch("https://account.example.org"), SkipConsent: true},
+			PkceEnabled: true, IsGroupRestricted: true, AllowedUserGroups: groups[:2], SkipConsent: true},
 	}}
 }
 
@@ -143,6 +147,21 @@ func (f *idpFake) RunInput(command, stdin string) (string, error) {
 		for _, g := range f.groups {
 			if strings.Contains(stdin, g.ID) {
 				c.AllowedUserGroups = append(c.AllowedUserGroups, g)
+			}
+		}
+		return reply(200, c)
+	case strings.Contains(stdin, `request = "PUT"`) && strings.Contains(stdin, "/api/oidc/clients/"):
+		// The whole-client update: only the launch URL is applied.
+		f.mutated = true
+		c := f.byID(idOf("/api/oidc/clients/"))
+		if c == nil {
+			return reply(404, map[string]string{"error": "Record not found"})
+		}
+		if m := launchURLParam.FindStringSubmatch(stdin); m != nil {
+			if m[1] == "" {
+				c.LaunchURL = nil
+			} else {
+				c.LaunchURL = &m[1]
 			}
 		}
 		return reply(200, c)

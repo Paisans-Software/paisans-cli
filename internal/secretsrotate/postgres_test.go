@@ -220,7 +220,7 @@ func (h *pgHost) Run(command string) (string, error) {
 			w.t.Fatalf("unexpected env read: %s", command)
 		}
 		return sum(w.running[h.site][m[1]]) + "  -\n", nil
-	case strings.Contains(command, "--force-recreate patroni"):
+	case strings.Contains(command, "--force-recreate --timeout 60 patroni"):
 		w.running[h.site] = maps(w.file[h.site])
 		w.log = append(w.log, "recreate "+h.site)
 		if h.site == w.leader {

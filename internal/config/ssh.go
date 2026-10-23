@@ -274,6 +274,10 @@ func (s SSH) AuthorizedKeys() ([]AuthorizedKey, []string) {
 // a command line and a file name on the host without quoting surprises.
 var unixUser = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 
+// ValidLogin reports whether s is a login name the toolkit puts in a command
+// line, as a destination's user must be.
+func ValidLogin(s string) bool { return unixUser.MatchString(s) }
+
 // hostLabel is one label of a DNS name.
 var hostLabel = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
 
@@ -457,15 +461,79 @@ func (c *Config) operatorProblems() []string {
 }
 
 // Destination is where a host is reached: user, host and port. Its string
-// form is user@host:port, with the port always written.
+// form is user@host:port, with the port always written, and for an alias of
+// the operator's ssh config the alias first, alias -> user@host:port, so
+// every message and record names both what the operator typed and what it
+// reached.
 type Destination struct {
 	User string
 	Host string
 	Port int
+	// Alias, when set, is the Host alias of the operator's ssh config that
+	// Host was resolved from (see ResolveDestination). ssh is given the
+	// alias rather than Host, so its ProxyJump, IdentityFile and every
+	// other option apply to the connection as they do to a plain ssh.
+	Alias string
+	// HostKeyAlias, when set, is the HostKeyAlias the operator's ssh config
+	// gives the destination: the name ssh records its host key under in
+	// known_hosts, in place of the host.
+	HostKeyAlias string
 }
 
 func (d Destination) String() string {
-	return d.User + "@" + net.JoinHostPort(d.Host, strconv.Itoa(d.Port))
+	address := d.User + "@" + net.JoinHostPort(d.Host, strconv.Itoa(d.Port))
+	if d.Alias != "" {
+		return d.Alias + " -> " + address
+	}
+	return address
+}
+
+// Arg is d as --ssh or --from takes it again: user@alias:port for an alias,
+// so that a command a message suggests keeps the alias's ssh options, and
+// user@host:port otherwise.
+func (d Destination) Arg() string {
+	return d.User + "@" + net.JoinHostPort(d.SSHHost(), strconv.Itoa(d.Port))
+}
+
+// SSHHost is the host ssh is given for d: the alias, when d has one, so the
+// alias's ssh config applies to the connection, or the host.
+func (d Destination) SSHHost() string {
+	if d.Alias != "" {
+		return d.Alias
+	}
+	return d.Host
+}
+
+// KnownHostsName is d's host as ssh records it in known_hosts: its
+// HostKeyAlias when the ssh config gives one, which ssh records alone, or
+// else the host ssh connects to, which for an alias is its HostName, in
+// brackets with the port when the port is not 22.
+func (d Destination) KnownHostsName() string {
+	if d.HostKeyAlias != "" {
+		return d.HostKeyAlias
+	}
+	if d.Port != 0 && d.Port != DefaultSSHPort {
+		return "[" + d.Host + "]:" + strconv.Itoa(d.Port)
+	}
+	return d.Host
+}
+
+// Same reports whether d and o are one login: the same user and port on the
+// same host, where an alias and the host it resolves to name the same host,
+// so a site declared by its alias is the site --ssh names by its address,
+// and the other way round.
+func (d Destination) Same(o Destination) bool {
+	if d.User != o.User || d.Port != o.Port {
+		return false
+	}
+	for _, a := range []string{d.Host, d.Alias} {
+		for _, b := range []string{o.Host, o.Alias} {
+			if a != "" && strings.EqualFold(a, b) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ParseDestination reads user@host or user@host:port, with an IPv6 host in

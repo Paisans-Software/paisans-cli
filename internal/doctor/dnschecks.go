@@ -13,6 +13,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/dns"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // The DNS checks ask whether Caddy can get its certificates, and whether
@@ -404,28 +405,31 @@ func Records(p RecordsProbe) []Finding {
 			present++
 		case dns.Conflict:
 			first, more, _ := strings.Cut(e.Detail, ". ")
-			advice := "A visitor is sent there. Delete it at the provider by hand, because paisans dns init never updates a record and paisans dns prune keeps one whose name is still wanted."
+			advice := "A visitor is sent there. Delete it at the provider by hand, because " + progname.Cmd() + " dns init updates only a record it made itself and " + progname.Cmd() + " dns prune keeps one whose name is still wanted."
 			switch {
 			case e.Parent:
 				wanted = fmt.Sprintf("this deployment's: %s -> %s (zone %s)", record, recordContent(e.Want), e.Zone)
-				advice = "Give each its own DMARC policy, or delete this one at the provider by hand; paisans dns init then gives each hostname its own."
+				advice = "Give each its own DMARC policy, or delete this one at the provider by hand; " + progname.Cmd() + " dns init then gives each hostname its own."
 			case e.Guard:
 				wanted = fmt.Sprintf("checked: %s holds no SPF record that lets a server send (zone %s)", e.Name, e.Zone)
 				advice = "If the hostname sends mail, list it in community.mail_domains; otherwise remove that record at the provider."
 			case e.Leftover || e.Advisory:
-				advice = "paisans dns prune --execute removes it."
+				advice = progname.Cmd() + " dns prune --execute removes it."
 			case strings.Contains(first, "proxied"):
 				advice = more
 			}
 			fails = append(fails, Finding{Section: SectionRecords, Level: Fail, Line: record + ": " + strings.TrimSuffix(first, "."), More: []string{wanted, advice}})
 		case dns.Create:
-			advice := "paisans dns init --execute creates it."
+			advice := progname.Cmd() + " dns init --execute creates it."
 			if e.Type == "A" || e.Type == "AAAA" {
 				advice = "Nothing can reach it there. " + advice
 			}
 			fails = append(fails, Finding{Section: SectionRecords, Level: Fail, Line: fmt.Sprintf("%s has no %s record", e.Name, e.Type), More: []string{wanted, advice}})
+		case dns.Update:
+			fails = append(fails, Finding{Section: SectionRecords, Level: Fail, Line: fmt.Sprintf("%s points at an address this deployment no longer declares", record),
+				More: []string{wanted, e.Detail + ". " + progname.Cmd() + " dns init --execute updates it."}})
 		case dns.Moving:
-			rest = append(rest, Finding{Section: SectionRecords, Level: Info, Line: record + " waits for paisans gateway move", More: []string{e.Detail}})
+			rest = append(rest, Finding{Section: SectionRecords, Level: Info, Line: record + " waits for " + progname.Cmd() + " gateway move", More: []string{e.Detail}})
 		case dns.Warn:
 			rest = append(rest, Finding{Section: SectionRecords, Level: Warn, Line: record + " is not this toolkit's to write, and is missing or weak",
 				More: []string{e.Detail, "expected at least: " + strings.TrimPrefix(wanted, "wanted: ")}})

@@ -300,3 +300,58 @@ func TestConfigPullMergeRefusesWhileARekeyIsUnderWay(t *testing.T) {
 		}
 	}
 }
+
+// A local file holding a pasted value with a line break in it is refused by
+// that refusal, naming the key and the command that repairs it, not as a
+// file that could not be decrypted.
+func TestConfigPullMergeSaysWhyTheLocalSecretsAreRefused(t *testing.T) {
+	ours := append(append([]string{}, mergeOurs...), "external.c", "bad\nc")
+	m := newMergeCase(t, mergeBase, ours, mergeTheirs, "")
+	_, err := m.pull(t, true)
+	text := problemText(err)
+	if err == nil || strings.Contains(text, "could not be decrypted") || !strings.Contains(text, "external.c") || !strings.Contains(text, "paisans secrets set external.c") {
+		t.Errorf("got %q", text)
+	}
+	if strings.Contains(text, "bad") {
+		t.Errorf("the refusal shows the value: %q", text)
+	}
+}
+
+// A published version holding a pasted value with a line break in it is
+// still read as the merge's base or head: the check that refuses it belongs
+// to the local file, which the next command loads, and a version in the
+// store cannot be repaired, so refusing it there would fail every pull.
+func TestConfigPullMergeReadsAVersionWithABadPastedValue(t *testing.T) {
+	// The repair: the value went bad in a published version, and the local
+	// file set it again with `secrets set`.
+	t.Run("base and head", func(t *testing.T) {
+		bad := []string{"external.c", "bad\nc"}
+		base := append(append([]string{}, mergeBase...), bad...)
+		theirs := append(append([]string{}, mergeTheirs...), bad...)
+		ours := append(append([]string{}, mergeOurs...), "external.c", "fixed-c")
+		m := newMergeCase(t, base, ours, theirs, "")
+		if _, err := m.pull(t, true); err != nil {
+			t.Fatalf("the merge refused versions with a bad pasted value: %v", err)
+		}
+		s := m.secrets(t)
+		for key, want := range map[string]string{"external.a": "ours-a", "external.b": "theirs-b", "external.c": "fixed-c"} {
+			if got, _ := s.Get(key); got != want {
+				t.Errorf("%s %q, want %q", key, got, want)
+			}
+		}
+	})
+	t.Run("head", func(t *testing.T) {
+		theirs := []string{"external.a", "base-a", "external.b", "theirs\nb"}
+		m := newMergeCase(t, mergeBase, mergeOurs, theirs, "")
+		_, err := m.pull(t, true)
+		if err != nil && strings.Contains(err.Error()+problemText(err), "could not be decrypted") {
+			t.Fatalf("a head with a bad pasted value reads as undecryptable: %v", err)
+		}
+		id := must(config.LoadBytes(must(os.ReadFile(m.cfg)))).ID
+		_, err = config.LoadDeploymentSecrets(filepath.Join(m.l.Dir, "secrets.enc.yaml"), id)
+		var p *ui.Problem
+		if !errors.As(err, &p) || !strings.Contains(p.Hint, "external.b") {
+			t.Errorf("the merged file's bad value is not refused by key on the next load: %v", err)
+		}
+	})
+}

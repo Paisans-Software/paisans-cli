@@ -47,7 +47,7 @@ func judgeOK(t *testing.T, f *fake, a Anchor) Verdict {
 	return v
 }
 
-func alice() Anchor { return Anchor{Signer: "fp-alice"} }
+func alice() Anchor { return Anchor{Signers: []string{"fp-alice"}} }
 
 func wantHeads(t *testing.T, v Verdict, heads ...string) {
 	t.Helper()
@@ -124,7 +124,7 @@ func TestJudgeForgedRoot(t *testing.T) {
 }
 
 func TestJudgeNoAnchor(t *testing.T) {
-	_, err := Judge(chain().graph(), Anchor{Signer: "fp-zed"})
+	_, err := Judge(chain().graph(), Anchor{Signers: []string{"fp-zed"}})
 	if !errors.Is(err, ErrNoAnchor) {
 		t.Fatalf("err = %v, want ErrNoAnchor", err)
 	}
@@ -158,7 +158,7 @@ func TestJudgePinMustBeAGoodRoot(t *testing.T) {
 func TestJudgeSignerAnchorMustDescendFromPin(t *testing.T) {
 	f := chain()
 	f.add("m1", 1, "fp-mallory", nil, "mallory")
-	_, err := Judge(f.graph(), Anchor{Signer: "fp-alice", Root: "m1"})
+	_, err := Judge(f.graph(), Anchor{Signers: []string{"fp-alice"}, Root: "m1"})
 	if !errors.Is(err, ErrNoAnchor) {
 		t.Fatalf("err = %v, want ErrNoAnchor", err)
 	}
@@ -168,7 +168,7 @@ func TestJudgeSignerAnchorMustDescendFromPin(t *testing.T) {
 		}
 	}
 
-	v := judgeOK(t, f, Anchor{Signer: "fp-alice", Root: "v1"})
+	v := judgeOK(t, f, Anchor{Signers: []string{"fp-alice"}, Root: "v1"})
 	if v.AnchorAt != "v3" {
 		t.Fatalf("AnchorAt = %s, want v3", v.AnchorAt)
 	}
@@ -176,7 +176,7 @@ func TestJudgeSignerAnchorMustDescendFromPin(t *testing.T) {
 }
 
 func TestJudgeEmptyGraph(t *testing.T) {
-	for _, a := range []Anchor{{Root: "v1"}, {Signer: "fp-alice"}, {}} {
+	for _, a := range []Anchor{{Root: "v1"}, {Signers: []string{"fp-alice"}}, {}} {
 		if _, err := Judge(newFake().graph(), a); !errors.Is(err, ErrNoAnchor) {
 			t.Fatalf("anchor %+v: err = %v, want ErrNoAnchor", a, err)
 		}
@@ -204,7 +204,7 @@ func TestJudgeRemovalInHistoryStands(t *testing.T) {
 func TestJudgeMutualRemovalOutsideHistoryIsAConflict(t *testing.T) {
 	f := reviewAttack("fp-op")
 	for i := 0; i < 5; i++ {
-		_, err := Judge(f.graph(), Anchor{Signer: "fp-op"})
+		_, err := Judge(f.graph(), Anchor{Signers: []string{"fp-op"}})
 		var c *ConflictError
 		if !errors.As(err, &c) {
 			t.Fatalf("err = %v, want *ConflictError", err)
@@ -225,7 +225,7 @@ func TestJudgeUncontestedRemovalOutsideHistory(t *testing.T) {
 	f := reviewAttack("fp-op")
 	f.operators["b2"] = map[string]string{"fp-op": "op", "fp-alice": "alice", "fp-bob": "bob"}
 	f.add("b3", 3, "fp-alice", on("b2"), "op", "alice", "bob")
-	v := judgeOK(t, f, Anchor{Signer: "fp-op"})
+	v := judgeOK(t, f, Anchor{Signers: []string{"fp-op"}})
 	wantUntrusted(t, v, "b2", "removal")
 	wantUntrusted(t, v, "b3", "not trusted")
 	wantTrusted(t, v, "a2", "a3")
@@ -244,7 +244,7 @@ func TestJudgeKeyRotation(t *testing.T) {
 	f.operators["v3"] = map[string]string{"fp-new": "alice"}
 	f.add("x2", 2, "fp-old", on("v1"))
 	f.operators["x2"] = map[string]string{"fp-old": "alice"}
-	v := judgeOK(t, f, Anchor{Signer: "fp-new"})
+	v := judgeOK(t, f, Anchor{Signers: []string{"fp-new"}})
 	wantUntrusted(t, v, "x2", "removal")
 	wantHeads(t, v, "v3")
 }
@@ -405,7 +405,7 @@ func TestJudgeConflictChain(t *testing.T) {
 	f.add("ax", 2, "fp-a", on("v1"), "op", "a", "c")
 	f.add("by", 2, "fp-b", on("v1"), "op", "a", "b")
 	f.add("cz", 2, "fp-c", on("v1"), "op", "b", "c")
-	_, err := Judge(f.graph(), Anchor{Signer: "fp-op"})
+	_, err := Judge(f.graph(), Anchor{Signers: []string{"fp-op"}})
 	var c *ConflictError
 	if !errors.As(err, &c) {
 		t.Fatalf("err = %v, want *ConflictError", err)
@@ -448,7 +448,7 @@ func TestJudgeInvalidPinWithSignerAnchor(t *testing.T) {
 	f.add("e1", 1, "fp-eve", nil, "alice")
 	f.add("e2", 2, "fp-alice", on("e1"), "alice")
 	for _, pin := range []string{"elsewhere", "v2", "e1"} {
-		_, err := Judge(f.graph(), Anchor{Signer: "fp-alice", Root: pin})
+		_, err := Judge(f.graph(), Anchor{Signers: []string{"fp-alice"}, Root: pin})
 		if !errors.Is(err, ErrNoAnchor) {
 			t.Fatalf("pin %s: err = %v, want ErrNoAnchor", pin, err)
 		}
@@ -513,7 +513,7 @@ func TestJudgeKeyRotatedTwice(t *testing.T) {
 	keys("s2", "k1")
 	f.add("s3", 3, "k2", on("v2"))
 	keys("s3", "k2")
-	for _, a := range []Anchor{{Signer: "k3"}, {Root: "v1"}} {
+	for _, a := range []Anchor{{Signers: []string{"k3"}}, {Root: "v1"}} {
 		v := judgeOK(t, f, a)
 		wantUntrusted(t, v, "s2", "removal")
 		wantUntrusted(t, v, "s3", "removal")
@@ -567,4 +567,179 @@ func TestJudgeBuildReasons(t *testing.T) {
 	if _, err := Judge(f.graph(), Anchor{Root: "v1"}); err == nil || !strings.Contains(err.Error(), "`paisans deployment apply --execute` publishes a new first version") {
 		t.Errorf("root: %v", err)
 	}
+}
+
+// named is an anchor of the key --key names.
+func named(root, fp string) Anchor { return Anchor{Signers: []string{fp}, Named: true, Root: root} }
+
+// A named key's newest version that the rules trust anchors; a key that
+// signed nothing is no anchor.
+func TestJudgeNamedKeyAnchors(t *testing.T) {
+	f := chain()
+	f.add("v4", 4, "fp-bob", on("v3"), "alice", "bob")
+	f.operators["v3"] = map[string]string{"fp-alice": "alice", "fp-bob": "bob"}
+	v := judgeOK(t, f, named("", "fp-bob"))
+	if v.AnchorAt != "v4" {
+		t.Fatalf("AnchorAt = %s, want v4", v.AnchorAt)
+	}
+	wantHeads(t, v, "v4")
+	if _, err := Judge(f.graph(), named("", "fp-zed")); !errors.Is(err, ErrNoAnchor) {
+		t.Fatalf("err = %v, want ErrNoAnchor", err)
+	}
+}
+
+// A named key trusts only versions it signed: a newer version by another
+// operator is refused, since a key alone cannot tell this deployment's line
+// from one it signed before a redeploy under the same id, where an operator
+// since removed may still be listed.
+func TestJudgeNamedKeyRefusesAnotherOperatorsHead(t *testing.T) {
+	f := newFake()
+	f.add("o1", 1, "fp-alice", nil, "alice", "mallory")
+	f.add("o2", 2, "fp-alice", on("o1"), "alice", "mallory")
+	f.add("o3", 3, "fp-mallory", on("o2"), "alice", "mallory")
+	_, err := Judge(f.graph(), named("", "fp-alice"))
+	if !errors.Is(err, ErrNoAnchor) || !strings.Contains(err.Error(), "o3") || !strings.Contains(err.Error(), "--root") {
+		t.Fatalf("err = %v, want ErrNoAnchor naming o3 and --root", err)
+	}
+}
+
+// A named key a version removed is refused, whether its last version is on
+// the removal or beside it; the removed key's versions are never trusted.
+func TestJudgeNamedRemovedKeyIsRefused(t *testing.T) {
+	f := newFake()
+	f.add("v1", 1, "fp-old", nil, "old", "new")
+	f.add("v2", 2, "fp-new", on("v1"), "new") // removes old
+	f.add("x3", 3, "fp-old", on("v2"), "new", "old")
+	f.add("y2", 2, "fp-old", on("v1"), "old", "new")
+	_, err := Judge(f.graph(), named("", "fp-old"))
+	if !errors.Is(err, ErrNoAnchor) || !strings.Contains(err.Error(), "fp-old") {
+		t.Fatalf("err = %v, want ErrNoAnchor naming fp-old", err)
+	}
+	v := judgeOK(t, f, named("", "fp-new"))
+	wantUntrusted(t, v, "x3", "signer")
+	wantUntrusted(t, v, "y2", "removal")
+	wantHeads(t, v, "v2")
+}
+
+// A named key no version lists as an operator's anchors nothing.
+func TestJudgeNamedKeyNeverAnOperatorIsRefused(t *testing.T) {
+	f := chain()
+	f.add("x4", 4, "fp-shared", on("v3"), "shared")
+	if _, err := Judge(f.graph(), named("", "fp-shared")); !errors.Is(err, ErrNoAnchor) {
+		t.Fatalf("err = %v, want ErrNoAnchor", err)
+	}
+}
+
+// A named key with a root pinned is a caller's mistake: with a root, the
+// root anchors alone, and the CLI never names a key beside one.
+func TestJudgeNamedKeyWithARootIsRefused(t *testing.T) {
+	if _, err := Judge(chain().graph(), named("v1", "fp-alice")); err == nil {
+		t.Fatal("Judge took a named key beside a pinned root")
+	}
+}
+
+// A pin that is not held is answered by the pin's own refusal, whatever the
+// sites serve, so a mistyped or old --root is named as such.
+func TestJudgeUnheldPinIsNamedNotJudgedByWhatIsServed(t *testing.T) {
+	f := oldAndNew(2)
+	g := serving(f, "n")
+	_, err := Judge(g, Anchor{Root: "elsewhere"})
+	var ns *PinNotServedError
+	if errors.As(err, &ns) || !errors.Is(err, ErrNoAnchor) || !strings.Contains(err.Error(), "is not held") {
+		t.Fatalf("err = %v, want the pin's own refusal", err)
+	}
+}
+
+// A merge the named key signed over another operator's version is one line,
+// not a fork.
+func TestJudgeNamedKeyMergeIsOneLine(t *testing.T) {
+	f := newFake()
+	f.add("v1", 1, "fp-k1", nil, "k1", "carol")
+	f.add("a2", 2, "fp-k1", on("v1"), "k1", "carol")
+	f.add("b2", 2, "fp-carol", on("v1"), "k1", "carol")
+	f.add("m3", 3, "fp-k1", on("a2", "b2"), "k1", "carol")
+	v := judgeOK(t, f, named("", "fp-k1"))
+	wantHeads(t, v, "m3")
+}
+
+// The heads are the rules' heads, as a recorded key's are.
+func TestJudgeNamedKeyHeadsAreTheRulesHeads(t *testing.T) {
+	f := newFake()
+	f.add("v1", 1, "fp-alice", nil, "alice", "bob")
+	f.add("c2", 2, "fp-bob", on("v1"), "alice", "bob")
+	f.add("a3", 3, "fp-alice", on("c2"), "alice", "bob")
+	f.add("b2", 2, "fp-alice", on("v1"), "alice", "bob")
+	f.add("b3", 3, "fp-alice", on("b2"), "alice", "bob")
+	f.add("b4", 4, "fp-alice", on("b3"), "alice", "bob")
+	want := judgeOK(t, f, Anchor{Signers: []string{"fp-alice"}})
+	v := judgeOK(t, f, named("", "fp-alice"))
+	wantHeads(t, v, want.Heads...)
+	wantHeads(t, v, "b4", "a3")
+}
+
+// A named key that signed versions under two roots is refused: which root
+// is this deployment's is for a pin to say, never a revision.
+func TestJudgeNamedKeyUnderTwoRootsIsRefused(t *testing.T) {
+	f := chain()
+	f.add("o1", 1, "fp-alice", nil, "alice")
+	f.add("o2", 2, "fp-alice", on("o1"), "alice")
+	_, err := Judge(f.graph(), named("", "fp-alice"))
+	if !errors.Is(err, ErrNoAnchor) || !strings.Contains(err.Error(), "more than one root") {
+		t.Fatalf("err = %v, want ErrNoAnchor for two roots", err)
+	}
+}
+
+// oldAndNew is an older incarnation, o1 to o4, and a newer one after a
+// redeploy under the same id, n1 to n<newRev>, all signed by alice.
+func oldAndNew(newRev int) *fake {
+	f := newFake()
+	f.add("o1", 1, "fp-alice", nil, "alice", "mallory")
+	f.add("o2", 2, "fp-alice", on("o1"), "alice", "mallory")
+	f.add("o3", 3, "fp-alice", on("o2"), "alice", "mallory")
+	f.add("o4", 4, "fp-alice", on("o3"), "alice", "mallory")
+	f.add("n1", 1, "fp-alice", nil, "alice")
+	prev := "n1"
+	for r := 2; r <= newRev; r++ {
+		sha := "n" + string(rune('0'+r))
+		f.add(sha, r, "fp-alice", on(prev), "alice")
+		prev = sha
+	}
+	return f
+}
+
+// serving makes the sites serve only the versions whose names start with
+// prefix; the rest are held only in the workstation's cache.
+func serving(f *fake, prefix string) Graph {
+	g := f.graph()
+	g.Served = map[string]bool{}
+	for sha := range f.vs {
+		if strings.HasPrefix(sha, prefix) {
+			g.Served[sha] = true
+		}
+	}
+	return g
+}
+
+// A pin the sites serve nothing of refuses rather than staying on the cache,
+// whoever signed what they serve, and names no root they served. A pin whose
+// history any site serves, if only a tip, judges as before, whatever else
+// they serve.
+func TestJudgePinTheSitesDoNotServe(t *testing.T) {
+	f := oldAndNew(2)
+	for _, a := range []Anchor{{Root: "o1"}, {Root: "o1", Signers: []string{"fp-alice"}}} {
+		var ns *PinNotServedError
+		_, err := Judge(serving(f, "n"), a)
+		if !errors.As(err, &ns) || strings.Contains(err.Error(), "n1") {
+			t.Fatalf("%+v: err = %v", a, err)
+		}
+	}
+	g := f.graph()
+	g.Served = map[string]bool{"o4": true, "n2": true}
+	v, err := Judge(g, Anchor{Root: "o1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantHeads(t, v, "o4")
+	g.Served = map[string]bool{}
+	wantHeads(t, judgeOK(t, f, Anchor{Root: "o1"}), "o4")
 }

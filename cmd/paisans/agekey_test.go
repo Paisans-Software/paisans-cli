@@ -235,6 +235,10 @@ func TestInitAgePrivateKeyFileRefusals(t *testing.T) {
 		if !strings.Contains(err.Error(), "once ~/.config/paisans exists") {
 			t.Errorf("init = %v, want it to say the suggested directory must exist", err)
 		}
+		// The directory is named in full: "inside ." says nothing.
+		if wd, _ := os.Getwd(); !strings.Contains(problemText(err), "is inside "+wd+",") {
+			t.Errorf("init = %v, want it to name %s in full", problemText(err), wd)
+		}
 		if exists(t, "deployment.key") || exists(t, config.SOPSConfigName) {
 			t.Error("something was written")
 		}

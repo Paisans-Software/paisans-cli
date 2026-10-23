@@ -15,6 +15,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // Local is an operator's workstation: the directory holding paisans-stack.yaml,
@@ -243,7 +244,7 @@ func (l Local) SetSigningKey(line string) error {
 }
 
 // Anchor is what this workstation starts trust from: the fingerprint of its
-// signing key and its pinned root, either of which may be empty.
+// recorded signing key and its pinned root, either of which may be empty.
 func (l Local) Anchor() (Anchor, error) {
 	var a Anchor
 	line, err := l.SigningKey()
@@ -252,7 +253,7 @@ func (l Local) Anchor() (Anchor, error) {
 	}
 	if line != "" {
 		k, _, _ := config.ParseKeyLine(line)
-		a.Signer = k.Fingerprint
+		a.Signers = []string{k.Fingerprint}
 	}
 	a.Root, err = l.Root()
 	return a, err
@@ -292,6 +293,63 @@ func (l Local) Current() (sha string, revision int, err error) {
 		return "", 0, err
 	}
 	return head, cache.revision(head), nil
+}
+
+// Declaration is the newest version in the history of a workstation's head
+// whose paisans-stack.yaml declares an app.
+type Declaration struct {
+	// History is false when the workstation holds no head or no store, so
+	// there was no history to read.
+	History bool
+	// SHA is the version, "" when none in the history declares the app, and
+	// Config its paisans-stack.yaml.
+	SHA    string
+	Config *config.Config
+	// Unreadable is each version passed over because this paisans does not
+	// load its paisans-stack.yaml: every one newer than SHA, or in the whole
+	// history when no version declares the app.
+	Unreadable []string
+}
+
+// Declaring finds the newest version in the history of this workstation's
+// head that declares app. It reaches no site, and changes nothing on the
+// workstation.
+func (l Local) Declaring(app string) (Declaration, error) {
+	head, err := l.Head()
+	if err != nil || head == "" {
+		return Declaration{}, err
+	}
+	dir := l.state(cacheDir)
+	if _, err := os.Stat(filepath.Join(dir, "HEAD")); os.IsNotExist(err) {
+		return Declaration{}, nil
+	} else if err != nil {
+		return Declaration{}, err
+	}
+	cache := Repo{Dir: dir}
+	// --topo-order lists every version before its parents, so the first
+	// that declares app has no descendant that does.
+	out, err := cache.git(nil, nil, "rev-list", "--topo-order", head)
+	if err != nil {
+		return Declaration{}, err
+	}
+	shas := strings.Fields(string(out))
+	files, err := cache.paisansFiles(shas)
+	if err != nil {
+		return Declaration{}, err
+	}
+	d := Declaration{History: true}
+	for _, sha := range shas {
+		cfg, err := config.LoadBytes(files[sha])
+		if err != nil {
+			d.Unreadable = append(d.Unreadable, sha)
+			continue
+		}
+		if _, ok := cfg.Apps[app]; ok {
+			d.SHA, d.Config = sha, cfg
+			return d, nil
+		}
+	}
+	return d, nil
 }
 
 func (l Local) path(name string) string { return filepath.Join(l.Dir, name) }
@@ -546,7 +604,36 @@ func gather(l Local, sites map[string]apply.Transport, configured int, id string
 		direct++
 	}
 	g.Majority = configured > 0 && 2*direct > configured
+	return judgeHeld(l, cache, g, id, a)
+}
 
+// HeldStore is the workstation's store as it is on disk, opened without
+// creating or configuring anything, and false when there is none. Cache
+// makes the store it opens; this is for reading a workstation that is not
+// the command's own, which the read must leave as it was.
+func (l Local) HeldStore() (Repo, bool, error) {
+	dir := l.state(cacheDir)
+	if _, err := os.Stat(filepath.Join(dir, "HEAD")); os.IsNotExist(err) {
+		return Repo{}, false, nil
+	} else if err != nil {
+		return Repo{}, false, err
+	}
+	return Repo{Dir: dir}, true, nil
+}
+
+// JudgeHeld judges the versions cache, l's store as HeldStore opens it,
+// already holds for deployment id, from the anchor a, as a gather that
+// reaches no site does. It writes nothing to l: no site is pulled and no
+// seen record is written. With no site, no version is served, so a pinned
+// root is judged from the history the store holds, as Judge judges an
+// empty Served.
+func JudgeHeld(l Local, cache Repo, id string, a Anchor) (Gathered, error) {
+	return judgeHeld(l, cache, Gathered{Holders: map[string][]string{}, Signers: map[string]string{}}, id, a)
+}
+
+// judgeHeld is the half of a gather after the sites are pulled: every version
+// in cache, judged from a, with the seen record checked.
+func judgeHeld(l Local, cache Repo, g Gathered, id string, a Anchor) (Gathered, error) {
 	shas, err := cache.versionRefs()
 	if err != nil {
 		return g, err
@@ -577,9 +664,30 @@ func gather(l Local, sites map[string]apply.Transport, configured int, id string
 		g.Verdict = Verdict{Trusted: map[string]bool{}, Reasons: map[string]string{}}
 		return g, nil
 	}
-	g.Verdict, err = Judge(Graph{Versions: g.Versions, Operators: operators}, a)
+	served := map[string]bool{}
+	for sha := range g.Holders {
+		served[sha] = true
+	}
+	g.Verdict, err = Judge(Graph{Versions: g.Versions, Operators: operators, Served: served}, a)
 	if err != nil || len(g.Verdict.Heads) == 0 {
 		return g, err
+	}
+	// A key named with --key carries no pin of its own, so every version it
+	// leads to trusting must declare the deployment being gathered: a history
+	// the key signed for another deployment is never this one's.
+	if a.Named {
+		for _, sha := range slices.Sorted(maps.Keys(g.Verdict.Trusted)) {
+			if !g.Verdict.Trusted[sha] {
+				continue
+			}
+			cfg, err := configs(sha)
+			if err != nil {
+				return g, fmt.Errorf("version %s: %w", sha, err)
+			}
+			if cfg.ID != id {
+				return g, &anchorError{fmt.Sprintf("version %s, trusted from the key --key names, declares deployment %s, not %s", sha, cfg.ID, id)}
+			}
+		}
 	}
 	top := g.Verdict.Heads[0]
 	rev := g.Versions[top].Revision
@@ -951,24 +1059,24 @@ func Parents(g Gathered, head string, merge bool) ([]string, error) {
 	heads := g.Verdict.Heads
 	switch {
 	case len(heads) == 0 && head != "":
-		return nil, fmt.Errorf("your base %s is held by no site that answered and is not in the local store; run paisans deployment pull", head)
+		return nil, fmt.Errorf("your base %s is held by no site that answered and is not in the local store; run %s deployment pull", head, progname.Cmd())
 	case len(heads) == 0 && merge:
 		return nil, errors.New("there is nothing to merge: no site holds a version")
 	case len(heads) == 0:
 		return nil, nil
 	case merge && (head == "" || !g.Verdict.Trusted[head]):
-		return nil, fmt.Errorf("a merge needs a trusted base, and your base %q is not one; run paisans deployment pull", head)
+		return nil, fmt.Errorf("a merge needs a trusted base, and your base %q is not one; run %s deployment pull", head, progname.Cmd())
 	case merge:
 		return heads, nil
 	case g.Verdict.Fork:
-		return nil, fmt.Errorf("the sites hold a fork, %s; merge the heads' files by hand and publish with paisans deployment publish --merge", strings.Join(heads, " and "))
+		return nil, fmt.Errorf("the sites hold a fork, %s; merge the heads' files by hand and publish with %s deployment publish --merge", strings.Join(heads, " and "), progname.Cmd())
 	case head != heads[0]:
 		v := g.Versions[heads[0]]
 		signer := g.Signers[heads[0]]
 		if signer == "" {
 			signer = v.SignerFP
 		}
-		return nil, fmt.Errorf("stale: the sites hold %s (revision %d, signed by %s); run paisans deployment pull", heads[0], v.Revision, signer)
+		return nil, fmt.Errorf("stale: the sites hold %s (revision %d, signed by %s); run %s deployment pull", heads[0], v.Revision, signer, progname.Cmd())
 	}
 	return heads[:1], nil
 }
@@ -1009,9 +1117,9 @@ func AttestTarget(l Local, g Gathered, pin string) (head string, write bool, err
 	heads := g.Verdict.Heads
 	switch {
 	case len(heads) == 0:
-		return "", false, errors.New("the sites hold no version to attest; paisans deployment publish makes the first")
+		return "", false, errors.New("the sites hold no version to attest; " + progname.Cmd() + " deployment publish makes the first")
 	case g.Verdict.Fork:
-		return "", false, fmt.Errorf("the sites hold a fork, %s; merge the heads' files by hand and publish with paisans deployment publish --merge", strings.Join(heads, " and "))
+		return "", false, fmt.Errorf("the sites hold a fork, %s; merge the heads' files by hand and publish with %s deployment publish --merge", strings.Join(heads, " and "), progname.Cmd())
 	}
 	head = heads[0]
 	if !l.HasFiles() {

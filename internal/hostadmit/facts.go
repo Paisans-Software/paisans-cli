@@ -18,6 +18,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/admitrules"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/hostmem"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 )
 
@@ -84,7 +85,13 @@ type Facts struct {
 	WatchdogRules []string
 	// WatchdogDevs is each watchdog node's owner, by path.
 	WatchdogDevs map[string]int
-	Records      []string
+	// WatchdogState is /sys/class/watchdog/watchdog0/state, "none" when the
+	// driver reports none there, as a legacy one does.
+	WatchdogState string
+	// WatchdogNowayout is whether watchdog0's driver has nowayout set, so
+	// nothing stops its timer once it runs.
+	WatchdogNowayout bool
+	Records          []string
 	// OrphanDropIns are the deployment's mesh drop-ins the probe found by
 	// the deployment they name while the user does not exist: a user
 	// deleted by hand leaves its own.
@@ -103,18 +110,15 @@ type Facts struct {
 		Avail           int64
 		Unsafe          bool
 	}
-	// Swap is the host's swap, in any form, and what a swapfile would need.
-	// MemTotal is its RAM in bytes, 0 when unread. Active is any entry in
-	// /proc/swaps; Partition a block device formatted as swap, FSTab a swap
-	// line in /etc/fstab, ZRAM a zram-generator configuration and File
-	// something at /swapfile, each whether it is on or not. RootFS and
-	// RootAvail are the filesystem of / and its free bytes, counting what a
-	// swapfile step that stopped part way left at /swapfile.paisans-tmp,
-	// which the next one removes first.
+	// Swap is the host's RAM and swap, in any form (hostmem.Facts), and
+	// what a swapfile would need. RootFS and RootAvail are the filesystem
+	// of / and its free bytes, counting what a swapfile step that stopped
+	// part way left at /swapfile.paisans-tmp, which the next one removes
+	// first.
 	Swap struct {
-		MemTotal, RootAvail                  int64
-		Active, Partition, FSTab, ZRAM, File bool
-		RootFS                               string
+		hostmem.Facts
+		RootAvail int64
+		RootFS    string
 	}
 	// raw is every line, by key, for what no field above carries.
 	raw map[string][]string
@@ -301,7 +305,7 @@ func sha(content string) string {
 // is quoted for the shell with q, so a --data-dir that is absolute and clean
 // but holds a space or a $( is a path and nothing else.
 func probeScript(d deployment.Deployment, in Input) (string, error) {
-	tmpl, err := template.New("probe.sh.tmpl").Funcs(template.FuncMap{"q": apply.ShellQuote}).ParseFS(snippets, "snippets/probe.sh.tmpl")
+	tmpl, err := template.New("probe.sh.tmpl").Funcs(template.FuncMap{"q": apply.ShellQuote, "memProbe": func() string { return hostmem.Probe }}).ParseFS(snippets, "snippets/probe.sh.tmpl")
 	if err != nil {
 		return "", err
 	}
@@ -558,6 +562,10 @@ func parseFacts(out, user string) (Facts, error) {
 				return f, fmt.Errorf("unreadable watchdog-dev line %q", v)
 			}
 			f.WatchdogDevs[dev] = uid
+		case "watchdog-state":
+			f.WatchdogState = v
+		case "watchdog-nowayout":
+			f.WatchdogNowayout = v == "yes"
 		case "record":
 			f.Records = append(f.Records, v)
 		case "mesh-unit":
@@ -593,30 +601,18 @@ func parseFacts(out, user string) (Facts, error) {
 				return f, fmt.Errorf("unreadable data-avail line %q", v)
 			}
 			f.Data.Avail = n
-		case "mem-total", "root-avail", "swap-tmp":
-			var n int64
+		case "mem-total", "swap-total", "zram-on", "swap-active", "swap-partition", "swap-fstab", "swap-zram", "swapfile":
+			if _, err := f.Swap.Read(key, v); err != nil {
+				return f, err
+			}
+		case "root-avail", "swap-tmp":
 			if v != "" {
-				var err error
-				if n, err = strconv.ParseInt(v, 10, 64); err != nil || n < 0 {
+				n, err := strconv.ParseInt(v, 10, 64)
+				if err != nil || n < 0 {
 					return f, fmt.Errorf("unreadable %s line %q", key, v)
 				}
-			}
-			switch key {
-			case "mem-total":
-				f.Swap.MemTotal = n
-			default:
 				f.Swap.RootAvail += n
 			}
-		case "swap-active":
-			f.Swap.Active = v == "yes"
-		case "swap-partition":
-			f.Swap.Partition = v == "yes"
-		case "swap-fstab":
-			f.Swap.FSTab = v == "yes"
-		case "swap-zram":
-			f.Swap.ZRAM = v == "yes"
-		case "swapfile":
-			f.Swap.File = v == "present"
 		case "root-fs":
 			f.Swap.RootFS = v
 		}

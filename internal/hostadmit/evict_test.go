@@ -449,19 +449,6 @@ func TestEvictChecksTheHomeItDeletes(t *testing.T) {
 	}
 }
 
-// Stopping the manager of a data site stops Patroni, and one that does not
-// stop in time is killed with the watchdog armed, which reboots the host:
-// the plan says so.
-func TestEvictOfADataSiteWarnsOfTheWatchdog(t *testing.T) {
-	plan, err := hostadmit.BuildEvict(withEntries(evicted("home-a", gateway)()), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(plan.Text(), "warning: watchdog: stopping") {
-		t.Errorf("no watchdog warning:\n%s", plan.Text())
-	}
-}
-
 // A host-wide file that is not as admit wrote it is the owner's, kept, and
 // the plan says so.
 func TestEvictKeepsAHostWideFileItDidNotWrite(t *testing.T) {
@@ -795,4 +782,87 @@ func TestEvictGoesOnPastAnotherEntryWithNoBuild(t *testing.T) {
 	if len(plan.Steps) == 0 {
 		t.Error("nothing was planned")
 	}
+}
+
+// On a data site, stopping the user's manager stops Patroni, and Docker
+// kills one that outlasts its stop timeout with the watchdog armed. The
+// manager's step disarms the watchdog as root the moment Patroni lets go of
+// it, so the host does not reboot.
+func TestEvictDisarmsTheWatchdogAfterTheManagerStops(t *testing.T) {
+	plan, err := hostadmit.BuildEvict(withEntries(evicted("home-a", gateway)()), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manager *hostadmit.Step
+	for i, s := range plan.Steps {
+		if s.Title == "stop paisans-f2a9's manager" {
+			manager = &plan.Steps[i]
+		}
+	}
+	if manager == nil {
+		t.Fatalf("no manager step:\n%s", plan.Text())
+	}
+	// The disarm loop starts before the stop and runs beside it, so a
+	// Patroni killed while slower containers still stop is disarmed in time.
+	loop, stop := strings.Index(manager.Command, "do disarm; sleep 0.5"), strings.Index(manager.Command, "systemctl stop user@1001.service")
+	if loop < 0 || stop < loop || !strings.Contains(manager.Command, "printf V > /dev/watchdog") {
+		t.Errorf("the manager step does not disarm the watchdog around the stop: %s", manager.Command)
+	}
+	for _, w := range plan.Warnings {
+		if strings.Contains(w.Hint, "manager stops its Patroni") {
+			t.Errorf("still warns about a reboot: %s", w.Hint)
+		}
+	}
+}
+
+// A site without this deployment's watchdog leaves the device alone.
+func TestEvictOfASiteWithoutTheWatchdogDoesNotTouchIt(t *testing.T) {
+	plan, err := hostadmit.BuildEvict(withEntries(evicted("watch", hostadmit.Flags{PublicPorts: true})()), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range plan.Steps {
+		if strings.Contains(s.Title, "manager") && strings.Contains(s.Command, "/dev/watchdog") {
+			t.Errorf("the manager step touches the watchdog on a site without one: %s", s.Command)
+		}
+	}
+}
+
+// An evict resumed after its manager stopped still kills the user's
+// processes inside the disarm, since a Patroni left running outside the
+// manager may lead; a host whose watchdog reports no state is warned about.
+func TestEvictResumedKillsInsideTheDisarm(t *testing.T) {
+	h := evicted("home-a", gateway)().with("linger", "no").with("manager", "inactive")
+	plan, err := hostadmit.BuildEvict(withEntries(h), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := titleIndex(plan, "kill paisans-f2a9's processes")
+	if at < 0 || !strings.Contains(plan.Steps[at].Command, "printf V > /dev/watchdog") {
+		t.Errorf("the kill does not run inside the disarm:\n%s", plan.Text())
+	}
+	legacy, err := hostadmit.BuildEvict(withEntries(evicted("home-a", gateway)().add("watchdog-dev", "1001 /dev/watchdog").with("watchdog-state", "none")), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(legacy.Text(), "watchdog: evict cannot tell whether it runs") {
+		t.Errorf("no warning for a watchdog without state:\n%s", legacy.Text())
+	}
+	nowayout, err := hostadmit.BuildEvict(withEntries(evicted("home-a", gateway)().add("watchdog-dev", "1001 /dev/watchdog").with("watchdog-state", "active").with("watchdog-nowayout", "yes")), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(nowayout.Text(), "watchdog: its driver has nowayout set") {
+		t.Errorf("no warning for nowayout:\n%s", nowayout.Text())
+	}
+}
+
+// titleIndex is the index of the step titled title, or -1.
+func titleIndex(plan *hostadmit.Plan, title string) int {
+	for i, s := range plan.Steps {
+		if s.Title == title {
+			return i
+		}
+	}
+	return -1
 }

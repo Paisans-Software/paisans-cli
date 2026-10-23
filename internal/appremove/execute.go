@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"path"
 	"sort"
 	"strings"
 
@@ -48,7 +49,10 @@ func VolumesCommand(d deployment.Deployment, project string) string {
 // FilesCommand removes each file whose content still hashes to what the
 // manifest recorded, and prints one line per file: `removed`, `kept` (its
 // content differs, so somebody edited it) or `gone`, then the path. The
-// hash is checked on the host at the moment of removal.
+// hash is checked on the host at the moment of removal. The path is used
+// as it is: a directory above the file that is a symbolic link is
+// followed, so the file removed is one with the content apply wrote,
+// wherever the link leads.
 func FilesCommand(files []File) string {
 	var b strings.Builder
 	for _, f := range files {
@@ -59,13 +63,95 @@ func FilesCommand(files []File) string {
 }
 
 // DirCommandFor empties what can go of the stack directory. Without
-// deleteData it removes only empty directories, the stack directory last,
-// so whatever the app wrote stays. With it, the whole directory goes.
-func DirCommandFor(dir string, deleteData bool) string {
+// deleteData it removes only the directories files were rendered in, each
+// once it is empty, and then the stack directory if it is empty, so
+// whatever the app wrote stays, the empty directories inside its data too:
+// a database's data directory holds empty directories it needs. With it,
+// the whole directory goes.
+//
+// Both run under rootlesskit, for the reason DirCommand does: a file or
+// directory a container's non-root user wrote is the namespace root's to
+// remove, and not the user's (Docker's rootless documentation, Uninstall:
+// rootlesskit rm -rf ~/.local/share/docker). dir is always d.Dir(app), and
+// app has passed nameShape, so it is one segment under the deployment's
+// root. A find that fails fails the command. rmdir runs as the user: the stack directory is the deployment
+// root's entry, and the user owns the root.
+func DirCommandFor(dir string, files []File, deleteData bool) string {
 	if deleteData {
-		return "rm -rf -- " + quote(dir)
+		return "rootlesskit rm -rf -- " + quote(dir)
 	}
-	return fmt.Sprintf(`d=%s; if [ -d "$d" ]; then find "$d" -mindepth 1 -depth -type d -empty -delete; rmdir "$d" 2>/dev/null || true; fi`, quote(dir))
+	empty := ""
+	if dirs := RenderedDirs(dir, files); len(dirs) > 0 {
+		empty = EmptyDirsCommand(dir, dirs) + " && "
+	}
+	return fmt.Sprintf(`if [ -d %[1]s ]; then %[2]s{ rmdir %[1]s 2>/dev/null || true; }; fi`, quote(dir), empty)
+}
+
+// RenderedDirs is each directory below top that holds one of files, and
+// each between it and top, deepest first: the directories apply made to
+// write them. top is left out. A directory a container mounts and writes
+// holds no rendered file, so it is never one of them.
+func RenderedDirs(top string, files []File) []string {
+	paths := make([]string, len(files))
+	for i, f := range files {
+		paths[i] = "/" + f.Entry.Path
+	}
+	return DirsOf(top, paths)
+}
+
+// DirsOf is each directory below top that holds one of paths, and each
+// between it and top, deepest first. top is left out.
+func DirsOf(top string, paths []string) []string {
+	seen := map[string]bool{}
+	var dirs []string
+	for _, p := range paths {
+		for dir := path.Dir(p); strings.HasPrefix(dir, top+"/") && !seen[dir]; dir = path.Dir(dir) {
+			seen[dir] = true
+			dirs = append(dirs, dir)
+		}
+	}
+	sort.Slice(dirs, func(i, j int) bool {
+		if a, b := strings.Count(dirs[i], "/"), strings.Count(dirs[j], "/"); a != b {
+			return a > b
+		}
+		return dirs[i] < dirs[j]
+	})
+	return dirs
+}
+
+// EmptyDirsCommand removes each of dirs, all below top, that is empty, in
+// order, so a directory emptied by removing the one before it goes too, and
+// leaves one that holds anything, with all it holds. find examines each
+// directory itself and never descends into it, and a directory underTop
+// skips is left alone. It runs under rootlesskit, as DirCommandFor's does,
+// from the directory's parent, which rootlesskit keeps as its working
+// directory (observed with rootlesskit 3.3.0: cd X && rootlesskit pwd
+// prints X), in a subshell whose status is the first find's that failed.
+func EmptyDirsCommand(top string, dirs []string) string {
+	return underTop(top, dirs, `rootlesskit find "./$n" -maxdepth 0 -type d -empty -delete`)
+}
+
+// EmptyDirsProbe names each of dirs, all below top, that is empty and that
+// EmptyDirsCommand would remove, so a plan never lists a directory the
+// command would leave.
+func EmptyDirsProbe(top string, dirs []string) string {
+	return underTop(top, dirs, `if [ ! -L "./$n" ] && [ -z "$(ls -A -- "./$n")" ]; then echo "$d"; fi`)
+}
+
+// underTop runs body for each of dirs, all below top, in a subshell in the
+// directory's parent, with d the directory and n its name. A directory
+// with a symbolic link anywhere from top down to it, top included, is
+// skipped: the link would take body out of top, Eg: a container that
+// replaced a directory it mounts with a link to one of the user's own. The
+// shell enters the parent with cd -P and compares where it is with where
+// the parent should be, and body takes the directory by its name there, so
+// a link put in place above it after the check changes nothing.
+func underTop(top string, dirs []string, body string) string {
+	quoted := make([]string, len(dirs))
+	for i, d := range dirs {
+		quoted[i] = quote(d)
+	}
+	return fmt.Sprintf(`(t=%s; T=$(cd -P -- "${t%%/*}" 2>/dev/null && pwd -P) || exit 0; T=$T/${t##*/}; for d in %s; do p=${d%%/*}; n=${d##*/}; ( cd -P -- "$p" 2>/dev/null && [ "$(pwd -P)" = "$T${p#"$t"}" ] && [ -d "./$n" ] || exit 0; %s ) || exit 1; done)`, quote(top), strings.Join(quoted, " "), body)
 }
 
 // Executor runs a plan.
@@ -151,7 +237,8 @@ func (e *Executor) execute(p *Plan) error {
 		if err := e.webServer(h, d, s); err != nil {
 			return fmt.Errorf("%s: %w", s.Site, err)
 		}
-		if err := e.files(h, d, s); err != nil {
+		drop, err := e.files(h, s)
+		if err != nil {
 			return fmt.Errorf("%s: %w", s.Site, err)
 		}
 		dir := d.Dir(p.App)
@@ -161,15 +248,22 @@ func (e *Executor) execute(p *Plan) error {
 		} else {
 			e.work("remove empty directories")
 		}
-		if out, err := h.Run(DirCommandFor(dir, deleteDir)); err != nil {
+		if out, err := h.Run(DirCommandFor(dir, s.Files, deleteDir)); err != nil {
 			return fmt.Errorf("%s: %s: %w: %s", s.Site, dir, err, firstLine(out))
+		}
+		// After the directories: the entries name them, so a run that
+		// stops before here finds them again.
+		if err := dropEntries(h, d, drop); err != nil {
+			return fmt.Errorf("%s: %w", s.Site, err)
 		}
 		if p.DeleteData && !deleteDir {
 			e.Kept = append(e.Kept, dirEdited(s.Site, dir))
 		}
 		if dd, err := probeDir(h, dir); err != nil {
 			return fmt.Errorf("%s: %w", s.Site, err)
-		} else if dd.Exists {
+		} else if dd.Files > 0 {
+			// Empty directories alone are kept data too, which dataKept
+			// names.
 			e.Kept = append(e.Kept, dirData(s.Site, dir, dd.Files, size(dd.Bytes)))
 		}
 		if p.DeleteData {
@@ -246,18 +340,16 @@ func (e *MonitorError) Unwrap() error {
 	return e.Err
 }
 
-// files removes the app's unedited files on one site and then drops the
-// entries of every file removed or already gone, keeping every other entry.
-// The manifest is read again just before it is written, and written the way
-// apply writes it: whole, through a temporary file moved into place, 0600.
-func (e *Executor) files(h Host, d deployment.Deployment, s SitePlan) error {
+// files removes the app's unedited files on one site, and answers the
+// entries of every file removed or already gone, for dropEntries.
+func (e *Executor) files(h Host, s SitePlan) (map[string]bool, error) {
 	if len(s.Files) == 0 {
-		return nil
+		return nil, nil
 	}
 	e.work("remove files")
 	out, err := h.Run(FilesCommand(s.Files))
 	if err != nil {
-		return fmt.Errorf("removing files: %w: %s", err, firstLine(out))
+		return nil, fmt.Errorf("removing files: %w: %s", err, firstLine(out))
 	}
 	drop := map[string]bool{}
 	answered := map[string]bool{}
@@ -280,9 +372,17 @@ func (e *Executor) files(h Host, d deployment.Deployment, s SitePlan) error {
 	}
 	for _, f := range s.Files {
 		if !answered[f.Entry.Path] {
-			return fmt.Errorf("removing files: no answer for /%s, so the manifest is left as it was", f.Entry.Path)
+			return nil, fmt.Errorf("removing files: no answer for /%s, so the manifest is left as it was", f.Entry.Path)
 		}
 	}
+	return drop, nil
+}
+
+// dropEntries drops the manifest entries drop names, keeping every other
+// entry. The manifest is read again just before it is written, and written
+// the way apply writes it: whole, through a temporary file moved into
+// place, 0600.
+func dropEntries(h Host, d deployment.Deployment, drop map[string]bool) error {
 	if len(drop) == 0 {
 		return nil
 	}

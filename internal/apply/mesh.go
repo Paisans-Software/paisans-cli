@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -101,7 +102,7 @@ func helperProblem(site string, h WGHelper, err error) error {
 	if line := refusedConf(text); line != "" {
 		advice := "The helper installs only what paisans renders, on the ListenPort and inside the mesh subnet the host's owner admitted. When the site's endpoint port or mesh.subnet has changed since, the owner admits the deployment again from a new request."
 		if hostRefusal(line) {
-			advice = "That is the host, not the mesh file: the host's owner runs `paisans site admit` again, which installs the helper and /etc/wireguard as the helper expects them, then apply again."
+			advice = "That is the host, not the mesh file: the host's owner runs `" + progname.Default + " site admit` again, which installs the helper and /etc/wireguard as the helper expects them, then apply again."
 		}
 		return &ui.Problem{
 			Hint:    "mesh: the WireGuard helper refused " + site + "'s mesh file",
@@ -174,7 +175,7 @@ func sudoAdvice(line string) string {
 	if strings.Contains(line, ttyRefusal) {
 		return "sudo on this host requires a terminal (requiretty), and apply has none: the host's owner removes that requirement for the helper, then apply again."
 	}
-	return "`paisans site admit` installs the helper and the one sudoers line that lets this deployment's user run it: the host's owner admits the deployment, then apply again."
+	return "`" + progname.Default + " site admit` installs the helper and the one sudoers line that lets this deployment's user run it: the host's owner admits the deployment, then apply again."
 }
 
 // sudoRefusals are what sudo prints when it will not run a command, as
@@ -356,7 +357,7 @@ func meshProblem(plan *Plan, t Transport, cause error) error {
 	problem.Cause = fmt.Errorf("%w\n%s:\n%s", cause, logCommand, journal)
 	line := wgQuickError(journal)
 	if name := unresolvedName(line); name != "" {
-		problem.Explain = fmt.Sprintf("%s does not resolve from %s; create its DNS record (paisans dns init) and apply again.\n%s", name, plan.Site, stopped)
+		problem.Explain = fmt.Sprintf("%s does not resolve from %s; create its DNS record (%s dns init) and apply again.\n%s", name, plan.Site, progname.Cmd(), stopped)
 		return problem
 	}
 	if line != "" {

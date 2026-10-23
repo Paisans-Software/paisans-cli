@@ -78,6 +78,13 @@ type fakeHost struct {
 	// leader is the Patroni member /cluster reports as leader, empty for a
 	// cluster with none yet. newHost makes it home-a.
 	leader string
+	// leaderAfter, when set, becomes leader once the infrastructure stack's
+	// `up -d` runs: the leader's Patroni recreated, and a standby taking the
+	// leader key while it restarted.
+	leaderAfter string
+	// etcdHosts is ETCD3_HOSTS as the running Patroni container has it,
+	// empty for one that does not answer. newHost makes it the fixture's.
+	etcdHosts string
 	// ps is what `docker compose ps --format json` prints, by stack. A stack
 	// not in it answers with one running container and no healthcheck.
 	ps map[string]string
@@ -133,7 +140,9 @@ type fakeHost struct {
 	sourceMark string
 }
 
-func newHost() *fakeHost { return &fakeHost{files: map[string]string{}, leader: "home-a"} }
+func newHost() *fakeHost {
+	return &fakeHost{files: map[string]string{}, leader: "home-a", etcdHosts: "10.44.0.1:2379,10.44.0.2:2379,10.44.0.3:2379"}
+}
 
 func (h *fakeHost) RunInput(command, stdin string) (string, error) {
 	h.inputs = append(h.inputs, stdin)
@@ -150,6 +159,9 @@ func (h *fakeHost) Describe() string { return "fake" }
 
 func (h *fakeHost) Run(command string) (string, error) {
 	h.commands = append(h.commands, command)
+	if h.leaderAfter != "" && strings.Contains(command, "/infra/compose.yaml up -d") {
+		h.leader = h.leaderAfter
+	}
 	if command == apply.SourceMarkProbe {
 		return h.sourceMark, nil
 	}
@@ -246,6 +258,19 @@ func (h *fakeHost) Run(command string) (string, error) {
 	}
 	if strings.Contains(command, "psql") && strings.Contains(command, " -At") {
 		return strings.Join(h.replicaHas, "\n") + "\n", nil
+	}
+	if strings.HasSuffix(command, "exec -T patroni printenv ETCD3_HOSTS") {
+		if h.etcdHosts == "" {
+			return "service \"patroni\" is not running", fmt.Errorf("exit status 1")
+		}
+		return h.etcdHosts + "\n", nil
+	}
+	if strings.Contains(command, ":8008/patroni") {
+		// This host's own Patroni, which is home-a's.
+		if h.leader == "home-a" {
+			return `{"state":"running","role":"primary"}`, nil
+		}
+		return `{"state":"running","role":"replica"}`, nil
 	}
 	if strings.Contains(command, ":8008/cluster") {
 		if h.leader == "" {
@@ -1070,8 +1095,9 @@ func TestPlanningOnlyProbesTheMesh(t *testing.T) {
 	for _, command := range host.commands {
 		// The sweep's read of the host's images, the read of which
 		// containers run and the read of the rootless namespace's
-		// src_valid_mark are the other probes a plan makes.
-		if !strings.HasPrefix(command, "ip -br addr show dev psns-f2a9") && !strings.Contains(command, "echo paisans-sweep-end") && !strings.Contains(command, "--filter label=com.docker.compose.project") && command != apply.SourceMarkProbe {
+		// src_valid_mark and the read of the etcd hosts Patroni runs with
+		// are the other probes a plan makes.
+		if !strings.HasPrefix(command, "ip -br addr show dev psns-f2a9") && !strings.HasSuffix(command, "exec -T patroni printenv ETCD3_HOSTS") && !strings.Contains(command, "echo paisans-sweep-end") && !strings.Contains(command, "--filter label=com.docker.compose.project") && command != apply.SourceMarkProbe {
 			t.Errorf("building a plan ran %q, which is more than a probe", command)
 		}
 	}

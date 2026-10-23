@@ -44,7 +44,7 @@ func TestWGHelperCommandLines(t *testing.T) {
 	if err := w.Put([]byte("[Interface]\nListenPort = 51820\n")); err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range []func() error{w.Up, w.Restart, w.Sync} {
+	for _, f := range []func() error{w.Up, w.Restart, w.Down, w.Sync} {
 		if err := f(); err != nil {
 			t.Fatal(err)
 		}
@@ -58,7 +58,7 @@ func TestWGHelperCommandLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	const helper = "sudo -n '/usr/local/libexec/paisans/wg-psns-f2a9' "
-	want := []string{helper + "put", helper + "up", helper + "restart", helper + "sync", helper + "show peers", helper + "show latest-handshakes", helper + "show public-key", helper + "show allowed-ips", helper + "show persistent-keepalive", helper + "show listen-port", helper + "log"}
+	want := []string{helper + "put", helper + "up", helper + "restart", helper + "down", helper + "sync", helper + "show peers", helper + "show latest-handshakes", helper + "show public-key", helper + "show allowed-ips", helper + "show persistent-keepalive", helper + "show listen-port", helper + "log"}
 	if strings.Join(h.ran, "\n") != strings.Join(want, "\n") {
 		t.Errorf("ran:\n%s\nwant:\n%s", strings.Join(h.ran, "\n"), strings.Join(want, "\n"))
 	}
@@ -118,6 +118,7 @@ func TestWGHelperRefusesABadInterface(t *testing.T) {
 			"Put":     func() error { return w.Put([]byte("x")) },
 			"Up":      w.Up,
 			"Restart": w.Restart,
+			"Down":    w.Down,
 			"Sync":    w.Sync,
 			"Show":    func() error { _, err := w.Show("peers"); return err },
 			"Log":     func() error { _, err := w.Log(); return err },
@@ -153,6 +154,7 @@ func TestWGHelperErrorsCarryWhatTheHelperPrinted(t *testing.T) {
 		"Put":     func() error { return w.Put([]byte("x")) },
 		"Up":      w.Up,
 		"Restart": w.Restart,
+		"Down":    w.Down,
 		"Sync":    w.Sync,
 		"Show":    func() error { _, err := w.Show("peers"); return err },
 		"Log":     func() error { _, err := w.Log(); return err },

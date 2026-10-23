@@ -29,7 +29,7 @@ func withReplica(t *testing.T) *world {
 	cfg.Etcd.Members = []string{"home-a", "home-b", "home-c", "vm"}
 	secrets.Sites["home-c"] = config.SiteSecrets{WireGuardPrivateKey: "REREREREREREREREREREREREREREREREREREREREREQ=", HeartbeatToken: "6666666666666666666666666666ffff"}
 
-	w := &world{t: t, cfg: cfg, secrets: secrets, hosts: map[string]*host{}, nextID: 3,
+	w := &world{t: t, cfg: cfg, secrets: secrets, hosts: map[string]*host{}, clusterID: 0xc1a5, nextID: 3,
 		running: map[string]bool{"home-a": true, "home-c": true, "vm": true},
 		patroni: map[string]bool{"home-a": true, "home-c": true},
 		served:  map[string]string{}, syncMode: true, etcdHosts: map[string]string{}, starting: map[string]int{}}
@@ -74,7 +74,7 @@ func withReplica(t *testing.T) *world {
 }
 
 // An existing replica's patroni.env is applied and its Patroni recreated,
-// gated on it streaming again; the leader's is noted for its next restart.
+// gated on it streaming again; the leader's is noted for when it is next recreated.
 func TestAJoinBringsAReplicasPatroniEnvUpToDate(t *testing.T) {
 	defer siteadd.SetFast()()
 	w := withReplica(t)
@@ -88,7 +88,7 @@ func TestAJoinBringsAReplicasPatroniEnvUpToDate(t *testing.T) {
 		}
 	}
 	notes := strings.Join(p.Owed, "\n")
-	if !strings.Contains(notes, "home-a leads") || !strings.Contains(notes, "next restart") {
+	if !strings.Contains(notes, "home-a leads") || !strings.Contains(notes, "next recreated") {
 		t.Errorf("the leader's patroni.env is not noted:\n%s", notes)
 	}
 	rec := &ui.Recorder{}

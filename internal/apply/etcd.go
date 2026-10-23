@@ -1,14 +1,18 @@
 package apply
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -170,7 +174,10 @@ func ParseEtcdMembers(out string) ([]EtcdMember, error) {
 
 // ParseEtcdCluster reads `etcdctl member list -w json`, header and members
 // (etcd v3.5.16, etcdctl/ctlv3/command/printer_json.go, which marshals the
-// MemberListResponse whole: header.cluster_id is the cluster's ID).
+// MemberListResponse whole, on one line: header.cluster_id is the cluster's
+// ID). The transport carries stderr with stdout, and etcdctl's client logs
+// warnings there as JSON lines of their own (Eg: a retried request), so the
+// answer is the last line that starts as the response does.
 func ParseEtcdCluster(out string) (EtcdCluster, error) {
 	var list struct {
 		Header struct {
@@ -178,7 +185,15 @@ func ParseEtcdCluster(out string) (EtcdCluster, error) {
 		} `json:"header"`
 		Members []EtcdMember `json:"members"`
 	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &list); err != nil {
+	body := strings.TrimSpace(out)
+	lines := strings.Split(body, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if line := strings.TrimSpace(lines[i]); strings.HasPrefix(line, `{"header"`) {
+			body = line
+			break
+		}
+	}
+	if err := json.Unmarshal([]byte(body), &list); err != nil {
 		return EtcdCluster{}, fmt.Errorf("etcd's member list is not JSON: %w\n%s", err, out)
 	}
 	return EtcdCluster{ID: list.Header.ClusterID, Members: list.Members}, nil
@@ -273,6 +288,45 @@ func EtcdInitialMembers(in render.EtcdInitial) ([]EtcdMember, bool) {
 	}
 	return members, len(members) > 0
 }
+
+// EtcdDataDir is a site's etcd data directory on its host, which the etcd
+// container mounts as its --data-dir (infra-compose.yaml.tmpl).
+func EtcdDataDir(d deployment.Deployment) string { return d.Dir(infraStack) + "/etcd" }
+
+// EtcdContainerIDs lists the etcd containers of this deployment on a host,
+// running or stopped: its label, the infrastructure stack's compose project
+// and the etcd service, so nothing else on the host can match. It finds them
+// by their labels, not by the compose file, because a compose file written
+// without etcd does not name the service.
+func EtcdContainerIDs(d deployment.Deployment) string {
+	return fmt.Sprintf("docker ps -aq --filter %s --filter %s --filter %s",
+		shellQuote(d.LabelFilter()), shellQuote("label=com.docker.compose.project="+d.Project(infraStack)), shellQuote("label=com.docker.compose.service=etcd"))
+}
+
+// RemoveEtcdContainers stops and removes them. A stopped one left behind is
+// started again by its restart policy. Its bind mounts stay.
+func RemoveEtcdContainers(d deployment.Deployment) string {
+	return fmt.Sprintf("ids=$(%s) && { [ -z \"$ids\" ] || { docker stop $ids >/dev/null && docker rm $ids >/dev/null; }; }", EtcdContainerIDs(d))
+}
+
+// EmptyEtcdData deletes everything in a site's etcd data directory and keeps
+// the directory.
+//
+// etcd starts from a data directory that holds a member as that member, and
+// ignores --initial-cluster then (etcd v3.5.16, server/etcdmain/etcd.go). A
+// removed member's ID is never accepted by the cluster again, so a site
+// whose member was removed and whose host kept the data cannot rejoin from
+// it: etcd exits and restarts in a loop. Callers delete only this cluster's
+// data: a member site remove has just removed, or data site add has read on
+// disk (ReadEtcdData) and found to be this cluster's or nothing. That data
+// holds only Patroni's store, runtime state every remaining member also
+// holds, so deleting it loses nothing.
+//
+// The files are the etcd container's, which under rootless Docker are
+// expected to be owned by a subordinate UID rather than the deployment's
+// user, so they go through rootlesskit (RootlessDeleteLoop). That ownership
+// is expected, not yet observed on a host.
+func EmptyEtcdData(d deployment.Deployment) string { return RootlessEmptyDir(EtcdDataDir(d)) }
 
 // EtcdContainerRunning reports whether this host's etcd container runs. It
 // asks Docker, not etcd, so it answers the same for a member with no leader.
@@ -392,8 +446,8 @@ func EtcdRefusal(cfg *config.Config, plan *Plan, members []EtcdMember) error {
 	return &ui.Problem{
 		Hint: plan.Site + "'s etcd members differ from the running cluster's",
 		Explain: fmt.Sprintf(
-			"The running cluster's members are %s, and %s says %s, so this site's infrastructure stack was not touched: applying it now would start an etcd the cluster has not admitted. Growing the cluster is paisans site add <site>, which adds each member as a learner and promotes it once it has caught up. Run it for the site being added, then apply.",
-			strings.Join(live, ", "), cfg.EtcdMembersKey(), strings.Join(want, ", ")),
+			"The running cluster's members are %s, and %s says %s, so this site's infrastructure stack was not touched: applying it now would start an etcd the cluster has not admitted. Growing the cluster is %s site add <site>, which adds each member as a learner and promotes it once it has caught up. Run it for the site being added, then apply.",
+			strings.Join(live, ", "), cfg.EtcdMembersKey(), strings.Join(want, ", "), progname.Cmd()),
 	}
 }
 
@@ -474,7 +528,7 @@ func WitnessFirstRefusal(cfg *config.Config, plan *Plan, founding bool, running 
 	}
 	var commands []string
 	for _, name := range waiting {
-		commands = append(commands, "paisans deployment apply --site "+name)
+		commands = append(commands, progname.Cmd()+" deployment apply --site "+name)
 	}
 	return &ui.Problem{
 		Hint: fmt.Sprintf("%s would found etcd while the witness %s runs none", plan.Site, strings.Join(waiting, ", ")),
@@ -482,4 +536,29 @@ func WitnessFirstRefusal(cfg *config.Config, plan *Plan, founding bool, running 
 			"This site's infrastructure stack was not touched. A new etcd cluster settles its version only once every founding member answers, and until then Patroni cannot take the leader key on any data site. Apply the witness first with %s, then apply this site again.",
 			strings.Join(commands, ", then ")),
 	}
+}
+
+var (
+	foundingMu     sync.Mutex
+	foundingTokens = map[string]string{}
+)
+
+// EtcdFoundingToken is the --initial-cluster-token a deployment's etcd is
+// founded with when no founder of it has a record yet (see
+// render.WithEtcdFoundingToken): the deployment's token and 64 random bits.
+// It is chosen once per run, so every render of one run founds with the same
+// token; a later run reads it from the record of a founder that has one.
+func EtcdFoundingToken(d deployment.Deployment) (string, error) {
+	foundingMu.Lock()
+	defer foundingMu.Unlock()
+	if tok, ok := foundingTokens[d.ID]; ok {
+		return tok, nil
+	}
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("choosing etcd's cluster token: %w", err)
+	}
+	tok := d.Prefix() + "-" + hex.EncodeToString(b[:])
+	foundingTokens[d.ID] = tok
+	return tok, nil
 }

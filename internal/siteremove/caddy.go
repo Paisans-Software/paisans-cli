@@ -12,6 +12,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/ownership"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/version"
 )
@@ -49,9 +50,9 @@ type caddyPlan struct {
 	// manifest is the manifest listing only the kept files, empty when the
 	// host's already is it.
 	manifest string
-	// others are the paths under the root that are not Caddy's, and empty
-	// the empty directories among them, from keptProbe.
-	others, empty []string
+	// others are the paths under the root that are not Caddy's, from
+	// keptProbe.
+	others []string
 	// dataFiles counts the files among others no step deletes without
 	// --delete-data.
 	dataFiles int
@@ -136,7 +137,7 @@ func (p *Plan) planCaddy(t apply.Transport, inv *hostcheck.Inventory) (*caddyPla
 		// file bind mount, which only an in place write reaches. An apply
 		// moves it, so that is what to run.
 		if _, legacy, lerr := t.ReadFile(p.legacyCaddyfile()); lerr == nil && legacy {
-			return nil, fmt.Errorf("site remove %s: its Caddy serves the host owner's sites in %s, and still reads %s, where a toolkit before this one wrote it. Run `paisans deployment apply --site %s --execute` first, which moves it to %s, then run this again. Nothing was changed", p.Site, render.HostSitesDir(p.dep()), p.legacyCaddyfile(), p.Site, p.caddyfile())
+			return nil, fmt.Errorf("site remove %s: its Caddy serves the host owner's sites in %s, and still reads %s, where a toolkit before this one wrote it. Run `%s deployment apply --site %s --execute` first, which moves it to %s, then run this again. Nothing was changed", p.Site, render.HostSitesDir(p.dep()), p.legacyCaddyfile(), progname.Cmd(), p.Site, p.caddyfile())
 		}
 		return nil, fmt.Errorf("site remove %s: its Caddy serves the host owner's sites in %s, and %s is not there to reduce to them. Nothing was changed", p.Site, render.HostSitesDir(p.dep()), p.caddyfile())
 	}
@@ -249,19 +250,19 @@ func (p *Plan) keptManifest(entries []render.ManifestFile, proven map[string]boo
 }
 
 // keptProbe lists every path under the root that no kept path covers, each
-// as find's type letter and the path, an empty directory as e.
+// as find's type letter and the path. find runs under rootlesskit, as
+// appremove.DirCommand's does, so it reads what a container's user wrote.
 func (p *Plan) keptProbe() string {
 	var prune []string
 	for _, k := range p.keptPaths() {
 		prune = append(prune, "-path "+quote(k))
 	}
-	return fmt.Sprintf(`d=%s; if [ -d "$d" ]; then find "$d" -mindepth 1 \( %s \) -prune -o \( -type d -empty -printf 'e %%p\n' \) -o -printf '%%y %%p\n'; fi`, quote(p.dep().Root()), strings.Join(prune, " -o "))
+	return fmt.Sprintf(`d=%s; if [ -d "$d" ]; then rootlesskit find "$d" -mindepth 1 \( %s \) -prune -o -printf '%%y %%p\n'; fi`, quote(p.dep().Root()), strings.Join(prune, " -o "))
 }
 
 // parseKeptProbe reads keptProbe's answer: the paths that are not Caddy's,
-// leaving out the directories above a kept path, and the empty directories
-// among them.
-func (p *Plan) parseKeptProbe(out string) (others, empty []string, files []string) {
+// leaving out the directories above a kept path, and the files among them.
+func (p *Plan) parseKeptProbe(out string) (others, files []string) {
 	kept := p.keptPaths()
 	for _, line := range strings.Split(out, "\n") {
 		kind, path, ok := strings.Cut(strings.TrimSpace(line), " ")
@@ -276,14 +277,11 @@ func (p *Plan) parseKeptProbe(out string) (others, empty []string, files []strin
 			continue
 		}
 		others = append(others, path)
-		switch kind {
-		case "e":
-			empty = append(empty, path)
-		case "f", "l":
+		if kind == "f" || kind == "l" {
 			files = append(files, path)
 		}
 	}
-	return others, empty, files
+	return others, files
 }
 
 // deleteBesideKept deletes everything under the root but the kept paths:
@@ -312,18 +310,11 @@ func (p *Plan) deleteBesideKept() string {
 	sort.Strings(dirs)
 	var loops []string
 	for _, dir := range dirs {
-		q := quote(dir)
-		head := fmt.Sprintf(`for f in %[1]s/* %[1]s/.[!.]* %[1]s/..?*; do [ -e "$f" ] || [ -L "$f" ] || continue;`, q)
-		if len(keep[dir]) == 0 {
-			loops = append(loops, head+` rootlesskit rm -rf -- "$f"; done`)
-			continue
-		}
 		var names []string
 		for n := range keep[dir] {
-			names = append(names, quote(n))
+			names = append(names, n)
 		}
-		sort.Strings(names)
-		loops = append(loops, head+fmt.Sprintf(` case "${f##*/}" in %s) ;; *) rootlesskit rm -rf -- "$f";; esac; done`, strings.Join(names, "|")))
+		loops = append(loops, apply.RootlessDeleteLoop(dir, names))
 	}
 	// A directory walked that is a symbolic link would take the loop out of
 	// the root, Eg: snippets pointing at the owner's sites: nothing is
@@ -336,16 +327,16 @@ func (p *Plan) deleteBesideKept() string {
 	return "set -e; " + guard + "; " + strings.Join(loops, "; ")
 }
 
-// emptyBesideKept removes the empty directories under the root, but never a
-// kept one or one inside it: the container mounts them, and a missing mount
-// source keeps it from starting again. find runs through rootlesskit, as
-// emptyRootCommand's does.
-func (p *Plan) emptyBesideKept() string {
-	var not []string
+// underKept reports whether dir is a kept path or inside one: the
+// container mounts it, and a missing mount source keeps it from starting
+// again.
+func (p *Plan) underKept(dir string) bool {
 	for _, k := range p.keptPaths() {
-		not = append(not, "! -path "+quote(k), "! -path "+quote(k+"/*"))
+		if dir == k || strings.HasPrefix(dir, k+"/") {
+			return true
+		}
 	}
-	return fmt.Sprintf(`d=%s; if [ -d "$d" ]; then rootlesskit find "$d" -mindepth 1 -depth -type d -empty %s -delete; fi`, quote(p.dep().Root()), strings.Join(not, " "))
+	return false
 }
 
 func caddyCommand(container hostcheck.Container, verb, config string) string {

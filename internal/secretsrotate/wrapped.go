@@ -13,6 +13,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/dns"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/smtpcheck"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -84,7 +85,7 @@ func (p pasted) Next(e Env, s *config.Secrets) (string, error) {
 func (p pasted) current(e Env, s *config.Secrets) (string, error) {
 	v, _ := s.Get(p.path)
 	if v == "" {
-		return "", fmt.Errorf("the secrets file holds no %s. Set the one %s issued with `paisans secrets set %s`", p.path, p.issuer(e.Cfg), p.path)
+		return "", fmt.Errorf("the secrets file holds no %s. Set the one %s issued with `%s secrets set %s`", p.path, p.issuer(e.Cfg), progname.Cmd(), p.path)
 	}
 	ui.Secret(v)
 	return v, nil
@@ -125,7 +126,7 @@ func (p pasted) Accepts(e Env, next string) (bool, error) {
 // CheckText is what the plan says stage 2 does for the secret.
 func (p pasted) CheckText(cfg *config.Config) string {
 	if p.smtp {
-		return "the next password logs in to the mail server from this machine; a pasted one also sends the operators a test message when pasted, as `paisans secrets set` does. Every site that will be handed it tries it too, and none is handed it until all accept; a server this machine cannot reach is tried from the sites alone"
+		return "the next password logs in to the mail server from this machine; a pasted one also sends the operators a test message when pasted, as `" + progname.Cmd() + " secrets set` does. Every site that will be handed it tries it too, and none is handed it until all accept; a server this machine cannot reach is tried from the sites alone"
 	}
 	if !p.dns {
 		return "nothing checks it here: " + p.issuer(cfg) + " issued it"
@@ -192,7 +193,7 @@ func smtpCheck(e Env, path, password string, send bool) error {
 	if err != nil {
 		return err
 	}
-	tried, err := smtpcheck.TryPassword(e.Mail, e.Cfg, s, path, password, "paisans secrets rotate", send)
+	tried, err := smtpcheck.TryPassword(e.Mail, e.Cfg, s, path, password, progname.Cmd()+" secrets rotate", send)
 	if err != nil {
 		var failed *smtpcheck.Error
 		if errors.As(err, &failed) {
@@ -322,7 +323,7 @@ func (p pasted) hostsRun(e Env) (bool, []string, error) {
 			return false, nil, fmt.Errorf("%s: reading the lines of %s: %w", f.site, f.rel, err)
 		}
 		if !found {
-			return false, nil, fmt.Errorf("%s renders %s into %s and has no copy of it, so which value it holds cannot be told. Run `paisans deployment apply --site %s` first", f.site, p.path, f.rel, f.site)
+			return false, nil, fmt.Errorf("%s renders %s into %s and has no copy of it, so which value it holds cannot be told. Run `%s deployment apply --site %s` first", f.site, p.path, f.rel, progname.Cmd(), f.site)
 		}
 		for _, line := range f.lines {
 			if !held[line] {
@@ -502,7 +503,7 @@ func (r oidcClient) Precheck(e Env) error {
 	id, _ := s.Get("oidc_clients." + r.app + ".client_id")
 	secret, _ := s.Get(r.path)
 	if id == "" || secret == "" {
-		return fmt.Errorf("the secrets file records no OIDC client for %s, so there is no secret to rotate. `paisans oidc client create --app %s` creates one", r.app, r.app)
+		return fmt.Errorf("the secrets file records no OIDC client for %s, so there is no secret to rotate. `%s oidc client create --app %s` creates one", r.app, progname.Cmd(), r.app)
 	}
 	return nil
 }

@@ -13,6 +13,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployrecord"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
 	"github.com/paisans-software/paisans-cli/internal/smtpcheck"
@@ -36,7 +37,7 @@ func runSecrets(args []string) error {
 	case len(args) >= 1 && args[0] == "rotate":
 		return runSecretsRotate(args[1:], os.Stdin, os.Stdout)
 	}
-	return fmt.Errorf("secrets takes one subcommand, list, set, prune or rotate: paisans secrets list, paisans secrets set <dotted.key> [--secrets path] < value, paisans secrets set at a terminal to be asked for each owed secret, paisans secrets prune [--execute], or paisans secrets rotate <path>... | --all [--execute]")
+	return fmt.Errorf("secrets takes one subcommand, list, set, prune or rotate: %s secrets list, %s secrets set <dotted.key> [--secrets path] < value, %s secrets set at a terminal to be asked for each owed secret, %s secrets prune [--execute], or %s secrets rotate <path>... | --all [--execute]", progname.Cmd(), progname.Cmd(), progname.Cmd(), progname.Cmd(), progname.Cmd())
 }
 
 // hasSecrets reports whether the secrets file holds anything under key, a
@@ -117,7 +118,7 @@ func runSecretsPrune(args []string, stdin io.Reader, stdout io.Writer) error {
 		return nil
 	}
 	for _, o := range orphans {
-		detail := "removed by `paisans secrets prune --execute`"
+		detail := "removed by `" + progname.Cmd() + " secrets prune --execute`"
 		if o.Leaves != "" {
 			detail = o.Leaves
 		}
@@ -195,7 +196,7 @@ func runSecretsSet(args []string, stdin io.Reader) error {
 	// typing it would echo.
 	atTerminal := stdinIsTerminal(stdin)
 	if key == "" && !atTerminal {
-		return fmt.Errorf("secrets set: name the key first, as in `paisans secrets set external.acme_dns_token < token`. Run it at a terminal with no key to be asked for each owed secret in turn, or with a key to be asked for that one")
+		return fmt.Errorf("secrets set: name the key first, as in `%s secrets set external.acme_dns_token < token`. Run it at a terminal with no key to be asked for each owed secret in turn, or with a key to be asked for that one", progname.Cmd())
 	}
 
 	cfg, err := config.Load(*configPath)
@@ -205,7 +206,9 @@ func runSecretsSet(args []string, stdin io.Reader) error {
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
 	}
-	secrets, err := config.LoadDeploymentSecrets(*secretsPath, cfg.ID)
+	// With a key, a control character already in that key's value does not
+	// refuse the file, since setting the key is how it is repaired.
+	secrets, err := config.LoadDeploymentSecretsReplacing(*secretsPath, cfg.ID, key)
 	if err != nil {
 		return err
 	}
@@ -259,6 +262,9 @@ func runSecretsSet(args []string, stdin io.Reader) error {
 	}
 	if value == "" {
 		return fmt.Errorf("secrets set: %s: nothing on stdin. An empty value is refused rather than written, since it reads as set and renders as missing", key)
+	}
+	if err := config.CheckPastedSecret(key, value); err != nil {
+		return fmt.Errorf("secrets set: %w. Nothing was written", err)
 	}
 
 	if err := secrets.Set(key, value); err != nil {
@@ -319,6 +325,9 @@ func setOwedSecrets(r ui.Reporter, cfg *config.Config, secrets *config.Secrets, 
 		if len(value) > maxSecret {
 			return fmt.Errorf("secrets set: %s: more than %d bytes, which is not a credential this file holds. %s", o.Name, maxSecret, setSoFar(done))
 		}
+		if err := config.CheckPastedSecret(o.Name, value); err != nil {
+			return fmt.Errorf("secrets set: %w. %s", err, setSoFar(done))
+		}
 		if err := secrets.Set(o.Name, value); err != nil {
 			return err
 		}
@@ -336,7 +345,7 @@ func setOwedSecrets(r ui.Reporter, cfg *config.Config, secrets *config.Secrets, 
 		done = append(done, o.Name)
 	}
 	for _, key := range skipped {
-		r.Note("secrets: "+key+" was skipped and is still owed", "paisans secrets set "+key+" < value")
+		r.Note("secrets: "+key+" was skipped and is still owed", progname.Cmd()+" secrets set "+key+" < value")
 	}
 	r.Result("Set %d of %d owed secret(s).", len(done), len(owed))
 	if len(recipients) == 0 {
@@ -426,7 +435,7 @@ func secretKeyAllowed(cfg *config.Config, secrets *config.Secrets, key string) e
 			return nil
 		}
 	}
-	return errors.New("secrets set: " + key + " is neither set nor owed from elsewhere. A generated secret is created by `paisans init`, which fills in what is missing; this command sets a pasted or captured one, or replaces one that exists")
+	return errors.New("secrets set: " + key + " is neither set nor owed from elsewhere. A generated secret is created by `" + progname.Cmd() + " init`, which fills in what is missing; this command sets a pasted or captured one, or replaces one that exists")
 }
 
 // requireACMEToken refuses to render or apply a site running the toolkit's
@@ -443,7 +452,7 @@ func requireACMEToken(cfg *config.Config, secrets *config.Secrets, sites []strin
 	}
 	for _, site := range sites {
 		if cfg.Sites[site].RunsCaddy() {
-			return fmt.Errorf("%s runs the toolkit's Caddy (a gateway, or a monitor with managed_by: paisans), and secrets external.acme_dns_token is empty, so it could obtain no certificate. Get a token from %s scoped to this zone, then pipe it in: `paisans secrets set external.acme_dns_token < token-file`", site, cfg.ACME.Provider)
+			return fmt.Errorf("%s runs the toolkit's Caddy (a gateway, or a monitor with managed_by: paisans), and secrets external.acme_dns_token is empty, so it could obtain no certificate. Get a token from %s scoped to this zone, then pipe it in: `%s secrets set external.acme_dns_token < token-file`", site, cfg.ACME.Provider, progname.Cmd())
 		}
 	}
 	return nil

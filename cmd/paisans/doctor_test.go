@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -94,6 +95,7 @@ func readOnly(cfg *config.Config) (exact []string, prefixes []string) {
 		doctor.DockerCommand,
 		doctor.LingerCommand,
 		doctor.SudoCommand,
+		doctor.MemoryCommand,
 	}
 	prefixes = []string{
 		"docker inspect --format '{\"State\":{{json .State}},\"RestartCount\":{{.RestartCount}}}' ",
@@ -166,6 +168,7 @@ func admitHosts(t *testing.T, cfg *config.Config, hosts map[string]doctorHost) {
 			doctor.DockerCommand: "host unix:///run/user/1000/docker.sock\nengine 29.9.1\nsecurity [\"name=seccomp,profile=builtin\",\"name=rootless\",\"name=cgroupns\"]\nsource-mark 0\n",
 			doctor.LingerCommand: "linger yes\nmesh-order yes\n",
 			doctor.SudoCommand:   sudoHelperOnly(s.SSHUser(), site, helper),
+			doctor.MemoryCommand: "mem-total 4113297408\nswap-total 2147479552\nswap-active yes\nswap-partition no\nswap-fstab yes\nswap-zram no\nswapfile present\n",
 		} {
 			if _, given := h.answers[command]; !given {
 				h.answers[command] = answer
@@ -500,13 +503,15 @@ func TestDoctorDiagnosesTheStuckReplicaAndOnlyReads(t *testing.T) {
 		"fail: check pocket-id auth no active instance, so sign in is down",
 		"home-b   unreachable did not answer ssh (see reach)",
 		"There is no database primary (see patroni)",
-		"Not checked because of this: admission, user, docker, docker engine, docker source mark, linger, sudo rights, mesh, patroni, containers, settings talk, clocks, leftovers on home-b.",
+		"Not checked because of this: admission, user, docker, docker engine, docker source mark, linger, sudo rights, swap, memory, mesh, patroni, containers, settings talk, clocks, leftovers on home-b.",
 		"done: check admission home-a admitted as ubuntu by paisans " + version.Current().String() + ", covering its roles",
 		"done: check user home-a ubuntu is in no privileged group",
 		"done: check docker home-a its rootless Docker answers at unix:///run/user/1000/docker.sock",
 		"done: check docker engine home-a Docker Engine 29.9.1",
 		"done: check linger home-a its manager starts after the mesh at boot",
 		"done: check sudo rights home-a sudo lets ubuntu run the WireGuard helper and nothing else",
+		"done: check swap home-a on, 2.0 GiB",
+		"done: check memory home-a 3.8 GiB of RAM and 2.0 GiB of swap, at least its 3.0 GiB floor for what it runs",
 		"section: failed, deepest first:",
 		"doctor changes nothing",
 		"done: check self-check watch answers as this deployment on 443 and 80, asked for health.example.org through 203.0.113.20",
@@ -855,5 +860,28 @@ func TestDoctorBoundsCommandsPerSiteOnly(t *testing.T) {
 	}
 	if busiest < 2 || top <= 2 {
 		t.Errorf("the checks did not run at once: at most %d on one site, %d in all", busiest, top)
+	}
+}
+
+// How the port was silent reaches doctor's finding, and a 443 that answers
+// in plain HTTP is another server holding it.
+func TestDoctorSelfCheckCarriesHowThePortWasSilent(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := doctorSelfCheck
+	t.Cleanup(func() { doctorSelfCheck = saved })
+	doctorSelfCheck = func(_ context.Context, target selfcheck.Target) error {
+		return &selfcheck.Unanswered{Port: 443, Site: target.Site, URL: "https://" + target.Host, Address: target.Address, Err: syscall.ECONNREFUSED, Why: selfcheck.Refused}
+	}
+	if p := (doctorReads{cfg: cfg}).SelfCheck("watch"); p.Silent != 443 || p.Why != selfcheck.Refused {
+		t.Errorf("a refused 443: %+v", p)
+	}
+	doctorSelfCheck = func(_ context.Context, target selfcheck.Target) error {
+		return &selfcheck.Conflict{Port: 443, Site: target.Site, Detail: "plain HTTP rather than TLS"}
+	}
+	if p := (doctorReads{cfg: cfg}).SelfCheck("watch"); p.Conflict != 443 || p.Silent != 0 {
+		t.Errorf("plain HTTP on 443: %+v", p)
 	}
 }

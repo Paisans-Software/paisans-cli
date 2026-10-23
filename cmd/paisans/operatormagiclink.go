@@ -8,6 +8,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/appadmin"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/validate"
@@ -35,7 +36,7 @@ func runOperatorMagicLink(args []string) error {
 		return err
 	}
 	if len(pos) != 1 {
-		return &ui.Problem{Hint: "operator magic-link takes one operator", Explain: "paisans operator magic-link <operator>, by their key under operators."}
+		return &ui.Problem{Hint: "operator magic-link takes one operator", Explain: progname.Cmd() + " operator magic-link <operator>, by their key under operators."}
 	}
 	id := pos[0]
 	// The link goes to stdout and nothing else does, so a script can read it.

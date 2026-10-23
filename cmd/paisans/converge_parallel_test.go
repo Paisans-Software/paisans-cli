@@ -155,7 +155,7 @@ func TestAFailedHostLetsTheOthersFinishAndStopsBeforeInstall(t *testing.T) {
 			t.Errorf("hint %q does not name %s", hint, want)
 		}
 	}
-	for _, want := range []string{"mesh subnet 10.44.0.0/24 is in use", "Remove it if not in use.", "apt-get install failed", resumeAdvice} {
+	for _, want := range []string{"mesh subnet 10.44.0.0/24 is in use", "Remove it if not in use.", "apt-get install failed", resumeAdvice()} {
 		if !strings.Contains(explain, want) {
 			t.Errorf("explanation does not say %q:\n%s", want, explain)
 		}

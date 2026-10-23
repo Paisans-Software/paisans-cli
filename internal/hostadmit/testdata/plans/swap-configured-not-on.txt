@@ -39,4 +39,4 @@ present: forwarding: not needed, this site has no endpoint
 present: record: /etc/paisans/admitted.f2a9.json as admitted at 2026-10-15T12:00:00Z
 present: keys: every operator's key is in paisans-f2a9's authorized_keys
 warning: swap: configured but not on (a swap partition, a swap line in /etc/fstab)
-  Without swap, a host that runs short of memory has the kernel kill a process, which may be the database, instead of slowing down. Turn it on (swapon -a, or the zram service), or remove it and admit again to be offered a swapfile. Admit makes no swapfile beside swap the host already has.
+  Without swap, a host that runs short of memory has the kernel kill a process, which may be the database, instead of slowing down. Turn it on (swapon -a), or remove it and admit again to be offered a swapfile. Admit makes no swapfile beside swap the host already has.

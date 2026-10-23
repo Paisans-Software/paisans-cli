@@ -237,7 +237,11 @@ The sites only store; the workstation decides what to trust, because someone
 with root on a site can write anything there:
 
 * **Trust starts from something only the operator holds:** the newest version
-  signed by their own SSH key, or a root hash they pin with `--root`. A history
+  signed by their own SSH key, or a root hash they pin with `--root`. Their key
+  is the one `.paisans/signing-key` records or, on a workstation that records
+  none, the one they name with `--key`, which anchors only on versions it
+  signed itself, under one root, that the rules below already trust from that
+  root. A history
   found only on the sites is never trusted, however consistent, because whoever
   holds those sites could have written it and listed themselves as an operator. An
   operator who has never published gets an anchor of their own with `paisans operator
@@ -265,23 +269,40 @@ an old one visible instead:
   asks for `rollback` before giving it an older one.
 
 When the workstation is gone, `paisans deployment recover --from <user@host>
---root <sha> --execute` in an empty directory gathers from the hosts named and
-then every site the trusted heads name, and writes the three files. The root is
-the hash of a version the operator trusts, as `paisans deployment log` prints it;
-an empty workstation holds no signature of its own, so keep that hash
+--key <path.pub> --execute` in an empty directory gathers from the hosts named
+and then every site the trusted heads name, and writes the three files. Trust
+starts from the newest version your operator key, named with `--key`, signed
+under one root, among those the rules trust from that root. Every head must be
+signed by that key and list it, and every trusted version must declare the
+deployment's id: a key alone cannot tell this deployment's history from one it
+signed before a redeploy under the same id, so a newer version by another
+operator, or the key's versions under two roots, need `--root`. The key is
+recorded in `.paisans/signing-key` for the
+publishes that follow when the ssh-agent holds it and an operator of the head
+lists it. Without the key, `--root <sha>` pins the hash of a version the
+operator trusts, as `paisans deployment log` prints it; keep that hash
 somewhere other than the workstation, or commit `.paisans/config-root`, which
-the operators may share. When the sites hold two heads, `recover` writes each to
-`.paisans/incoming/<sha>/` and leaves the choice to an operator.
+the operators may share. A pinned root anchors alone. When the sites hold two
+trusted heads, or the named key's versions lead to different heads, `recover`
+writes each head to `.paisans/incoming/<sha>/` and leaves the choice to an
+operator.
 
 **Does not protect.** A fresh workstation that reaches only sites an attacker
 holds can be served an old, genuine version, and applying it reaches only those
-sites. Nothing checks that a removed operator's age key was taken out of the
-secrets file: that is the operator's step (see *A former recipient still has
-the secrets file*).
+sites. With `--key` that includes a genuine version the key signed in an
+incarnation of the deployment from before a redeploy under the same id, when
+every site that answers serves that incarnation, and the root it pins is that
+incarnation's: confirm the full root hash the recovery prints with another
+operator before applying. A later pull from sites that serve none of the
+pinned root's history refuses: either the pin is out of date, and you recover
+from the current root, or a site that answered holds a history it should not.
+Nothing checks that a
+removed operator's age key was taken out of the secrets file: that is the
+operator's step (see *A former recipient still has the secrets file*).
 
 **You do.** Keep the files in a repository with more than one copy anyway, keep
-each operator's age key backed up somewhere other than that repository, and keep a
-trusted root hash where a lost workstation does not take it.
+each operator's age key backed up somewhere other than that repository, keep
+your SSH key, or a trusted root hash, where a lost workstation does not take it.
 
 What no design can protect is losing every operator's age key. That is total loss:
 add a second recipient, another operator or an offline backup key, as soon as the

@@ -243,3 +243,12 @@ func FakeQuietLogin(quiet func(SSHTransport) bool) func() {
 
 // SecurityKey exposes the check for a FIDO identity.
 func SecurityKey(path string) bool { return securityKey(path) }
+
+// KnownHostsName is t's host as known_hosts names it, for tests.
+func KnownHostsName(t SSHTransport) string { return t.knownHostsName() }
+
+// ConnectCommand is t's connect command, for tests.
+func ConnectCommand(t SSHTransport) string { return t.connectCommand() }
+
+// AuthProblem is t's authProblem, for tests.
+func AuthProblem(t SSHTransport, err error, out string) error { return t.authProblem(err, out) }

@@ -39,7 +39,7 @@ deleting DNS records, making an administrator) or a read (`doctor`,
 | Flag | Default | Taken by | Meaning |
 |------|---------|----------|---------|
 | `-v`, `--verbose` | off | every command | the reasons, values, request bodies and command output behind each step; with it, a failure also shows the underlying error |
-| `--config <path>` | `paisans-stack.yaml` | every command except `site deployments`, `deployment list` and `deployment fetch` | the deployment declaration |
+| `--config <path>` | `paisans-stack.yaml` | every command except `site deployments`, `deployment list` and `deployment fetch` | the deployment declaration; for `deployment checkout`, where to write it |
 | `--secrets <path>` | `secrets.enc.yaml` beside the config | every command that reads secrets | the sops encrypted secrets file. A plaintext one is refused (see *`secrets.enc.yaml` exists only encrypted* in `README.md`) |
 | `--execute` | off | every command that changes something, as each entry says | without it, the command plans and prints and changes nothing |
 | `--yes` | off | every command that asks for a confirmation, as each entry says | answers each confirmation as typing it would; needs `PAISANS_ALLOW_YES=1` (see *`--yes` answers confirmations* below) |
@@ -112,6 +112,58 @@ refusal, and 2 when its command line cannot run. `storage add`
 also exits 75 when a stage is waiting on Garage. `doctor` and `web-server check`
 exit 1 on any `FAIL`.
 
+### Destinations: `user@host[:port]` or an ssh alias
+
+The flags that name a host by its login, `--ssh` of `deployment fetch`,
+`site deployments`, `site remove`, `site admit` and `site evict`, and
+`deployment recover --from`, take every form ssh takes: `user@host[:port]`,
+`user@[v6]:port`, or a `Host` alias of your own ssh config, alone or with a
+user, a port or both.
+
+```sh
+paisans deployment fetch --ssh home-a                        # alias
+paisans deployment recover --from home-a --from admin@home-b  # user@alias
+paisans site deployments --ssh admin@home-a:2222             # user@alias:port
+paisans site deployments --ssh admin@203.0.113.9             # user@host
+```
+
+* **Resolved by ssh.** A destination is read with `ssh -G`, so `Match`,
+  `Include` and wildcards decide it exactly as they decide a plain ssh. A user
+  or port given overrides the config's, as it does for ssh, and one not given
+  is the config's, for an address as for an alias. ssh is then given the
+  user and port explicitly, so the login is the one messages name.
+* **Resolved once.** The lookup is made when the command starts. A config
+  whose `HostName` depends on where the workstation is when ssh connects
+  (`Match exec`, `Match localnetwork`) can make the address a message names
+  differ from the one a later connection reaches; the connection follows the
+  config, since ssh is given the alias.
+* **Reached as the alias.** ssh is given the alias, with the user and port it
+  resolved to, so its `ProxyJump`, `IdentityFile` and every other option apply
+  to the connection, and host key checking is ssh's own, as before. Advice
+  about a changed host key names the entry known_hosts holds: the
+  `HostKeyAlias`, or the resolved host, as `[host]:port` off port 22.
+* **Shown both ways.** Messages name an alias with what it resolved to,
+  `home-a -> admin@203.0.113.9:22`, and `deployment fetch` saves that line as
+  where each copy came from, since the alias means something only on this
+  workstation. Nothing is written into `paisans-stack.yaml`: `ssh.user` is
+  recorded only from a site's own ssh section, never from `--ssh`.
+* **The user ssh would use.** A destination with no user takes the user
+  `ssh -G` reports: its config's `User`, or your local login where none
+  applies, as a plain ssh logs in. Messages name that user, so the login is
+  always shown.
+* **Never an option.** A destination starting with `-`, or holding a space or
+  a pattern character, is refused before ssh is run. A name that is not a
+  host name, such as one with an underscore, is a destination only as an
+  alias with a `HostName`.
+* **`site admit` and `site evict` with `--site`.** There `--ssh` may also be a
+  login alone, which reaches the site's declared host on its declared port,
+  `ssh.port` or 22, as every command reaches a site. A word alone is never
+  guessed: it is an alias when it carries a port (`home-a:2222`), or when
+  your ssh config maps it to the declared host and port; a word your config
+  maps to any other host is refused, naming both spellings (`user@word` for
+  the alias, `word@host` for a login), since a config that expands short
+  names maps every word somewhere; any other word is a login.
+
 ## Configuration and secrets
 
 ### `paisans validate`
@@ -140,7 +192,9 @@ paisans validate --offline   # the file alone; no site is reached
 * **Hosts:** reaches each site running an app that sends mail, over ssh, and
   through it the app's mail server. Changes none. A site that cannot be
   reached, or a secrets file that cannot be read, skips the mail check with a
-  warning, so it works away from the hosts.
+  warning, so it works away from the hosts. A mail server at an address inside
+  `mesh.subnet` is checked only once the mesh is up on the site and on the
+  site holding the address; before then the check is skipped with a warning.
 * **Secrets:** with `--offline` too, refuses a `secrets.enc.yaml` that is
   plaintext, or encrypted with no recipient in the `.sops.yaml` beside it,
   naming the fix. It reads the file without decrypting it, so it needs no age
@@ -329,6 +383,11 @@ security find-generic-password -s acme -w | paisans secrets set external.acme_dn
 * **Alone:** always. The whole apply names it, in a note, for each credential
   still owed.
 
+A pasted or captured value holding a control character or a Unicode line or
+paragraph separator is refused with nothing written, by key. Setting a key is
+also how a file already holding such a value under that key is repaired (see
+*Three kinds of secret* in `README.md`).
+
 Given a key at a terminal, it asks for that key's value with echo off, saying
 whether the key is already set. An empty answer writes nothing.
 
@@ -464,7 +523,10 @@ around it.
 The signed copies of `paisans-stack.yaml`, `secrets.enc.yaml` and `.sops.yaml` that
 every site keeps. Four subcommands of `deployment`, each gathering every site's versions first
 and trusting them only from the operator's own signature or a root pinned with
-`--root`.
+`--root`. The operator's signature is the key `.paisans/signing-key` records;
+on a workstation that records none, `pull`, `log` and `recover` anchor on the
+key the operator names with `--key`, only on a version the trust rules already
+trust (see *Trust* below). A pinned root anchors alone.
 
 ```sh
 paisans deployment publish                # what would be signed, with which key
@@ -472,8 +534,9 @@ paisans deployment publish --execute      # sign the local files, push to every 
 paisans deployment publish --merge --execute   # one version on every head of a fork
 paisans deployment pull                   # what would be written
 paisans deployment pull --execute         # move the files to the sites' newest
-paisans deployment log                    # every version, signer, build, holding sites
-paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # empty directory
+paisans deployment log                    # every version, signer, build, holding sites; a root's full hash
+paisans deployment recover --from admin@203.0.113.9 --key ~/.ssh/id_ed25519.pub --execute   # empty directory
+paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # or pin the root
 ```
 
 * **Alone:** always, except as `deployment apply` runs its part (below). Each is an
@@ -485,8 +548,9 @@ paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # e
   |------|----------|---------|
   | `--config <path>` | all | the deployment declaration, which must be named `paisans-stack.yaml` with `secrets.enc.yaml` and `.sops.yaml` beside it; `.paisans/` beside it holds this workstation's state |
   | `--merge` | `publish` | the version's parents are every head, after the operator has merged a fork or an incoming change by hand |
-  | `--root <sha>` | `pull`, `log`, `recover` | trust starts from this version; `pull` and `recover` record it, `log` judges from it for the run only |
-  | `--from <user@host[:port]>` | `recover` (required, repeatable) | a host of the deployment to recover from; every site the trusted heads name is reached after it |
+  | `--root <sha>` | `pull`, `log`, `recover` | trust starts from this root, its full hash as `log` prints it on a root's line or another operator's `.paisans/config-root` holds it; `pull` and `recover` record it, `log` judges from it for the run only. One that differs from a recorded pin is refused |
+  | `--key <path.pub>` | `pull`, `log`, `recover` | your own operator key's public key file, to start trust from when `.paisans/signing-key` records none and no root is pinned; the agent need not hold it, and it is recorded only when the agent does. `log` records nothing |
+  | `--from <user@host[:port] or ssh alias>` | `recover` (required, repeatable) | a host of the deployment to recover from; every site the trusted heads name is reached after it |
   | `--id <id>` | `recover` | the deployment, when the logins' admission records name more than one; it must be a deployment id |
   | `--execute` | `publish`, `pull`, `recover` | do it; `log` takes none |
   | `--yes` | `publish`, `pull`, `recover` | type `partial` and `rollback` when asked for; `log` asks nothing and takes none |
@@ -495,6 +559,32 @@ paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # e
 * **Hosts:** every site, over ssh as the site's ssh user, and each is
   reached, not only the ones named on the command line. `recover` has no
   `paisans-stack.yaml` to name them and so starts from `--from`.
+* **Trust:** the newest version signed by the key `.paisans/signing-key`
+  records is where trust starts. With no key recorded, it is the key `--key`
+  names, which anchors only on versions it signed itself, under one root,
+  that the trust rules trust from that root (signed by an operator its parent
+  lists and not barred by a removal). Every head must be signed by the named
+  key and list it under an operator, and every trusted version must declare
+  the deployment's id. A newer version by another operator, or the key's
+  versions under two roots, are refused and need `--root <sha>`: a key alone
+  cannot tell this deployment's history from one it signed before a redeploy
+  under the same id, where an operator since removed may still be listed. The
+  newest such version anchors, and the gather names its key. When every site
+  that answers serves an older incarnation, a `--key` recovery can land on a
+  genuine version the key signed there, so `recover --key` prints the full
+  hash of the root it pins: confirm it with another operator, against their
+  `.paisans/config-root` or a root's line of their `log`, before applying. A
+  pinned root anchors alone; `--key` is then ignored, and the run notes it.
+  With a root pinned, a gather whose sites serve none of its history is
+  refused, naming no root they served: either the pin is out of date, and the
+  way out is to get the current root from another operator and recover from
+  it into an empty directory with `deployment recover --root <sha>`, or a site
+  that answered holds a history it should not, such as a host never evicted.
+  With no
+  anchor, `pull`, `log` and `recover` say to name your own operator key with
+  `--key` (loaded with `ssh-add`, so it is recorded) or pin `--root <sha>`,
+  and `publish`, which judges only from the recorded key, says the same of
+  `deployment pull`; all but `recover` add `operator register`.
 * **Without `--execute`:** no site is changed and no site is asked to sync with
   its peers; it reads what each site holds now, which can be staler. Only the
   cache in `.paisans/` beside the configuration is written.
@@ -525,6 +615,10 @@ paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # e
   naming the paths, until `secrets rotate` finishes it. `recover` refuses to
   write over files, and with a fork writes each head to
   `.paisans/incoming/<sha>/` and refuses to choose. `pull` and `recover`
+  record, in `.paisans/signing-key`, the key that signed the version trust
+  started from when `--key` named it, the ssh-agent holds it and an operator
+  of the head lists it, so later publishes sign with it; a colleague's public
+  key named with `--key` anchors and is not recorded. `pull` and `recover`
   refuse a version whose `secrets.enc.yaml` is plaintext before they write
   any of its files or sign anything.
 * **Words typed at a terminal:** `partial` when fewer than a majority of sites
@@ -574,6 +668,47 @@ paisans deployment list
 
 See *This workstation keeps every deployment it applies* in `README.md`.
 
+### `paisans deployment checkout`
+
+Copies a deployment saved on this workstation into an empty directory, so its
+files can be edited and published from there.
+
+```sh
+paisans deployment checkout f2a9 --config ~/work/example/paisans-stack.yaml            # what would be written
+paisans deployment checkout example.org --config ~/work/example/paisans-stack.yaml --execute
+```
+
+* **Alone:** always, when a saved deployment is to be edited somewhere of the
+  operator's choosing.
+* **Flags:** the deployment, by its id, a unique start of the id, or its
+  domain, as `deployment list` prints them; `--config <path>`, where to write
+  `paisans-stack.yaml` (in the current directory when left out); `--execute`.
+* **What it writes:** `paisans-stack.yaml`, `secrets.enc.yaml` and
+  `.sops.yaml`, and in `.paisans/` the store (`store.git`, every version with
+  its signature), `signing-key`, `config-root`, `config-head` and
+  `config-seen` where the saved copy has them, and `.paisans/.gitignore`. Not
+  `saved.json` or `.paisans/incoming/`. Each file keeps the saved copy's mode,
+  so `secrets.enc.yaml` stays `0600`. `deployment log`, `pull` and `publish`
+  then trust in the new directory as they do in the saved copy, with no root
+  to pin again.
+* **Trust:** the saved copy is judged from its own anchor before anything is
+  written, as `deployment log` judges, and refused when its head is not a
+  trusted version at the revision it records or its files are not that
+  version's. The new directory is judged again once written and must judge the
+  same, seen record included. On any failure, that one included, what was
+  written is removed, with the directories the run made.
+* **Refuses:** a directory holding any of the three files, any of that
+  `.paisans/` state or a `.paisans/incoming/`, with the same rule as
+  `deployment recover`, so it never overwrites a file; a name that matches no
+  saved deployment, or more than one; and an `unverified` or `fork` saved
+  copy, or one whose store holds a fork, which has no one trusted version to
+  check out and is pinned with `deployment recover --root <sha>` instead.
+* **Without `--execute`:** prints every path it would write, in full, and the
+  version and revision. Writes nothing.
+* **After:** the saved copy may be behind the sites; `deployment pull` in the
+  new directory brings any newer version.
+* **Hosts:** none.
+
 ### `paisans deployment fetch`
 
 Saves, for every deployment in the registry of the host `--ssh` names, the
@@ -585,7 +720,8 @@ paisans deployment fetch --ssh admin@203.0.113.9
 
 * **Alone:** always, and without `paisans-stack.yaml`: on a new workstation, or
   to bring the saved copies up to date.
-* **Flags:** `--ssh <user@host[:port]>` (required).
+* **Flags:** `--ssh <user@host[:port] or ssh alias>` (required); see
+  *Destinations*.
 * **Hosts:** the one host named, as its owner, through sudo, since the registry
   and the configuration stores are root's. It asks no site to sync and changes
   nothing on the host.
@@ -822,7 +958,8 @@ paisans site deployments --ssh admin@203.0.113.9   # read only
 
 * **Alone:** always, and without `paisans-stack.yaml`: to see what a shared host
   holds, or to find the id `site remove --id` takes.
-* **Flags:** `--ssh <user@host[:port]>` (required), `--sudo`.
+* **Flags:** `--ssh <user@host[:port] or ssh alias>` (required), `--sudo`;
+  see *Destinations*.
 * **Hosts:** reads the one host named, as its owner: through sudo unless
   `--sudo=false`, which lists the admission records alone, since they are
   readable without sudo and the registry and the deployments' directories are
@@ -884,8 +1021,8 @@ paisans site admit --site home-a --ssh owner@home-a.example.org --execute   # fr
   * from a request: `--request <file>`, on the host, as root;
   * from the configuration: `--site <name>` from a workstation, with
     `--config`, and `--ssh` as your login alone, for the site's declared ssh
-    host and port, or as `user@host[:port]`; left out, it is asked for at a
-    terminal;
+    host and port, or as `user@host[:port]` or an ssh alias (see
+    *Destinations*); left out, it is asked for at a terminal;
   * either way: the grants `--watchdog` and `--public-ports`;
     `--data-dir <path>`, `--bridge-netfilter`, `--mesh-lan`, `--enable-ufw`,
     `--enable-ufw-block-listed` (with `--enable-ufw` alone), `--swapfile`;
@@ -895,16 +1032,21 @@ paisans site admit --site home-a --ssh owner@home-a.example.org --execute   # fr
     before the host is reached.
 * **Hosts:** the one it runs on, or the one `--ssh` names, through sudo. The
   host needs ufw installed; admit never installs it.
-* **Swap:** a host with no swap in any form, on or not, is warned about.
-  `--swapfile`, or with `--execute` a yes at a terminal, where admit asks,
+* **Swap:** a host with no swap in any form, on or not, or with zram
+  alone, is warned about. `--swapfile`, or with `--execute` a yes at a terminal, where admit asks,
   or `--yes`, makes a swapfile at `/swapfile` of twice the host's RAM, to
   the nearest GiB, up to 16 GiB, before Docker's packages: it adds it to
   `/etc/fstab`, then turns it on. Swap the host has but has not turned on
-  (a swap partition, a swap line in `/etc/fstab`, a zram-generator
-  configuration or a `/swapfile`) is warned about and left alone, never
-  sized. Admit makes a swapfile only where `/` is ext4 or xfs and keeps
+  (a swap partition, a swap line in `/etc/fstab` or a `/swapfile`) is
+  warned about and left alone, never sized. zram is not such swap: it
+  keeps what it holds in RAM, so admit offers a swapfile beside it. Admit makes a swapfile only where `/` is ext4 or xfs and keeps
   5 GB free beside it. Where it makes none, it warns, and `--swapfile`
   refuses.
+* **Memory:** a host whose RAM is under the floor of the request's roles
+  is warned about, never refused; swap that is on, zram excepted, and the
+  swapfile `--swapfile` makes, count for up to a quarter of the floor. *A
+  host's memory is measured against its roles* in `README.md` gives the
+  floors.
 * **ufw not active:** `--enable-ufw`, or a yes at a terminal, where admit
   asks, adds these steps after the deployment's own rules, in this order:
   an allow for every TCP port sshd listens on (read from its sockets with
@@ -1056,7 +1198,8 @@ paisans site evict --site home-a --ssh owner@home-a.example.org --execute
 * **Flags:** `--request <file>`, or `--deployment <id> --user <name>` (both on
   the host, as root), or `--site <name>` with `--config`, and `--ssh` as
   your login alone, for the site's declared ssh host and port, or as
-  `user@host[:port]`; left out, it is asked for at a terminal;
+  `user@host[:port]` or an ssh alias (see *Destinations*); left out, it is
+  asked for at a terminal;
   `--data-dir <path>`, the one admit was given, needed only when the host
   holds no admission record; `--execute`; `--yes`, which types the user's name
   and, with `--site`, needs `--ssh`.
@@ -1195,7 +1338,11 @@ images it superseded* in `README.md`).
 * **Mail:** before the first step, every app that sends mail logs in to its
   mail server from each site it runs on, under `mail`, and nothing is sent;
   a dry run whose `init` still has work tries them once `init` has run. A failure refuses the run with every host as it was,
-  naming the app, where its settings are declared and the server's reply. The
+  naming the app, where its settings are declared and the server's reply, or
+  that the site could not open a connection to the server. A mail server at an address
+  inside `mesh.subnet` is tried only once the mesh is up on the site and on
+  the site holding the address; before then, as on a deployment's first
+  apply, it is warned about and the run goes on. The
   `deployment apply` steps it runs do not try again. See *Mail settings are tried before
   they are used* in `README.md`.
 * **`--execute`:** runs the steps, stopping at the first failure; run again,
@@ -1248,13 +1395,16 @@ starts, restarts or recreates what changed.
   asking for `/.well-known/paisans/<token>` through the community's public
   address, on 443 and on 80 (expecting the redirect), and fails the step
   with "443 on <site> answers, but not as this deployment" when anything
-  else answers there. With no `public_address` it warns "not checked"; a gateway
+  else answers there, plain HTTP or another protocol than TLS on 443 included. With no `public_address` it warns "not checked"; a gateway
   that does not answer fails with an account of hairpin NAT. `--require-all` is as for the whole apply.
 * **Mail:** before the host check, dry run or not, every app the apply
   starts on the site (`--only` narrows it) logs in to its mail server from
   the site, through `--ssh` when given, under `mail`; nothing is sent. A
   failure refuses the apply before anything changes, naming the app, where
-  its settings are declared and the server's reply.
+  its settings are declared and the server's reply, or that the site could
+  not open a connection to the server. A mail server at an address inside `mesh.subnet`
+  is tried only once the mesh is up on the site and on the site holding the
+  address; before then it is warned about and the apply goes on.
 * **Review:** the images every rendered `compose.yaml` of the site runs, and
   against what the host last recorded, under
   `review what paisans-stack.yaml grants`; `--only` narrows the images to its
@@ -1322,7 +1472,16 @@ stack. A witness joining in the same change, whether an existing site gaining th
 role or a new host holding it, joins etcd first, as a learner, in the same
 stage, and preflight checks a new witness host as it checks the new site.
 Refuses a witness given on its own: it joins through the `site add` of the
-data site joining with it.
+data site joining with it. A joiner whose member has not started, such as a
+site whose member an earlier removal took out, has its old etcd data,
+`/srv/paisans/<token>/infra/etcd`, deleted before its etcd starts, and the
+plan names it: etcd refuses to rejoin with a removed member's data. Its etcd
+container is removed first, and the data is read on disk and deleted only
+when it is nothing or a member whose write-ahead logs name this cluster and
+a member this cluster recorded removing for the site; anything else refuses,
+and nothing is deleted. A database with no write-ahead log, which a learner
+that never started can leave, is refused with the command that deletes it by
+hand once it is certain to be nothing to lose.
 
 ```
 paisans site add home-b             # every stage, its steps and its gate
@@ -1369,7 +1528,9 @@ See *Preflight* in `README.md`.
 ### `paisans site remove`
 
 Takes a site out of the running deployment in gated stages: its data out, out
-of the cluster, its host cleaned, as the deployment's user, of what is provably
+of the cluster (each leaving etcd member's data directory emptied once the
+member is removed, except on a host `--host-gone` does not reach), its host
+cleaned, as the deployment's user, of what is provably
 this deployment's and that user's to remove (on a
 monitor behind the operator's own web server, the reference files apply wrote
 under `/srv/paisans/<token>/web-server/` deleted, with the block the owner
@@ -1418,7 +1579,7 @@ paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete
   | `--host-gone` | off | the host is dead, or still runs and nobody else can reach it: cut it out of the mesh first and take it out of the cluster without reaching it; refuses `--force`, `--ssh`, `--id` and `--delete-data` |
   | `--delete-data` | off | also delete this deployment's data on the host; asks for the site's name at a terminal |
   | `--force` | off | clean this deployment off one host and nothing else; no cluster stage, and neither file edited |
-  | `--ssh <user@host[:port]>` | the site's `ssh` section | with `--force`: the host to clean |
+  | `--ssh <user@host[:port] or ssh alias>` | the site's `ssh` section | with `--force`: the host to clean |
   | `--id <id or token>` | none | with `--force` and `--ssh`, and no `paisans-stack.yaml`: the deployment to clean, found by the login's own admission record, as `site deployments` lists them |
 
   And the site as an argument, `--config`, `--secrets`, `--execute`, `--yes`.
@@ -1437,8 +1598,10 @@ paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete
   3 deletes the record of what the deployment granted on the host,
   `/srv/paisans/<token>/.paisans/granted.json`, last. It deletes the host's
   configuration store too, `/srv/paisans/<token>/.paisans/config/` and the
-  user's units that serve it; the other sites still hold every version. What
-  is root's stays: the mesh interface and its helper, the ufw rules, the
+  user's units that serve it; the other sites still hold every version. It
+  takes the mesh interface down through the WireGuard helper's `down`, which
+  deletes its conf too, so the site can be added back: `site prepare` first,
+  then `site add`. What is root's stays: the helper, the ufw rules, the
   user, its home, `/srv/paisans`, the admission record and the
   registry entry. The plan ends with the line the host's owner runs for them,
   `sudo paisans site evict --deployment <id> --user <user> --execute`, and
@@ -1506,7 +1669,8 @@ See *`failover test`: a switchover on purpose* in `README.md`.
 
 Reports what is stuck and how to recover: sites pending admission, down or
 unreachable, each site's admission record and rootless setup (the user's
-groups, its own Docker and Engine, linger, what sudo allows), etcd quorum and
+groups, its own Docker and Engine, linger, what sudo allows), each host's
+swap and its memory against its roles' floor, etcd quorum and
 version, the Patroni leader and why a replica will not promote, containers
 that are down or unhealthy, the settings a gated app must enforce, Pocket
 ID's active instance, clocks, what is left over, each Caddy site's answer from
@@ -1631,20 +1795,26 @@ See *Replacing an app's key: `storage rotate-key`* in `README.md`.
 ### `paisans dns init`
 
 Creates the public DNS records the configuration implies, at the provider
-`acme.provider` names. Creates only what is missing, never updates or deletes,
-and refuses if a record conflicts. An app whose `storage` is `local` has no
+`acme.provider` names. Creates what is missing, updates the address of an A or
+AAAA record it made for this deployment (one carrying exactly this
+deployment's comment), never deletes, and refuses if any other record
+conflicts. A record pointing at another declared site waits for `gateway
+move`; when moving the gateway role, keep the old site declared with its
+`public_address` until `paisans gateway move` finishes, or `dns init` updates
+the records to the new gateway at once. An app whose `storage` is `local` has no
 media hostname, so it gets no media record.
 
 ```sh
-paisans dns init                # shows what it would create
-paisans dns init --execute      # creates it
+paisans dns init                # shows what it would create or update
+paisans dns init --execute      # creates and updates it
 ```
 
 * **Alone:** the whole apply runs it before any site is applied. Typed alone,
   it is for a change that only adds names.
 * **Flags:** `--config`, `--secrets`, `--execute`.
 * **Hosts:** none; the DNS provider's API only.
-* **`--execute`:** creates the records listed.
+* **`--execute`:** updates and creates the records listed, then reads each
+  back.
 
 See *`dns init` creates the records a deployment needs* in `README.md`.
 

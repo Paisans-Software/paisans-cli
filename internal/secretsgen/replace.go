@@ -6,6 +6,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // Replacement is a new value for the secret at a dotted path, in the shape
@@ -46,7 +47,7 @@ func ReplacementIn(cfg *config.Config, path string, s *config.Secrets) (string, 
 	}
 	switch {
 	case last == "wireguard_private_key" || last == "wireguard_next_private_key":
-		return "", fmt.Errorf("%s: a WireGuard key is moved by `paisans mesh rekey`, which keeps every tunnel up", path)
+		return "", fmt.Errorf("%s: a WireGuard key is moved by `%s mesh rekey`, which keeps every tunnel up", path, progname.Cmd())
 	}
 
 	var gen func() (string, error)

@@ -169,7 +169,12 @@ func CloseConnections() {
 	for _, args := range masters {
 		dest := args[len(args)-1]
 		opts := args[:len(args)-1]
-		exit := append(append([]string(nil), opts...), "-O", "exit", dest)
+		// A destination given after -- keeps it after -O exit too.
+		end := []string{dest}
+		if n := len(opts); n > 0 && opts[n-1] == "--" {
+			opts, end = opts[:n-1], []string{"--", dest}
+		}
+		exit := append(append(append([]string(nil), opts...), "-O", "exit"), end...)
 		runMuxExit(exit)
 	}
 	os.RemoveAll(dir)

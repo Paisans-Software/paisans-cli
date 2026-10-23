@@ -9,6 +9,8 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/mesh"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/smtpcheck"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -16,12 +18,16 @@ import (
 // smtpEnv is how the mail checks reach a mail server: from a site, through
 // the site's own ssh (apply.SSHTransport.Dial), or through ssh[site] when
 // the command was given --ssh for it. The SMTP conversation runs here; the
-// site only carries the connection. Tests replace it, since none may reach a
-// real site or mail server.
+// site only carries the connection, and a forward the host could not open
+// is a check whose connection was not made (apply.ErrForwardNotOpened).
+// Tests replace it, since none may reach a real site or mail server.
 var smtpEnv = func(cfg *config.Config, ssh map[string]string) smtpcheck.Env {
-	return smtpcheck.Env{Dial: func(site, address string) (net.Conn, error) {
-		return siteTransport(site, cfg.Sites[site], ssh[site]).Dial(address)
-	}}
+	return smtpcheck.Env{
+		Dial: func(site, address string) (net.Conn, error) {
+			return siteTransport(site, cfg.Sites[site], ssh[site]).Dial(address)
+		},
+		NotOpened: func(err error) bool { return errors.Is(err, apply.ErrForwardNotOpened) },
+	}
 }
 
 // localSMTPEnv is how a credential is tried before it is written or handed
@@ -33,6 +39,63 @@ var localSMTPEnv = func() smtpcheck.Env {
 	return smtpcheck.Env{Dial: func(_, address string) (net.Conn, error) {
 		return (&net.Dialer{Timeout: smtpcheck.DefaultTimeout}).Dial("tcp", address)
 	}}
+}
+
+// meshLinkUp reports whether the deployment's mesh interface exists and is
+// up on site, read as the deployment's user through the site's ssh, or
+// through destination when the command was given --ssh for it. Tests
+// replace it, since none may reach a real site.
+var meshLinkUp = func(cfg *config.Config, site, destination string) (bool, error) {
+	out, err := siteTransport(site, cfg.Sites[site], destination).Run(mesh.LinkCommand(cfg.Deployment().Interface()))
+	if err != nil {
+		return false, err
+	}
+	exists, up, err := mesh.LinkUp(out)
+	return exists && up, err
+}
+
+// beforeMesh marks each check whose mail server is an address inside
+// mesh.subnet as not made while the mesh is not up on the check's site, or
+// on the site that holds the address, Eg: a relay on another site's mesh
+// address before the first apply has brought the mesh up. Until it is,
+// the address is on no interface and the site has no route to it, so a
+// dial from there learns nothing about the server.
+// apply brings the mesh up, and the apply after it tries the check. Each
+// site's mesh is read once; a site whose mesh cannot be read counts as up,
+// so its checks are made and their dial says why. A server named by host
+// name is dialled as it is, since the name is resolved on the host.
+func beforeMesh(cfg *config.Config, checks []smtpcheck.Check, ssh map[string]string) []smtpcheck.Check {
+	read := map[string]bool{}
+	up := func(site string) bool {
+		linked, ok := read[site]
+		if !ok {
+			var err error
+			if linked, err = meshLinkUp(cfg, site, ssh[site]); err != nil {
+				linked = true
+			}
+			read[site] = linked
+		}
+		return linked
+	}
+	for i, c := range checks {
+		host := strings.TrimSuffix(c.SMTP.Host, ".")
+		if c.Skip != "" || c.Site == "" || !cfg.Mesh.Contains(host) {
+			continue
+		}
+		sites := []string{c.Site}
+		for _, name := range cfg.SiteNames() {
+			if name != c.Site && cfg.Sites[name].Address == host {
+				sites = append(sites, name)
+			}
+		}
+		for _, site := range sites {
+			if !up(site) {
+				checks[i].Skip = fmt.Sprintf("%s is on the mesh, %s, and %s is not up on %s yet, so it cannot be tried from %s before the mesh exists. apply brings the mesh up, and the apply after it tries it", c.SMTP.Host, cfg.Mesh.Subnet, cfg.Deployment().Interface(), site, c.Site)
+				break
+			}
+		}
+	}
+	return checks
 }
 
 // mailChecks is every login apply or validate tries on sites (nil for every
@@ -66,7 +129,7 @@ func mailFailure(cfg *config.Config, failed *smtpcheck.Error) (hint, explain str
 	explain = fmt.Sprintf("%s, declared by %s, sends through %s with %s and %s. From %s the server answered: %s.",
 		c.Whose(), c.Setting(cfg), c.Address(), c.Security(), login, c.Site, failed.Reply())
 	if c.PasswordPath != "" {
-		explain += fmt.Sprintf(" Fix the setting, or set the password the mail provider issued with `paisans secrets set %s`.", c.PasswordPath)
+		explain += fmt.Sprintf(" Fix the setting, or set the password the mail provider issued with `%s secrets set %s`.", progname.Cmd(), c.PasswordPath)
 	} else {
 		explain += " Fix the setting."
 	}
@@ -77,9 +140,10 @@ func mailFailure(cfg *config.Config, failed *smtpcheck.Error) (hint, explain str
 // every app on sites (only, when scoped) logs in to its mail server from its
 // site, and nothing is sent. The first failure refuses the apply, naming the
 // app, its setting and the server's reply. A check that cannot be made, Eg:
-// a relay only the app's own network resolves, is a warning.
+// a relay only the app's own network resolves, or one on the deployment's
+// own mesh before the mesh is up on the site (beforeMesh), is a warning.
 func checkMailForApply(r ui.Reporter, cfg *config.Config, secrets *config.Secrets, sites, only []string, ssh map[string]string) error {
-	checks := mailChecks(cfg, secrets, sites, only)
+	checks := beforeMesh(cfg, mailChecks(cfg, secrets, sites, only), ssh)
 	if len(checks) == 0 {
 		return nil
 	}
@@ -131,6 +195,9 @@ func tryMailFromSites(r ui.Reporter, cfg *config.Config, secrets *config.Secrets
 				hint, explain := mailFailure(cfg, failed)
 				return &ui.Problem{Hint: hint, Explain: explain + after, Cause: err}
 			}
+			if failed != nil && failed.Unanswered() {
+				return &ui.Problem{Hint: c.From() + " could not open a connection to " + c.Address(), Explain: fmt.Sprintf("%s, declared by %s, sends through %s, and %s could not open a connection to it (%s): either nothing answers at that address from there, or the host's sshd does not forward TCP (AllowTcpForwarding in sshd_config(5)), which the check rides on. Every app's mail settings are tried from its site before anything there changes.%s", c.Whose(), c.Setting(cfg), c.Address(), c.From(), strings.TrimSuffix(failed.Reply(), "."), unreached), Cause: err}
+			}
 			return &ui.Problem{Hint: c.From() + " could not be reached to try " + c.Whose(), Explain: "every app's mail settings are tried from its site before anything there changes." + unreached, Cause: err}
 		}
 		if c.PasswordPath != "" {
@@ -162,7 +229,7 @@ func checkMailForValidate(r ui.Reporter, cfg *config.Config, secretsPath string)
 	env := smtpEnv(cfg, nil)
 	warned := 0
 	unreachable := map[string]bool{}
-	for _, c := range smtpcheck.Logins(cfg, secrets, nil) {
+	for _, c := range beforeMesh(cfg, smtpcheck.Logins(cfg, secrets, nil), nil) {
 		step := r.Step(c.Title())
 		switch {
 		case c.Skip != "":
@@ -191,7 +258,11 @@ func checkMailForValidate(r ui.Reporter, cfg *config.Config, secretsPath string)
 		case errors.As(err, &failed) && failed.Dialled():
 			step.End(ui.Warned, "does not log in")
 			_, explain := mailFailure(cfg, failed)
-			r.Explain(explain + " `paisans deployment apply` refuses until it does.")
+			r.Explain(explain + " `" + progname.Cmd() + " deployment apply` refuses until it does.")
+			warned++
+		case errors.As(err, &failed) && failed.Unanswered():
+			step.End(ui.Warned, "not opened")
+			r.Explain(fmt.Sprintf("%s could not open a connection to %s (%s): either nothing answers at that address from there, or the host's sshd does not forward TCP (AllowTcpForwarding in sshd_config(5)). %s was not checked, and `%s deployment apply` refuses until it can be.", c.Site, c.Address(), strings.TrimSuffix(failed.Reply(), "."), c.Whose(), progname.Cmd()))
 			warned++
 		default:
 			unreachable[c.Site] = true
@@ -229,7 +300,7 @@ func trySMTPPassword(r ui.Reporter, cfg *config.Config, secrets *config.Secrets,
 		step := r.Step(c.Title())
 		if c.Skip != "" {
 			step.End(ui.Warned, "not tried")
-			r.Explain(key + " is not tried for " + c.Whose() + ": " + c.Skip + ". `paisans deployment apply` tries it from the site.")
+			r.Explain(key + " is not tried for " + c.Whose() + ": " + c.Skip + ". `" + progname.Cmd() + " deployment apply` tries it from the site.")
 			continue
 		}
 		if to == nil {
@@ -239,7 +310,7 @@ func trySMTPPassword(r ui.Reporter, cfg *config.Config, secrets *config.Secrets,
 				return &ui.Problem{Hint: "no one to send the test message to", Explain: fmt.Sprintf("%s is tried by sending a test message, and %s. %s.", key, err, done)}
 			}
 		}
-		err := smtpcheck.Send(env, c, value, smtpcheck.TestMail(cfg, c, key, "paisans secrets set", to))
+		err := smtpcheck.Send(env, c, value, smtpcheck.TestMail(cfg, c, key, progname.Cmd()+" secrets set", to))
 		if err == nil {
 			step.Done("logs in; test message sent to " + strings.Join(to, ", "))
 			continue
@@ -258,7 +329,7 @@ func trySMTPPassword(r ui.Reporter, cfg *config.Config, secrets *config.Secrets,
 		if errors.As(err, &failed) {
 			why = failed.Reply()
 		}
-		r.Explain(fmt.Sprintf("%s could not be reached from %s (%s), so %s is written untried. `paisans deployment apply` tries it from each site running %s before it changes anything.", c.Address(), c.From(), strings.TrimSuffix(ui.Redact(why), "."), key, appsOf(c)))
+		r.Explain(fmt.Sprintf("%s could not be reached from %s (%s), so %s is written untried. `%s deployment apply` tries it from each site running %s before it changes anything.", c.Address(), c.From(), strings.TrimSuffix(ui.Redact(why), "."), key, progname.Cmd(), appsOf(c)))
 	}
 	return nil
 }

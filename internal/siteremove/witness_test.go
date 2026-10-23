@@ -107,7 +107,7 @@ func TestTwoDataSitesAndAWitnessShrinkToOneVoter(t *testing.T) {
 		t.Error("the edit lost a comment")
 	}
 	remains := strings.Join(p.Remains(), "\n")
-	for _, want := range []string{"home-a leads", "next restart", "etcd-initial is no longer rendered"} {
+	for _, want := range []string{"home-a leads", "next recreated", "etcd-initial is no longer rendered"} {
 		if !strings.Contains(remains, want) {
 			t.Errorf("the report does not say %q:\n%s", want, remains)
 		}
@@ -251,7 +251,7 @@ func TestReplicasTakePatroniEnvOneAtATime(t *testing.T) {
 	if strings.Join(w.recreated, ",") != "home-c,home-d" {
 		t.Errorf("recreated %v", w.recreated)
 	}
-	c, d := w.index("home-c: docker compose -f "+root+"/infra/compose.yaml up -d --no-deps --force-recreate patroni"), w.index("home-d: docker compose -f "+root+"/infra/compose.yaml up -d --no-deps --force-recreate patroni")
+	c, d := w.index("home-c: docker compose -f "+root+"/infra/compose.yaml up -d --no-deps --force-recreate --timeout 60 patroni"), w.index("home-d: docker compose -f "+root+"/infra/compose.yaml up -d --no-deps --force-recreate --timeout 60 patroni")
 	gated := false
 	for _, line := range w.log[c+1 : d] {
 		gated = gated || strings.HasPrefix(line, "home-c: ") && strings.Contains(line, "python3 -c") && strings.Contains(line, "http://10.44.0.5:8008/patroni")
@@ -267,7 +267,7 @@ func TestReplicasTakePatroniEnvOneAtATime(t *testing.T) {
 	if !strings.Contains(w.hosts["home-a"].etcdHosts, "10.44.0.2:") {
 		t.Error("the leader's Patroni was recreated")
 	}
-	if remains := strings.Join(p.Remains(), "\n"); !strings.Contains(remains, "home-a leads") || !strings.Contains(remains, "next restart") {
+	if remains := strings.Join(p.Remains(), "\n"); !strings.Contains(remains, "home-a leads") || !strings.Contains(remains, "next recreated") {
 		t.Errorf("the leader's patroni.env is not noted:\n%s", remains)
 	}
 

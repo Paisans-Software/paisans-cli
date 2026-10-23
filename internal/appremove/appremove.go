@@ -39,6 +39,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/garage"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/ownership"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
@@ -61,7 +62,7 @@ func Refusal(cfg *config.Config, app string) error {
 		return fmt.Errorf("app remove: %s is the infrastructure stack (Patroni, HAProxy, Garage and the gateway's Caddy), not an app, and is never removed by this command", app)
 	}
 	if _, ok := cfg.Apps[app]; ok {
-		return fmt.Errorf("app remove: %s is still in "+config.FileName+". Take it out of "+config.FileName+" and run `paisans deployment apply --site <site> --execute` on every site first: that apply stops routing to it and marks its files left over, which is what this command checks", app)
+		return fmt.Errorf("app remove: %s is still in "+config.FileName+". Take it out of "+config.FileName+" and run `%s deployment apply --site <site> --execute` on every site first: that apply stops routing to it and marks its files left over, which is what this command checks", app, progname.Cmd())
 	}
 	for _, site := range cfg.SiteNames() {
 		stacks, err := render.SiteStacks(cfg, site)
@@ -160,9 +161,12 @@ type ClientState struct {
 	// none, and Site where it was asked.
 	Provider string
 	Site     string
-	// Name is the name apply gives the app's client
-	// (config.Config.ClientName): the app's, or the community's for the gate.
-	Name string
+	// Name is the client's expected name (config.Config.ClientName): the
+	// name in the newest version of this workstation's configuration history
+	// that declares the app, else the name the current configuration gives
+	// it. NameFrom says which, for an operator reading why a client was kept.
+	Name     string
+	NameFrom string
 	// RecordedID is oidc_clients.<app>.client_id in the secrets file.
 	RecordedID string
 	// ByID is the client with RecordedID, ByName the client with Name.
@@ -373,7 +377,7 @@ func Build(cfg *config.Config, app string, in Input) (*Plan, error) {
 	}
 	sort.Slice(p.Sites, func(i, j int) bool { return p.Sites[i].Site < p.Sites[j].Site })
 	if len(unmarked) > 0 {
-		return nil, fmt.Errorf("app remove: %s still has rendered files that no whole apply has marked left over, so an apply may still route to it:\n  %s\nRun `paisans deployment apply --site <site> --execute` on each site named, then run this again. Nothing was changed", app, strings.Join(unmarked, "\n  "))
+		return nil, fmt.Errorf("app remove: %s still has rendered files that no whole apply has marked left over, so an apply may still route to it:\n  %s\nRun `%s deployment apply --site <site> --execute` on each site named, then run this again. Nothing was changed", app, strings.Join(unmarked, "\n  "), progname.Cmd())
 	}
 	p.Client = planClient(app, in.Client)
 	if in.DeleteData {
@@ -470,7 +474,7 @@ func planClient(app string, st ClientState) ClientPlan {
 	case st.ByID != nil && st.ByID.Name == st.Name:
 		cp.Delete = st.ByID
 	case st.ByID != nil:
-		cp.Kept = append(cp.Kept, byHand(st.ByID, fmt.Sprintf("its ID is the one recorded under oidc_clients.%s, and its name is not %s", app, st.Name)))
+		cp.Kept = append(cp.Kept, byHand(st.ByID, fmt.Sprintf("its ID is the one recorded under oidc_clients.%s, and its name is not %s%s", app, st.Name, nameFrom(st.NameFrom))))
 	}
 	if st.ByName != nil && (cp.Delete == nil || st.ByName.ID != cp.Delete.ID) && (st.ByID == nil || st.ByName.ID != st.ByID.ID) {
 		why := "no ID is recorded for it under oidc_clients." + app + ", so nothing proves this deployment made it"
@@ -480,6 +484,14 @@ func planClient(app string, st ClientState) ClientPlan {
 		cp.Kept = append(cp.Kept, byHand(st.ByName, why))
 	}
 	return cp
+}
+
+// nameFrom is from as a clause after the expected name, "" when from is.
+func nameFrom(from string) string {
+	if from == "" {
+		return ""
+	}
+	return ", " + from
 }
 
 // reservedRoles are the roles the rendered Patroni defines for itself, never

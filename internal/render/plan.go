@@ -142,6 +142,9 @@ type planner struct {
 	// etcdInitial is how each etcd member was first started, by site, as
 	// read from its host. See EtcdInitialPath.
 	etcdInitial map[string]EtcdInitial
+	// etcdFoundingToken is the --initial-cluster-token a member with no
+	// record founds with. See WithEtcdFoundingToken.
+	etcdFoundingToken string
 }
 
 // Build produces the plan for a configuration. It assumes validation has

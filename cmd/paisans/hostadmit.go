@@ -17,6 +17,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/hostadmit"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/validate"
 )
@@ -53,7 +54,7 @@ func runSiteAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 	)
 	fs.StringVar(&request, "request", "", "the request file the operator sent, on this host, as root")
 	fs.StringVar(&site, "site", "", "the site to admit, from the configuration, from a workstation")
-	fs.StringVar(&sshFlag, "ssh", "", "your own login on the host, with --site: user, for the site's declared host, or user@host[:port]; asked for at a terminal when left out")
+	fs.StringVar(&sshFlag, "ssh", "", "your own login on the host, with --site: user, for the site's declared host, or user@host[:port] or an alias of your ssh config; asked for at a terminal when left out")
 	fs.StringVar(&configPath, "config", config.FileName, "path to the deployment declaration, with --site")
 	fs.BoolVar(&flags.Watchdog, "watchdog", false, "grant the host's watchdog, which can reboot it, to a data site's Patroni")
 	fs.BoolVar(&flags.PublicPorts, "public-ports", false, "let every local user bind ports 80 to 1023, and open 80 and 443, for the toolkit's Caddy")
@@ -62,7 +63,7 @@ func runSiteAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs.BoolVar(&flags.MeshLAN, "mesh-lan", false, "let the mesh dial this host's own LAN")
 	fs.BoolVar(&flags.EnableUFW, "enable-ufw", false, "enable ufw when it is installed and not active: allow every port sshd listens on, arm a timer that turns ufw off again in 10 minutes, enable it, and stop the timer once a new SSH login gets through")
 	fs.BoolVar(&flags.EnableUFWBlockListed, "enable-ufw-block-listed", false, "with --enable-ufw: enable ufw although it blocks the ports admit lists, which answer from off the host now and no ufw rule allows, once you have checked each may be blocked")
-	fs.BoolVar(&flags.Swapfile, "swapfile", false, "make a swapfile at /swapfile, twice the host's RAM up to 16 GiB, when the host has no swap in any form; asked at a terminal with --execute")
+	fs.BoolVar(&flags.Swapfile, "swapfile", false, "make a swapfile at /swapfile, twice the host's RAM up to 16 GiB, when the host has no swap in any form but zram; asked at a terminal with --execute")
 	fs.BoolVar(&execute, "execute", false, "make the changes the plan shows")
 	fs.StringVar(&digestFlag, "digest", "", "with --request: the request's digest the operator gave you, compared as the one typed at a terminal is")
 	answers := yesFlag(fs)
@@ -84,7 +85,7 @@ func runSiteAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 	case request != "" && sshFlag != "":
 		return fmt.Errorf("site admit: --request runs on the host itself and takes no --ssh")
 	case request != "" && !runningAsRootOnLinux():
-		return fmt.Errorf("site admit: --request runs as root on the host it admits to: copy the request there and run sudo paisans site admit --request <file>")
+		return fmt.Errorf("site admit: --request runs as root on the host it admits to: copy the request there and run sudo %s site admit --request <file>", progname.Default)
 	case request == "" && digestFlag != "":
 		return fmt.Errorf("site admit: --digest goes with --request: with --site admit builds the request itself from the configuration")
 	case flags.EnableUFWBlockListed && !flags.EnableUFW:
@@ -118,7 +119,17 @@ type admitRun struct {
 	// anything but a yes. init sets it when it admits a site at the
 	// operator's word (see admitFromInit).
 	approve bool
+	// movePort, when set, lets a claim refused for the site's WireGuard
+	// listen port alone stop with a free port instead (see
+	// hostadmit.PortMoveError), for init to move the endpoint to. init sets
+	// it for a site whose port it may move (see admitSite).
+	movePort io.Reader
 }
+
+// portMoved is admit's refusal of a WireGuard listen port another
+// deployment holds, with a free port it found (see admitRun.movePort). It
+// is named here because only this file reaches the hostadmit package.
+type portMoved = hostadmit.PortMoveError
 
 // errAdmitDeclined is a plan the owner did not approve (admitRun.approve).
 var errAdmitDeclined = errors.New("site admit: the plan was not approved. Nothing was changed")
@@ -143,9 +154,9 @@ func admitStopped(err error) bool {
 // for each grant the site's roles need, then showing the plan and asking
 // before it runs. A plan the operator declines is errAdmitDeclined, and any
 // other stop before the plan runs is an admitStoppedError (see
-// admitStopped). A test replaces it.
-var admitFromInit = func(r ui.Reporter, configPath, site string, stdin io.Reader, stdout io.Writer) error {
-	return admit(r, admitRun{site: site, configPath: configPath, execute: true, approve: true}, answerer{}, stdin, stdout)
+// admitStopped). movePort is admitRun.movePort. A test replaces it.
+var admitFromInit = func(r ui.Reporter, configPath, site string, movePort io.Reader, stdin io.Reader, stdout io.Writer) error {
+	return admit(r, admitRun{site: site, configPath: configPath, execute: true, approve: true, movePort: movePort}, answerer{}, stdin, stdout)
 }
 
 // admit is site admit once its flags are checked: from a request on the
@@ -189,6 +200,7 @@ func admit(r ui.Reporter, run admitRun, ans answerer, stdin io.Reader, stdout io
 			return fmt.Errorf("site admit: %w", err)
 		}
 		declared = cfg.Sites[site]
+		in.MovePort = run.movePort
 	}
 	// The grants first, before any transport exists: the owner's decision
 	// needs nothing from the host. At a terminal, a grant the site's roles
@@ -362,7 +374,7 @@ func admit(r ui.Reporter, run admitRun, ans answerer, stdin io.Reader, stdout io
 		return err
 	}); err != nil {
 		where := ""
-		if h := declared.SSHHost(); h != dest.Host {
+		if h := declared.SSHHost(); h != dest.Host && h != dest.Alias {
 			where = fmt.Sprintf(" The login went to %s, the site's declared ssh host, and admit to %s: check that they are the same machine.", ui.Visible(h), ui.Visible(dest.Host))
 		}
 		return ufwFallbackNote(fmt.Errorf("site admit: %s is admitted and its Docker answers, but logging in as it failed: %w. Check that your key is one of sites.%s.ssh.keys.%s", user, err, site, where), plan, true)
@@ -380,11 +392,50 @@ func admit(r ui.Reporter, run admitRun, ans answerer, stdin io.Reader, stdout io
 
 // ownerDestination is where command (site admit or site evict) --site
 // logs in as the owner: --ssh as
-// user@host[:port], or a login alone for the site's declared ssh host and
+// user@host[:port] or an alias of the operator's ssh config (see
+// parseDestination), or a login alone for the site's declared ssh host and
 // port, or, with no --ssh, a login asked for at a terminal. Off a terminal
 // with no --ssh there is no one to ask, so it refuses.
+//
+// A word alone, with no @, is a login or an alias, and is never guessed: an
+// ssh config that expands short names (Host * with HostName %h.example.org)
+// maps every word to some host. With a port (alias:port), which no login
+// carries, it is an alias. Otherwise it is an alias only where ssh -G maps
+// it to the site's declared host and port, as ssh -G resolves those; a word
+// mapped to any other host is refused, naming both spellings; a word mapped
+// to none is a login. A typed answer at the terminal is always a login, as
+// the question asks for one.
+//
+// A login alone goes to the declared host on the declared port, written, as
+// every command reaches a site: ssh.port, or 22.
 func ownerDestination(command, sshFlag, site string, declared config.Site, stdin io.Reader, stdout io.Writer) (config.Destination, error) {
 	host, port := declared.SSHHost(), declared.SSH.PortOrDefault()
+	declaredAt := net.JoinHostPort(host, strconv.Itoa(port))
+	if sshFlag != "" && !strings.Contains(sshFlag, "@") {
+		if strings.Contains(sshFlag, ":") {
+			dest, err := parseDestination(sshFlag)
+			if err != nil {
+				return config.Destination{}, sshFlagProblem(sshFlag, err)
+			}
+			return dest, nil
+		}
+		if dest, err := parseDestination(sshFlag); err == nil && dest.Alias != "" {
+			target, err := parseDestination("root@" + declaredAt)
+			if err == nil && strings.EqualFold(dest.Host, target.Host) && dest.Port == target.Port {
+				return dest, nil
+			}
+			return config.Destination{}, &ui.Problem{
+				Hint:    fmt.Sprintf("--ssh %s is an alias or a login", sshFlag),
+				Explain: fmt.Sprintf("Your ssh config maps %s to %s, which is not %s, site %s's declared ssh host and port. Write --ssh user@%s for that alias, or --ssh %s@%s for a login on the declared host. Nothing was read or changed.", ui.Visible(sshFlag), ui.Visible(dest.Host+":"+strconv.Itoa(dest.Port)), ui.Visible(declaredAt), site, ui.Visible(sshFlag), ui.Visible(sshFlag), ui.Visible(declaredAt)),
+			}
+		}
+		if !config.ValidLogin(sshFlag) {
+			return config.Destination{}, &ui.Problem{
+				Hint:    fmt.Sprintf("--ssh %s is not a login", sshFlag),
+				Explain: fmt.Sprintf("A word alone is your login on site %s's declared host, %s, or an alias of your ssh config for that host. Write --ssh user@%s to reach %s as a host. Nothing was read or changed.", site, ui.Visible(declaredAt), ui.Visible(sshFlag), ui.Visible(sshFlag)),
+			}
+		}
+	}
 	verb := strings.TrimPrefix(command, "host ")
 	login := sshFlag
 	if login == "" {
@@ -401,9 +452,9 @@ func ownerDestination(command, sshFlag, site string, declared config.Site, stdin
 		}
 	}
 	if !strings.Contains(login, "@") {
-		login += "@" + net.JoinHostPort(host, strconv.Itoa(port))
+		login += "@" + declaredAt
 	}
-	dest, err := config.ParseDestination(login)
+	dest, err := parseDestination(login)
 	if err != nil {
 		return config.Destination{}, sshFlagProblem(login, err)
 	}
@@ -443,7 +494,7 @@ func askEnableUFW(a answerer, stdin io.Reader, stdout io.Writer, ports []int, bl
 // swapfile of size bytes on a host with no swap. Only y or yes says so, or
 // --yes, through a. A no admits the host without one.
 func askSwapfile(a answerer, stdin io.Reader, stdout io.Writer, size int64) (bool, error) {
-	explain := fmt.Sprintf("\nThis host has no swap. %s\n"+
+	explain := fmt.Sprintf("\nThis host has no swap, or only zram, which adds nothing to its memory. %s\n"+
 		"Admit can make a swapfile of %s at /swapfile, twice the host's RAM up to %s, and turn it on at boot through /etc/fstab.\n", hostadmit.SwapNeeded, hostadmit.GiB(size), hostadmit.GiB(hostadmit.SwapMax))
 	yes, err := a.yesNo(stdin, stdout, explain, "Make the swapfile (--swapfile)?", "make a swapfile (--swapfile)")
 	if err != nil {
@@ -485,7 +536,7 @@ func unshown(keys []string, shown []hostadmit.Blocked) []string {
 // --execute off a terminal. Once ufw is on, only a person opening a new
 // SSH session shows that SSH gets through.
 func ufwNeedsAPerson() error {
-	return fmt.Errorf("site admit: with --request, enabling ufw needs a person at a terminal: once ufw is on, admit waits for you to open a new SSH session to this host and say it logged in, before it stops the timer that turns ufw off again, and neither --yes nor a pipe answers that. Run paisans site admit --site <site> --ssh <your login> from a workstation instead, whose own login as the deployment's user proves SSH gets through; or run this at a terminal without --yes. Nothing was changed")
+	return fmt.Errorf("site admit: with --request, enabling ufw needs a person at a terminal: once ufw is on, admit waits for you to open a new SSH session to this host and say it logged in, before it stops the timer that turns ufw off again, and neither --yes nor a pipe answers that. Run %s site admit --site <site> --ssh <your login> from a workstation instead, whose own login as the deployment's user proves SSH gets through; or run this at a terminal without --yes. Nothing was changed", progname.Default)
 }
 
 // ufwOffAt is the latest the fallback armed by now turns ufw off.
@@ -626,7 +677,7 @@ func runSiteEvict(args []string, stdin io.Reader, stdout io.Writer) error {
 	id := fs.String("deployment", "", "the deployment's id, with --user, on this host, as root")
 	user := fs.String("user", "", "the deployment's user, with --deployment")
 	site := fs.String("site", "", "the site to evict, from the configuration, with --ssh")
-	sshFlag := fs.String("ssh", "", "your own login on the host, with --site: user, for the site's declared host, or user@host[:port]; asked for at a terminal when left out")
+	sshFlag := fs.String("ssh", "", "your own login on the host, with --site: user, for the site's declared host, or user@host[:port] or an alias of your ssh config; asked for at a terminal when left out")
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration, with --site")
 	dataDir := fs.String("data-dir", "", "the --data-dir admit was given, needed only when the host holds no admission record")
 	execute := fs.Bool("execute", false, "make the changes the plan shows")
@@ -659,7 +710,7 @@ func runSiteEvict(args []string, stdin io.Reader, stdout io.Writer) error {
 	case *site == "" && *sshFlag != "":
 		return fmt.Errorf("site evict: --ssh goes with --site")
 	case *site == "" && !runningAsRootOnLinux():
-		return fmt.Errorf("site evict: --request and --deployment run as root on the host itself: run sudo paisans site evict there")
+		return fmt.Errorf("site evict: --request and --deployment run as root on the host itself: run sudo %s site evict there", progname.Default)
 	}
 	r := reporter()
 	in := hostadmit.EvictInput{DataDir: *dataDir}

@@ -36,6 +36,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostarch"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/imagedigest"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
@@ -46,6 +47,7 @@ import (
 )
 
 func main() {
+	progname.Set(os.Args[0])
 	page, asked, run := resolveHelp(os.Args[1:])
 	switch {
 	case page != nil && asked:
@@ -57,7 +59,7 @@ func main() {
 	}
 	os.Args = append(os.Args[:1], run...)
 	if err := buildGate(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "paisans: "+err.Error())
+		fmt.Fprintln(os.Stderr, progname.Name()+": "+err.Error())
 		os.Exit(2)
 	}
 	warnTestMode(os.Stderr)
@@ -367,7 +369,7 @@ func runInit(args []string, stdin io.Reader, stdout io.Writer) error {
 		r.Detail("%s already has every generated secret (%d)", *secretsPath, len(filled.Kept))
 		reportOwed(r, filled)
 		if len(filled.Owed) > 0 {
-			r.Result(setOwedNext)
+			r.Result(setOwedNext())
 			return nil
 		}
 		r.Result("Every generated secret is already present. Nothing written.")
@@ -397,7 +399,7 @@ func runInit(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	reportOwed(r, filled)
 	if len(filled.Owed) > 0 {
-		r.Result(setOwedNext)
+		r.Result(setOwedNext())
 		return nil
 	}
 	r.Result("Secrets written.")
@@ -437,7 +439,7 @@ func (e *secretsWriteError) Unwrap() error { return e.err }
 
 // setOwedNext is init's result when a secret only the operator can provide
 // is unset: secrets set asks for each one at a terminal.
-const setOwedNext = "Next: run `paisans secrets set`."
+func setOwedNext() string { return "Next: run `" + progname.Cmd() + " secrets set`." }
 
 // reportOwed warns of each secret only the operator can provide. Leaving
 // these silent would let an operator believe an install is finished when
@@ -704,7 +706,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 		// Every step applies the run's current version, which a step that
 		// records at Pocket ID advances: files edited otherwise are not what
 		// the store holds.
-		return &ui.Problem{Hint: "the configuration changed after the run published it", Explain: config.FileName + " or secrets.enc.yaml is not what this run published as " + v.sha[:12] + ", so applying it would put on " + *site + " a version the store does not hold. Nothing was changed on " + *site + " by this step. Run paisans deployment apply --execute again, which publishes the files as they are now."}
+		return &ui.Problem{Hint: "the configuration changed after the run published it", Explain: config.FileName + " or secrets.enc.yaml is not what this run published as " + v.sha[:12] + ", so applying it would put on " + *site + " a version the store does not hold. Nothing was changed on " + *site + " by this step. Run " + progname.Cmd() + " deployment apply --execute again, which publishes the files as they are now."}
 	}
 
 	transport := siteTransport(*site, declared, *destination)
@@ -750,7 +752,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	review, approvedBy, err := stepReview(r, ans, stdin, stdout, cfg, *site, g, grant.ApplyScope(only...), transport, *execute, "paisans deployment apply --site "+*site+" --execute")
+	review, approvedBy, err := stepReview(r, ans, stdin, stdout, cfg, *site, g, grant.ApplyScope(only...), transport, *execute, progname.Cmd()+" deployment apply --site "+*site+" --execute")
 	if err != nil {
 		return err
 	}
@@ -1191,6 +1193,12 @@ func siteRenderOptions(cfg *config.Config, site string, transport apply.Transpor
 		}
 		if found {
 			out = append(out, render.WithEtcdInitial(site, initial))
+		} else {
+			token, err := etcdFoundingToken(cfg, site)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, render.WithEtcdFoundingToken(token))
 		}
 	}
 	if s := cfg.Sites[site]; !s.Has(config.RoleGateway) && s.RunsCaddy() {
@@ -1203,6 +1211,29 @@ func siteRenderOptions(cfg *config.Config, site string, transport apply.Transpor
 		}
 	}
 	return out, nil
+}
+
+// etcdFoundingToken is the --initial-cluster-token a member with no record
+// founds with: the one another founder's record holds, so every founder of
+// one cluster agrees however many runs found it, PatroniScope when that
+// founder was founded before tokens were recorded, or, when no founder has a
+// record yet, a token chosen at random for this run (see
+// render.WithEtcdFoundingToken for why). A member that cannot be read stops
+// the apply rather than risk founders with different tokens.
+func etcdFoundingToken(cfg *config.Config, site string) (string, error) {
+	for _, m := range cfg.Etcd.Members {
+		if m == site {
+			continue
+		}
+		in, found, err := convergeReadInitial(cfg, m)
+		if err != nil {
+			return "", fmt.Errorf("%s: reading its etcd record, for the token %s founds etcd with: %w", m, site, err)
+		}
+		if found && in.State == render.EtcdStateNew {
+			return in.Token, nil
+		}
+	}
+	return apply.EtcdFoundingToken(cfg.Deployment())
 }
 
 func planSiteApply(cfg *config.Config, secrets *config.Secrets, site string, transport apply.Transport, options ...apply.Option) (*apply.Plan, error) {
@@ -1459,7 +1490,7 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 	if err != nil {
 		return err
 	}
-	review, approvedBy, err := stepReview(r, env.answers, env.stdin, env.stdout, cfg, o.site, g, grant.PrepareScope, transport, o.execute, "paisans site prepare --site "+o.site+" --execute")
+	review, approvedBy, err := stepReview(r, env.answers, env.stdin, env.stdout, cfg, o.site, g, grant.PrepareScope, transport, o.execute, progname.Cmd()+" site prepare --site "+o.site+" --execute")
 	if err != nil {
 		return err
 	}
@@ -1535,9 +1566,9 @@ func hostPrepareAll(env prepareEnv, o hostPrepareOptions) error {
 		site := o
 		site.all, site.site, site.shown = false, name, true
 		if err := hostPrepare(env, site); err != nil {
-			next := "Run paisans site prepare --all again to resume."
+			next := "Run " + progname.Cmd() + " site prepare --all again to resume."
 			if o.execute {
-				next = "Run paisans site prepare --all --execute again to resume; a prepared host plans nothing."
+				next = "Run " + progname.Cmd() + " site prepare --all --execute again to resume; a prepared host plans nothing."
 			}
 			return convergeStop("site prepare --all stopped at "+name, err, next)
 		}
@@ -1553,12 +1584,13 @@ var insideApply bool
 // runDNSInit creates the public DNS records a deployment needs, at the
 // provider acme.provider names, using the token that already answers ACME
 // challenges. It is modelled on runStorageInit: a dry run by default, and
-// only what is missing is created.
+// only what is missing is created, or, for a record its own earlier run made,
+// updated to the address now declared.
 //
 // It reaches no host. The workstation talks to the provider's API and to
 // nothing else, so it takes no --site and no --ssh.
 func runDNSInit(args []string) error {
-	r, cfg, wants, provider, execute, err := dnsSetup("dns init", "actually create the missing records", args)
+	r, cfg, wants, provider, execute, err := dnsSetup("dns init", "actually create the missing records and update this deployment's own", args)
 	if err != nil {
 		return err
 	}
@@ -1583,13 +1615,16 @@ func runDNSInit(args []string) error {
 			r.Result("%s conflict with the provider's. Resolve %s before --execute, which creates nothing while one stands.", plural(n, "record"), map[bool]string{true: "it", false: "them"}[n == 1])
 			return nil
 		}
-		creates := ""
-		if n := len(plan.Creates()); n > 0 {
-			creates = plural(n, "record") + " to create"
+		var todo []string
+		if n := len(plan.Updates()); n > 0 {
+			todo = append(todo, plural(n, "record")+" to update")
 		}
-		dryRunFound(creates, nil)
-		if len(plan.Creates()) == 0 {
-			r.Result("Every record is present. Nothing to create.")
+		if n := len(plan.Creates()); n > 0 {
+			todo = append(todo, plural(n, "record")+" to create")
+		}
+		dryRunFound(strings.Join(todo, ", "), nil)
+		if len(todo) == 0 {
+			r.Result("Every record is present. Nothing to create or update.")
 			return nil
 		}
 		r.Result("Nothing changed. Re-run with --execute to apply.")
@@ -1599,9 +1634,26 @@ func runDNSInit(args []string) error {
 		return err
 	}
 	if !insideApply {
-		r.Result("Created %s at %s.", plural(len(plan.Creates()), "record"), plan.Provider)
+		r.Result("%s", dnsInitResult(len(plan.Updates()), len(plan.Creates()), plan.Provider))
 	}
 	return nil
+}
+
+// dnsInitResult is dns init's closing line after --execute, naming only the
+// counts that are not zero.
+func dnsInitResult(updates, creates int, provider string) string {
+	var done []string
+	if updates > 0 {
+		done = append(done, "updated "+plural(updates, "record"))
+	}
+	if creates > 0 {
+		done = append(done, "created "+plural(creates, "record"))
+	}
+	if len(done) == 0 {
+		return "Nothing was written."
+	}
+	summary := strings.Join(done, " and ")
+	return fmt.Sprintf("%s at %s.", strings.ToUpper(summary[:1])+summary[1:], provider)
 }
 
 // runDNSPrune deletes the address records dns init created that the
@@ -1735,7 +1787,7 @@ func checkWorkstationToken(r ui.Reporter, cfg *config.Config, token string) erro
 	step.Fail(errors.New(result.Finding))
 	return &ui.Problem{
 		Hint:    result.Finding,
-		Explain: result.Advice + " No record was read or changed.\n`paisans doctor` checks the token from every place that uses it.",
+		Explain: result.Advice + " No record was read or changed.\n`" + progname.Cmd() + " doctor` checks the token from every place that uses it.",
 	}
 }
 

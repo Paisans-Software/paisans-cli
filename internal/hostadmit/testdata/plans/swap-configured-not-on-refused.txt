@@ -1,1 +1,1 @@
-refused: swap: --swapfile: this host has swap that is not on (a zram-generator configuration), and admit makes no swapfile beside it. Turn it on (swapon -a, or the zram service), or remove it, and admit again. Nothing was changed
+refused: swap: --swapfile: this host has swap that is not on (a swap partition), and admit makes no swapfile beside it. Turn it on (swapon -a), or remove it, and admit again. Nothing was changed

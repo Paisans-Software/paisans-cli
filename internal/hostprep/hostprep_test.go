@@ -1160,15 +1160,25 @@ func TestADaemonThatCannotBeAskedIsNotRestarted(t *testing.T) {
 	}
 }
 
-// Prepare warns about a host with no swap on, reading /proc/swaps as the
-// deployment's user, and plans nothing for it: admit makes a swapfile.
+// Prepare warns about a host with no swap on beyond zram, reading
+// /proc/swaps as the deployment's user, and plans nothing for it: admit
+// makes a swapfile.
 func TestPrepareWarnsWithoutSwap(t *testing.T) {
+	const header = "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n"
+	const file = "/swapfile                               file\t\t8388604\t\t0\t\t-2\n"
+	const zram = "/dev/zram0                              partition\t4194300\t\t0\t\t100\n"
+	line := func(name string) string { return name + "\tfile\t\t1048572\t\t0\t\t-3\n" }
 	for _, c := range []struct {
-		name, swaps string
-		warns       bool
+		name, swaps, warns string
 	}{
-		{"none", "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n", true},
-		{"on", "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n/swapfile                               file\t\t8388604\t\t0\t\t-2\n", false},
+		{"empty", "", "swap: none on"},
+		{"none", header, "swap: none on"},
+		{"on", header + file, ""},
+		{"zram only", header + zram, "swap: only zram on"},
+		{"zram and a swapfile", header + zram + file, ""},
+		{"a name with a space", header + line(`/var/my\040swap`), ""},
+		{"a partition on a zram device", header + line("/dev/zram0p1"), ""},
+		{"a name that starts as zram's", header + line("/dev/zramfoo"), ""},
 	} {
 		host := preparedHost(false)
 		host.files["/proc/swaps"] = c.swaps
@@ -1176,9 +1186,27 @@ func TestPrepareWarnsWithoutSwap(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
-		warns := slices.ContainsFunc(plan.Warnings, func(w hostprep.Warning) bool { return strings.HasPrefix(w.Hint, "swap: none on") })
-		if warns != c.warns {
-			t.Errorf("%s: warned %v, want %v: %+v", c.name, warns, c.warns, plan.Warnings)
+		var warned []hostprep.Warning
+		for _, w := range plan.Warnings {
+			if strings.HasPrefix(w.Hint, "swap:") {
+				warned = append(warned, w)
+			}
+		}
+		on := slices.Contains(plan.Present, "swap: on")
+		if c.warns == "" {
+			if len(warned) > 0 || !on {
+				t.Errorf("%s: warned %+v, swap on %v; want swap on and no warning", c.name, warned, on)
+			}
+		} else if len(warned) != 1 || !strings.HasPrefix(warned[0].Hint, c.warns) || on {
+			t.Errorf("%s: warned %+v, swap on %v; want one %q", c.name, warned, on, c.warns)
+		} else {
+			d := warned[0].Detail
+			if !strings.Contains(d, "sudo paisans site admit --request home-a.admit") {
+				t.Errorf("%s: the warning does not name the owner's admit: %s", c.name, d)
+			}
+			if zram := strings.Contains(d, "stretches the host's memory"); zram != (c.warns == "swap: only zram on") {
+				t.Errorf("%s: the warning gives zram's reason %v: %s", c.name, zram, d)
+			}
 		}
 		if slices.ContainsFunc(plan.Steps, func(s hostprep.Step) bool { return strings.Contains(s.Title, "swap") }) {
 			t.Errorf("%s: prepare planned a swap step", c.name)

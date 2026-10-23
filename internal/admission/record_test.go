@@ -352,6 +352,22 @@ func TestMineIsTheLoginsOwnRecord(t *testing.T) {
 	}
 }
 
+// Listed is every record that parses and the login's name, whoever the
+// login is: the owner's login learns each deployment and its user.
+func TestListedIsEveryRecordToAnyLogin(t *testing.T) {
+	mine := encode(t, admission.NewRecord(build(t, "home-a"), admission.Grants{Watchdog: true}, "", at))
+	other := strings.ReplaceAll(strings.ReplaceAll(string(mine), "f2a9c4e1", "0b0bc4e1"), "paisans-f2a9", "paisans-0b0b")
+	h := &listing{host: host{files: map[string]string{
+		"/etc/paisans/admitted.f2a9.json": string(mine),
+		"/etc/paisans/admitted.0b0b.json": other,
+		"/etc/paisans/admitted.c0de.json": "{}",
+	}}, user: "ubuntu"}
+	user, recs, err := admission.Listed(h)
+	if err != nil || user != "ubuntu" || len(recs) != 2 || recs[0].User != "paisans-0b0b" || recs[1].User != "paisans-f2a9" {
+		t.Fatalf("Listed = %q, %+v, %v", user, recs, err)
+	}
+}
+
 // listing is a host that answers Mine's listing and the login's name.
 type listing struct {
 	host

@@ -10,6 +10,43 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+## [0.3.0-rc.6] - 2026-10-23
+
+### Added
+
+- `--ssh` and `--from` accept ssh config aliases, `[user@]alias[:port]`, and connect through them; a destination given without a user logs in as its ssh config `User`, or your local login.
+- `doctor` checks each host's swap, and `doctor` and `site admit` warn when a host's RAM, with swap counting up to a quarter, is under the floor its roles need.
+- `deployment checkout <id> --execute` copies a saved deployment, with its signed store and trust state, into an empty directory, where `deployment log`, `pull` and `publish` work without pinning a root.
+
+### Changed
+
+- `deployment apply` and `oidc client create` clear a toolkit-set launch URL from the client of any `no_launch` blueprint, now `account` and the gate's `oauth2-proxy`, and leave one an operator set.
+- Advice, errors and help name the command as it was invoked, so a build installed as `paisans-test` says `paisans-test deployment apply`; advice for a host's owner and files written onto hosts still name `paisans`.
+- `init` moves a never-applied site's WireGuard listen port, when another deployment on the host holds it and the endpoint is unset or a port alone, to a free one and says which port to open.
+
+### Fixed
+
+- Patroni has 60 s to stop, and `deployment apply` gives the infrastructure stack the same, so a leading Patroni it recreates on a slow host shuts down cleanly and disarms the watchdog.
+- `site evict` disarms a data site's watchdog as soon as Patroni lets go of it while the deployment stops, so a Patroni killed while it led does not reboot the host mid-evict.
+- `deployment apply` and `oidc client create` delete the secret Pocket ID gives a new client, so a client holds only the one the toolkit set, and updates keep a client's back-channel logout URL.
+- `site remove` and `app remove` without `--delete-data` remove only the directories their own files were in, once empty, so kept data keeps its empty directories and PostgreSQL starts when the site returns.
+- `site prepare` warns about a host whose only swap is zram, as `site admit` and `doctor` do, rather than reporting its swap as on.
+- `doctor`'s self-check and `deployment apply`'s gateway step report a 443 answering in anything but TLS as another server holding the port, and doctor advises a refused connection apart from a timeout.
+- `dns init` updates an A or AAAA record it made for this deployment to the address now declared, so a gateway whose public address changed needs no records deleted by hand.
+- `site add` deletes a rejoining site's old etcd data before adding its learner, so a site an earlier removal took out of etcd rejoins instead of crash-looping; `site remove` empties a leaving member's too.
+- `deployment apply` and `validate` try a mail server on the deployment's own mesh once the mesh is up, warning until then, and report a mail server a site could not connect to as unreachable.
+- `deployment apply` keeps Patroni's leader through a join by writing a `patroni.env` whose only change is `ETCD3_HOSTS` without recreating Patroni, and warns whenever a recreate may move, or has moved, the leader.
+- `app remove` looks for an app's Pocket ID client by the name in the newest stored version declaring the app, so a client named by its `display_name` is deleted after the app left `paisans-stack.yaml`.
+- `app remove` and `site remove` read and delete a deployment's directories under rootlesskit, so they reach files a container's non-root user wrote, such as FreshRSS's `data/`.
+- `deployment recover --from` takes any login that reaches the host, the owner's too, and reaches it again as the deployment's user its admission record names, so a recovery needs no name the lost workstation held.
+- `deployment recover`, `deployment pull`, `init --age-private-key-file` and the saved version's `applied from` note of `deployment apply` name the configuration's directory as a full path, not `.`.
+- `deployment recover`, `pull` and `log` take `--key <path.pub>` to anchor an unpinned workstation on versions you signed, `log` prints full root hashes, and a pin the sites serve none of refuses.
+- `site remove` takes the site's mesh interface down through the WireGuard helper's new `down`, so the site can be added back after `site prepare`, and host checks name the `down` that clears a leftover one.
+
+### Security
+
+- Pasted secrets holding a control character or line separator are refused when set or loaded, and the DNS tokens and OIDC client credentials are quoted in env files, so none can add a variable.
+
 ## [0.3.0-rc.5] - 2026-10-19
 
 ### Added
@@ -225,7 +262,8 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.
 - The gateway refuses any request to Pocket ID that carries an `X-API-Key` header with 403, so Pocket ID's API keys work only on the mesh.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.5...develop
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.6...develop
+[0.3.0-rc.6]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.5...v0.3.0-rc.6
 [0.3.0-rc.5]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.4...v0.3.0-rc.5
 [0.3.0-rc.4]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.3...v0.3.0-rc.4
 [0.3.0-rc.3]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.2...v0.3.0-rc.3

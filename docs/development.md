@@ -64,7 +64,8 @@ reach every site and never change one, and `site deployments` reads the one
 host `--ssh` names, with no `paisans-stack.yaml`, and changes nothing. `deployment
 fetch` reads the same host's registry and configuration stores through sudo,
 changes nothing there, and writes only the workstation's saved deployments;
-`deployment list` reads only those. `secrets
+`deployment list` reads only those, and `deployment checkout` copies one into an
+empty directory, only with `--execute`, reaching no machine. `secrets
 prune` reads each gateway's deployment record and rewrites only the local
 secrets file, only with `--execute`. `failover test` changes which site
 is primary, only with `--execute`. `dns init` and `dns prune` reach no
@@ -1231,8 +1232,10 @@ The connection comes from `Env.Dial`. The command wires it to
 so the connection is made, retried and its host key asked about as every
 other command's is, then `ssh -W host:port` over the shared master, its stdin
 and stdout joined to one end of a `net.Pipe` so deadlines work. When ssh ends
-the forward, the connection's last read carries ssh's last line, Eg:
-`administratively prohibited` or `Connection refused`. What is easy to undo
+the forward, the connection's last read carries ssh's reason, Eg:
+`Session open refused by peer` or `Connection refused`, and a reason saying
+the channel did not open is `apply.ErrForwardNotOpened`, which the
+command's `Env.NotOpened` reports as a connection not made. What is easy to undo
 by accident:
 
 * **No test reaches a site or a mail server.** `cmd/paisans`'s `TestMain`
@@ -1341,8 +1344,8 @@ local disk: the DNS provider's API, from the workstation. It is a dry run unless
 because it reaches no site.
 
 ```
-paisans dns init                 # shows present, create and conflict per record
-paisans dns init --execute       # creates what is missing, then reads each back
+paisans dns init                 # shows present, create, update and conflict per record
+paisans dns init --execute       # updates its own stale records and creates what is missing, then reads each back
 paisans dns prune                # shows remove and keep per toolkit record
 paisans dns prune --execute      # deletes the removes, then lists the zone again
 ```

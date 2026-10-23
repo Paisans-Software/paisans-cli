@@ -738,3 +738,39 @@ func TestSecretsSetWithAKeyAtATerminalRefusesBeforeAsking(t *testing.T) {
 		t.Errorf("asked for %v before refusing", *asked)
 	}
 }
+
+// A pasted value with a control character in it is refused before it is
+// written, by key and with the reason: rendered into an env file, a line
+// break in it would add a line that sets another variable.
+func TestSecretsSetRefusesAControlCharacter(t *testing.T) {
+	configPath, secretsPath := secretsDir(t, "version: 1\n")
+	for name, c := range map[string]string{"a newline": "\n", "a carriage return": "\r", "NUL": "\x00", "a line separator": "\u2028", "a paragraph separator": "\u2029"} {
+		t.Run(name, func(t *testing.T) {
+			printed, err := set(t, configPath, secretsPath, "external.acme_dns_token", "tok"+c+"STATIC_API_KEY=x\n")
+			if err == nil || !strings.Contains(err.Error(), "external.acme_dns_token") || !strings.Contains(err.Error(), "control character") {
+				t.Fatalf("got %v, want a refusal naming the key and why", err)
+			}
+			if strings.Contains(err.Error(), "STATIC_API_KEY") || printed != "" {
+				t.Errorf("the refusal showed the value or printed %q: %v", printed, err)
+			}
+			if s := mustSecrets(t, secretsPath); s.External["acme_dns_token"] != "" {
+				t.Error("the value was written")
+			}
+		})
+	}
+}
+
+// A file that already holds a bad pasted value is repaired by setting that
+// key: the load that refuses every other command lets this one through.
+func TestSecretsSetRepairsABadPastedValue(t *testing.T) {
+	configPath, secretsPath := secretsDir(t, "version: 1\nexternal:\n  acme_dns_token: \"tok\\nSTATIC_API_KEY=x\"\n")
+	if _, err := config.LoadSecrets(secretsPath); err == nil {
+		t.Fatal("the fixture loaded; it should be refused")
+	}
+	if _, err := set(t, configPath, secretsPath, "external.acme_dns_token", "not-a-real-token-0002\n"); err != nil {
+		t.Fatalf("setting the bad key was refused: %v", err)
+	}
+	if s := mustSecrets(t, secretsPath); s.External["acme_dns_token"] != "not-a-real-token-0002" {
+		t.Errorf("stored %q", s.External["acme_dns_token"])
+	}
+}

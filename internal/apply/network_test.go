@@ -198,3 +198,24 @@ func TestAFailedNetworkProbeStopsThePlan(t *testing.T) {
 		t.Fatalf("got %v, want the probe's failure", err)
 	}
 }
+
+// The infrastructure stack is never taken down by apply; the plan names the
+// command to run at a time the site can be out, with Patroni's stop timeout,
+// so a leading Patroni it stops disarms the watchdog.
+func TestAStaleInfraNetworkNamesItsDownWithPatronisTimeout(t *testing.T) {
+	host := appliedFrom(t, "home-a", plan(t))
+	host.networks = map[string]string{"paisans-f2a9-infra_default": pinnedPool}
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host, apply.Recreate("infra"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range p.Notes {
+		if strings.HasPrefix(n.Hint, "infra network differs") {
+			if !strings.Contains(n.Text, "/infra/compose.yaml down --timeout 60`") {
+				t.Errorf("the down it names has no stop timeout: %s", n.Text)
+			}
+			return
+		}
+	}
+	t.Fatalf("no note for the stale infra network: %+v", p.Notes)
+}

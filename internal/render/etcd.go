@@ -60,6 +60,19 @@ type EtcdInitial struct {
 	// server/etcdserver/api/membership/cluster.go,
 	// ValidateClusterAndAssignIDs).
 	Cluster string
+	// Token is --initial-cluster-token, empty for PatroniScope, the token
+	// every member founded before tokens were recorded runs with and every
+	// joiner is given (etcd reads it only to found a cluster). See
+	// WithEtcdFoundingToken.
+	Token string
+}
+
+// EtcdToken is the --initial-cluster-token in's member runs with.
+func (in EtcdInitial) EtcdToken() string {
+	if in.Token == "" {
+		return PatroniScope
+	}
+	return in.Token
 }
 
 // EtcdInitialState values.
@@ -87,13 +100,32 @@ func WithEtcdInitial(site string, initial EtcdInitial) Option {
 	}
 }
 
+// WithEtcdFoundingToken gives a member with no record the
+// --initial-cluster-token it founds with, recorded with its other flags.
+//
+// etcd derives a founding member's ID from its peer URLs and this token
+// alone, and the cluster's ID from its founders' IDs (etcd v3.5.16,
+// server/etcdserver/api/membership/member.go, NewMember, and cluster.go,
+// genID). A fixed token makes every cluster founded on the same mesh
+// addresses the same cluster to etcd, IDs and all: a deployment founded
+// again on the same addresses, or a copied configuration. A token chosen at
+// random for each founding makes the IDs its own, which is what lets site
+// add tell this cluster's data from another's (siteadd, checkEtcdData). Every
+// founder of one cluster must be given the same token; the caller reads it
+// from a founder that has a record. A member founded before tokens were
+// recorded keeps PatroniScope from its record, so nothing running is
+// rendered differently.
+func WithEtcdFoundingToken(token string) Option {
+	return func(p *planner) { p.etcdFoundingToken = token }
+}
+
 // etcdInitialFor is the record a site renders: the one it was handed, or a
 // founder's.
 func (p *planner) etcdInitialFor(site string) EtcdInitial {
 	if in, ok := p.etcdInitial[site]; ok {
 		return in
 	}
-	return EtcdInitial{State: EtcdStateNew, Cluster: p.etcdInitialCluster()}
+	return EtcdInitial{State: EtcdStateNew, Cluster: p.etcdInitialCluster(), Token: p.etcdFoundingToken}
 }
 
 // FormatEtcdInitial is the record's content.
@@ -105,7 +137,16 @@ func FormatEtcdInitial(in EtcdInitial) string {
 # every later render repeats them from here rather than from etcd.members.
 initial-cluster-state=%s
 initial-cluster=%s
-`, in.State, in.Cluster)
+`, in.State, in.Cluster) + tokenLine(in)
+}
+
+// tokenLine is the record's token line, absent for PatroniScope so that a
+// record written before tokens were recorded is written the same.
+func tokenLine(in EtcdInitial) string {
+	if in.Token == "" {
+		return ""
+	}
+	return "initial-cluster-token=" + in.Token + "\n"
 }
 
 // ParseEtcdInitial reads a record. ok is false when content holds no complete
@@ -118,6 +159,8 @@ func ParseEtcdInitial(content string) (EtcdInitial, bool) {
 			in.State = v
 		} else if v, ok := strings.CutPrefix(line, "initial-cluster="); ok {
 			in.Cluster = v
+		} else if v, ok := strings.CutPrefix(line, "initial-cluster-token="); ok && v != PatroniScope {
+			in.Token = v
 		}
 	}
 	return in, in.State != "" && in.Cluster != ""
@@ -134,6 +177,8 @@ func ParseEtcdFlags(compose string) (EtcdInitial, bool) {
 			in.State = v
 		} else if v, ok := strings.CutPrefix(line, "--initial-cluster="); ok {
 			in.Cluster = v
+		} else if v, ok := strings.CutPrefix(line, "--initial-cluster-token="); ok && v != PatroniScope {
+			in.Token = v
 		}
 	}
 	return in, in.State != "" && in.Cluster != ""

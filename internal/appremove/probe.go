@@ -69,10 +69,30 @@ func ProbeSite(cfg *config.Config, app, site string, h Host) (SiteState, error) 
 
 // DirCommand prints, for a directory that exists, a marker, its size in
 // bytes, how many files and links are under it, and its top level entries.
-// It prints nothing for one that does not.
+// It prints nothing for one that does not, and fails, printing only the
+// error, when it cannot read the whole directory.
+//
+// du and find run under rootlesskit, as root of a new user namespace that
+// maps the user's subordinate range as the rootless daemon's does: a
+// container's non-root user writes files the user's own uid cannot read,
+// such as FreshRSS's data/, written by www-data with mode 0770, which the
+// user sees as uid 165568. There they are the namespace root's to read.
+// One shell in one namespace reads all three, each into a variable, so a
+// failed read stops it before the marker and is never taken for an answer.
 func DirCommand(dir string) string {
-	return fmt.Sprintf(`d=%s; if [ -d "$d" ]; then echo present; du -sb "$d" | cut -f1; find "$d" -mindepth 1 \( -type f -o -type l \) | wc -l; find "$d" -mindepth 1 -maxdepth 1 -printf '%%P\n' | sort; fi`, quote(dir))
+	return fmt.Sprintf(`d=%s; if [ -d "$d" ]; then rootlesskit sh -c %s sh "$d"; fi`, quote(dir), quote(dirScript))
 }
+
+// dirScript is what DirCommand runs under rootlesskit, the directory its
+// first argument.
+const dirScript = `set -e
+s=$(du -sb -- "$1")
+n=$(find "$1" -mindepth 1 \( -type f -o -type l \) -printf x)
+e=$(find "$1" -mindepth 1 -maxdepth 1 -printf '%P\n')
+echo present
+printf '%s\n' "$s" | cut -f1
+echo ${#n}
+[ -z "$e" ] || printf '%s\n' "$e" | sort`
 
 func probeDir(h Host, dir string) (Dir, error) {
 	out, err := h.Run(DirCommand(dir))

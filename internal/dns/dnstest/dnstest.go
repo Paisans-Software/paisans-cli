@@ -81,6 +81,18 @@ func (p *Provider) Create(_ context.Context, zoneID string, r dns.Record) error 
 	return nil
 }
 
+func (p *Provider) Update(_ context.Context, zoneID string, r dns.Record) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for i, existing := range p.InZone[zoneID] {
+		if existing.ID == r.ID {
+			p.InZone[zoneID][i] = r
+			return nil
+		}
+	}
+	return fmt.Errorf("dnstest: HTTP 404: record %s does not exist", r.ID)
+}
+
 func (p *Provider) AllRecords(_ context.Context, zoneID string) ([]dns.Record, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

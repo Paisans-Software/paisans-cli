@@ -2,6 +2,7 @@ package hostadmit
 
 import (
 	"fmt"
+	"io"
 	"path"
 	"slices"
 	"sort"
@@ -56,6 +57,11 @@ type Input struct {
 	Digest  string
 	Flags   Flags
 	Now     time.Time
+	// MovePort, when set, is the random source for a WireGuard listen port
+	// another deployment holds: a claim refused for that port alone is a
+	// PortMoveError naming a free one (see freePort). paisans init sets it
+	// for a site whose port it may move; nil refuses the claim as found.
+	MovePort io.Reader
 	// enabledUFW is set by Execute when it reads the host again after this
 	// run's own `ufw --force enable` ran, so the plan it rebuilds records
 	// that admit enabled ufw although ufw is active by then.
@@ -210,6 +216,9 @@ type planner struct {
 	// unit active and no network store, and whose units none enables or
 	// this run disables: it has no networks.
 	heldDocker bool
+	// swapMade is the swapfile this run's plan makes, 0 for none: it
+	// counts toward the memory floor as swap that is on (planMemory).
+	swapMade int64
 	// prev caches previous(): this deployment's record as the host holds it.
 	prev struct {
 		read bool
@@ -254,6 +263,7 @@ var parts = []part{
 	{"claim", planClaim}, // 1
 	{"admission directory", planAdmissionDir},
 	{"swap", planSwap},
+	{"memory", planMemory},
 	{"sysctls before", planSysctlsBefore},
 	{"docker", planDocker},
 	{"apparmor", planAppArmor},

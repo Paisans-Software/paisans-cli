@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/localstore"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"io"
 	"os"
 	"slices"
@@ -48,7 +49,7 @@ var groupSummary = map[string]string{
 	"storage":     "Provision object storage, join sites to it, replace keys.",
 	"failover":    "Switch the database primary to another site and back.",
 	"dns":         "Create the DNS records the configuration implies, or prune them.",
-	"deployment":  "Apply, list, fetch, publish, pull and recover deployments.",
+	"deployment":  "Apply, list, check out, fetch, publish, pull and recover.",
 	"operator":    "Sign the sites' configuration, or give an operator a sign-in link.",
 	"secrets":     "List, set, prune and rotate secrets.",
 	"app":         "Take a removed app off hosts.",
@@ -187,12 +188,12 @@ var helpCommands = []helpCommand{
 		summary: "Admit a deployment to this host, as its owner.",
 		usage: []string{
 			"sudo paisans site admit --request <file> [--watchdog] [--public-ports] [--data-dir <path>]\n                        [--bridge-netfilter] [--mesh-lan] [--enable-ufw] [--execute]\n                        [--digest <digest>] [--yes]",
-			"paisans site admit --site <name> [--ssh <user>|<user@host[:port]>] [--config " + config.FileName + "] [the same grants]\n                   [--execute] [--yes]",
+			"paisans site admit --site <name> [--ssh <user>|<user@host[:port] or ssh alias>] [--config " + config.FileName + "] [the same grants]\n                   [--execute] [--yes]",
 		},
 		detail: "The one root step for a deployment on a host, run by the host's owner: the deployment's own unprivileged user with its own rootless Docker, the WireGuard helper and its sudoers line, the firewall, the egress table, the grants given and the admission record. " +
 			"ufw must be installed. When it is not active, --enable-ufw, or a yes at a terminal, has admit allow every port sshd listens on, arm a timer that turns ufw off again in 10 minutes, enable ufw, and stop the timer once a new SSH login gets through: with --site, admit's own login as the user; with --request, one you open and confirm. Without it admit refuses, and prints the commands that enable ufw by hand, every allow before the enable. Admit never enables ufw while it holds a deny or reject rule of yours, or with IPV6 not yes, as ufw reads /etc/default/ufw and /etc/ufw/ufw.conf, while sshd listens on IPv6, and then asks nothing. " +
 			"--watchdog and --public-ports are the owner's to give: at a terminal, admit asks for each one the site's roles need and the flags leave out; elsewhere a data site without --watchdog, or a gateway or Caddy monitor without --public-ports, stops before the host is reached. " +
-			"With --site, --ssh may be your login alone, for the site's declared ssh host and port, and is asked for at a terminal when left out. " +
+			"With --site, --ssh may be your login alone, for the site's declared ssh host and port, or an alias of your ssh config for that host, alias:port or a word your config maps to the declared host and port, and is asked for at a terminal when left out. " +
 			"--execute with --request asks for the request's digest at a terminal, or takes it as --digest, compared the same way; with --site it ends by logging in as the user with your own key.\n\n" +
 			"--yes grants each grant the site's roles need and answers the ufw question with --site. It never answers the digest: --yes --request --execute needs --digest. With --request it refuses where admit would enable ufw, since only a person can open the new SSH session that shows SSH still works; --site proves it with admit's own login. With --site it needs --ssh. " + yesTopic + "\n\n" +
 			"Never run by an agent unattended.",
@@ -217,10 +218,10 @@ var helpCommands = []helpCommand{
 		summary: "Take a site out of the running deployment, reaching its host or not.",
 		usage: []string{
 			"paisans site remove <site> [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n" +
-				"                    [--delete-data] [--force --ssh <user@host[:port]>] [--execute] [--yes]",
+				"                    [--delete-data] [--force --ssh <user@host[:port] or ssh alias>] [--execute] [--yes]",
 			"paisans site remove <site> --host-gone [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n" +
 				"                    [--execute] [--yes]",
-			"paisans site remove --force --ssh <user@host[:port]> --id <id or token>\n" +
+			"paisans site remove --force --ssh <user@host[:port] or ssh alias> --id <id or token>\n" +
 				"                    [--delete-data] [--execute] [--yes]",
 		},
 		detail: "Take a site out of the running deployment in gated stages: its data out (the Patroni leader switched to the Sync Standby, its Garage node out of the layout and the objects moved), out of the cluster (its etcd member, and the mesh, HAProxy and gateway routes on every remaining site, and each replica's patroni.env, one at a time; one data site out of two and a witness takes the witness out of etcd too), its host cleaned of everything provably this deployment's (a gateway's Caddy kept, reduced to the host owner's sites in its caddy.d, /srv/paisans/<token>/caddy.d, while there are any), the A and AAAA records dns init made for its public address deleted at the DNS provider, and its entry out of " + config.FileName + ".\n\n" +
@@ -237,12 +238,12 @@ var helpCommands = []helpCommand{
 		usage: []string{
 			"sudo paisans site evict --request <file> [--data-dir <path>] [--execute] [--yes]",
 			"sudo paisans site evict --deployment <id> --user <name> [--data-dir <path>] [--execute] [--yes]",
-			"paisans site evict --site <name> [--ssh <user>|<user@host[:port]>] [--config " + config.FileName + "] [--data-dir <path>]\n                   [--execute] [--yes]",
+			"paisans site evict --site <name> [--ssh <user>|<user@host[:port] or ssh alias>] [--config " + config.FileName + "] [--data-dir <path>]\n                   [--execute] [--yes]",
 		},
 		detail: "Undo site admit for one deployment: its mesh, its user with its home and data, the helper, the egress table, its firewall rules, the record and the registry entry. " +
 			"Host-wide files and sysctls go only when no other deployment is admitted. Evict never disables ufw, which stays as it is with its paisans: ssh allows when admit enabled it. " +
 			"--data-dir, the one admit was given, is needed only when the host holds no admission record.\n\n" +
-			"Run it as root on the host with --request or --deployment and --user, or from a workstation with --site, which reads the site from " + config.FileName + ". With --site, --ssh may be your login alone, for the site's declared ssh host and port, and is asked for at a terminal when left out. " +
+			"Run it as root on the host with --request or --deployment and --user, or from a workstation with --site, which reads the site from " + config.FileName + ". With --site, --ssh may be your login alone, for the site's declared ssh host and port, or an alias of your ssh config for that host, alias:port or a word your config maps to the declared host and port, and is asked for at a terminal when left out. " +
 			"After site remove has taken the site out of " + config.FileName + ", use the --deployment and --user line it printed.\n\n" +
 			"--execute asks for the user's name at a terminal; --yes types it, and with --site needs --ssh. " + yesTopic + "\n\n" +
 			"Never run by an agent unattended.",
@@ -250,9 +251,9 @@ var helpCommands = []helpCommand{
 	{
 		name:    "site deployments",
 		summary: "List every deployment on a host.",
-		usage:   []string{"paisans site deployments --ssh <user@host[:port]> [--sudo=false]"},
+		usage:   []string{"paisans site deployments --ssh <user@host[:port] or ssh alias> [--sudo=false]"},
 		detail: "List every admission record on the host --ssh names (the deployment, its user, the site and roles it was admitted as, the grants and when), every deployment in its registry (id, token, domain, site, roles and root), and any deployment directory no registry entry names. " +
-			"--sudo=false lists admission records only, which are readable without sudo. Needs no " + config.FileName + "; changes nothing.",
+			"--sudo=false lists admission records only, which are readable without sudo. Needs no " + config.FileName + "; changes nothing.\n\n" + sshAliasTopic,
 	},
 	{
 		name:    "mesh rekey",
@@ -336,7 +337,7 @@ var helpCommands = []helpCommand{
 		summary: "Create the public DNS records the configuration implies.",
 		usage:   []string{"paisans dns init [--config " + config.FileName + "] [--secrets secrets.enc.yaml] [--execute]"},
 		detail: "Create the public DNS records the configuration implies, at the provider named by acme.provider: addresses, and records saying every name without mail (community.mail_domains, smtp senders) sends and receives none.\n\n" +
-			"Creates only what is missing, never updates or deletes, and refuses if any record conflicts. Writes nothing without --execute.",
+			"Creates only what is missing, updates the address of an A or AAAA record it made for this deployment, never deletes, and refuses if any other record conflicts. Writes nothing without --execute.",
 	},
 	{
 		name:    "dns prune",
@@ -355,23 +356,23 @@ var helpCommands = []helpCommand{
 	{
 		name:    "deployment pull",
 		summary: "Move the local files to the sites' newest version.",
-		usage:   []string{"paisans deployment pull [--config " + config.FileName + "] [--root <sha>] [--execute] [--yes]"},
+		usage:   []string{"paisans deployment pull [--config " + config.FileName + "] [--root <sha>] [--key <path.pub>] [--execute] [--yes]"},
 		detail: "Move the local files to the sites' newest version, or, over local edits, show the difference and put its files in .paisans/incoming/." +
-			configTrust,
+			configTrust + "\n\n" + keyTrust,
 	},
 	{
 		name:    "deployment log",
 		summary: "List every version, its signer, and the sites holding it.",
-		usage:   []string{"paisans deployment log [--config " + config.FileName + "] [--root <sha>]"},
-		detail:  "List every version of the configuration the sites keep, its signer, and the sites holding it." + configTrust,
+		usage:   []string{"paisans deployment log [--config " + config.FileName + "] [--root <sha>] [--key <path.pub>]"},
+		detail:  "List every version of the configuration the sites keep, its signer, and the sites holding it." + configTrust + "\n\n" + keyTrust,
 	},
 	{
 		name:    "deployment recover",
 		summary: "Write the newest configuration onto an empty directory.",
-		usage:   []string{"paisans deployment recover --from <user@host[:port]>... [--root <sha>] [--id <id>]\n                       [--config " + config.FileName + "] [--execute] [--yes]"},
+		usage:   []string{"paisans deployment recover --from <user@host[:port] or ssh alias>... [--root <sha>] [--key <path.pub>] [--id <id>]\n                       [--config " + config.FileName + "] [--execute] [--yes]"},
 		detail: "Onto an empty directory, gather from the --from hosts and every site the trusted heads name, and write the head's files, or each head's in .paisans/incoming/ with a fork. " +
 			"With --execute, the recovered version is also saved to this workstation's saved deployments (see deployment list)." +
-			configTrust,
+			configTrust + "\n\n" + keyTrust + "\n\n" + sshAliasTopic,
 	},
 	{
 		name:    "deployment list",
@@ -383,12 +384,20 @@ var helpCommands = []helpCommand{
 			"Each is a directory holding " + config.FileName + ", secrets.enc.yaml and .sops.yaml, which any command takes with --config. Reads nothing else, and changes nothing.",
 	},
 	{
+		name:    "deployment checkout",
+		summary: "Copy a saved deployment into an empty directory to edit.",
+		usage:   []string{"paisans deployment checkout <id, start of id, or domain> [--config " + config.FileName + "] [--execute]"},
+		detail: "Copy a deployment saved on this workstation (see deployment list) into the empty directory of --config: " + config.FileName + ", secrets.enc.yaml and .sops.yaml, and in .paisans/ the store with every version and its signature, the signing key, the pinned root, the head and the highest revision seen, so deployment log, pull and publish trust there as they do in the saved copy. " +
+			"The saved copy is judged from its own anchor first, and the copy again once written; a copy that differs is removed. Refuses a directory with any of those files, and an unverified or forked saved copy, which deployment recover --root <sha> pins instead. " +
+			"Never overwrites a file, and reaches no host. The saved copy may be behind the sites; deployment pull brings it up to date. Writes nothing without --execute.",
+	},
+	{
 		name:    "deployment fetch",
 		summary: "Save every deployment a host holds to this workstation.",
-		usage:   []string{"paisans deployment fetch --ssh <user@host[:port]>"},
+		usage:   []string{"paisans deployment fetch --ssh <user@host[:port] or ssh alias>"},
 		detail: "Read, through sudo, the registry of the host --ssh names and, for each deployment in it, every version of its configuration the host keeps, and save the newest trusted one with the saved deployments (see deployment list). " +
 			"A deployment this workstation saved before is judged from the key that signed it, as deployment pull judges; one it never saved has nothing to trust from, so its newest versions are put in .paisans/incoming/<sha>/ and listed as unverified, " +
-			"for deployment recover --root <sha> to pin once the hash is checked with another operator. Needs no " + config.FileName + "; changes nothing on the host.",
+			"for deployment recover --root <sha> to pin once the hash is checked with another operator. Needs no " + config.FileName + "; changes nothing on the host.\n\n" + sshAliasTopic,
 	},
 	{
 		name:    "operator magic-link",
@@ -487,6 +496,12 @@ var helpCommands = []helpCommand{
 }
 
 // yesTopic is what every command that takes --yes says of it.
+// sshAliasTopic is how a destination flag reads a Host alias of the
+// operator's ssh config.
+const sshAliasTopic = "A destination is user@host[:port], or a Host alias of your ssh config: alias, user@alias, alias:port or user@alias:port, a user or port given overriding the config's. " +
+	"The alias is resolved with ssh -G, so Match, Include and wildcards apply as they do for ssh, and ssh is given the alias, so its ProxyJump, IdentityFile and other options apply to the connection. " +
+	"Messages show it as alias -> user@host:port. A destination with no user takes the one ssh -G reports: its config's User, or your local login where none applies, as ssh does."
+
 const yesTopic = "--yes answers each confirmation as typing it would, with no terminal, and prints approved by --yes: and what it approved, a line for each. It needs PAISANS_ALLOW_YES=1 in the environment, so a command line copied alone never approves anything."
 
 // configTrust is what every config subcommand shares, after its own
@@ -497,9 +512,18 @@ const configTrust = "\n\n" +
 	"--yes types partial and rollback for each command but log, which asks nothing. " + yesTopic + " " +
 	"With --execute each site first syncs with its peers; without it, and in log, no site is changed and only .paisans/ here is written."
 
+// keyTrust is how pull, log and recover start trust from --key on a
+// workstation that records no signing key.
+const keyTrust = "With no key recorded in .paisans/signing-key, name your own operator key with --key <path.pub>. It anchors only on versions it signed itself, under one root, that the trust rules trust from that root: every head must be signed by it and list it under an operator, and every trusted version must declare the deployment's id. " +
+	"A newer version by another operator, or the key's versions under two roots, need --root <sha>, the full hash deployment log prints on a root's line or another operator's .paisans/config-root holds, since a key alone cannot tell this deployment's history from one it signed before a redeploy under the same id. " +
+	"For the same reason, when every site that answers serves an older incarnation, a recovery with --key can land on a genuine version the key signed there: recover --key prints the full hash of the root it pins, to confirm with another operator before applying. " +
+	"A pinned root anchors alone, and --key is then ignored, with a note. With a root pinned, a gather whose sites serve none of its history is refused: the pin is out of date, and you recover from the current root into an empty directory, or a site that answered holds a history it should not. " +
+	"pull and recover with --execute record the named key in .paisans/signing-key when your ssh-agent holds it (load it with ssh-add) and an operator of the head lists it; log records nothing. With neither --key nor a root, they refuse and say so."
+
 // executeTopic is `paisans help execute`: which commands reach a host, and
 // what --execute lets each of them change.
-const executeTopic = `site prepare, site deployments, apply, prune, site add, site remove, mesh rekey,
+func executeTopic() string {
+	return `site prepare, site deployments, apply, prune, site add, site remove, mesh rekey,
 storage init, storage add, storage rotate-key, app admin create, app remove,
 oidc client create, secrets prune, secrets rotate, preflight, failover test,
 doctor, init, config, operator register, site admit and site evict
@@ -519,8 +543,8 @@ last. Every other command that writes to a host first reads the host's admission
 record for this deployment and refuses, with nothing changed, a host that has
 none, or whose record does not match the site: another site name, ssh user, SSH
 or WireGuard port, mesh subnet, forwarding, a grant its roles need, or, for
-an external web server, the owner's web server record. It names the two lines that fix it, paisans site request --site <site> >
-<site>.admit for the operator, and sudo paisans site admit --request
+an external web server, the owner's web server record. It names the two lines that fix it, ` + progname.Cmd() + ` site request --site <site> >
+<site>.admit for the operator, and sudo ` + progname.Default + ` site admit --request
 <site>.admit for the host's owner. apply and site prepare also refuse when
 anything else on the host overlaps the mesh subnet. dns init and dns prune reach
 no host, only the DNS provider's API, and change it only with --execute; site
@@ -536,6 +560,7 @@ the reasons, values, request bodies and command output behind each step show
 too. A failure always says what went wrong and what to do; with -v, the
 underlying error shows under it too.
 `
+}
 
 // helpWidth is the column help text wraps at.
 const helpWidth = 80
@@ -567,8 +592,8 @@ func isGroup(name string) bool { return len(subcommands(name)) > 0 }
 
 // printTopHelp writes the first page: every command, one line each.
 func printTopHelp(w io.Writer) {
-	fmt.Fprint(w, "paisans installs and runs a community stack from "+config.FileName+".\n\n")
-	fmt.Fprint(w, "Usage: paisans <command> [flags]\n")
+	fmt.Fprint(w, progname.Name()+" installs and runs a community stack from "+config.FileName+".\n\n")
+	fmt.Fprint(w, "Usage: "+progname.Cmd()+" <command> [flags]\n")
 	for _, s := range helpSections {
 		fmt.Fprintf(w, "\n%s:\n", s.title)
 		for _, name := range s.names {
@@ -581,14 +606,14 @@ func printTopHelp(w io.Writer) {
 	}
 	fmt.Fprint(w, "\nA command that changes a host changes it only with --execute; without it, it\n"+
 		"shows what it would do. Every command takes -v or --verbose.\n\n"+
-		"Run 'paisans help <command>' for a command's details, and 'paisans help\n"+
+		"Run '"+progname.Cmd()+" help <command>' for a command's details, and '"+progname.Cmd()+" help\n"+
 		"execute' for which commands reach a host and what --execute changes.\n")
 }
 
 // printGroupHelp writes a group's page: its subcommands, one line each.
 func printGroupHelp(w io.Writer, group string) {
 	subs := subcommands(group)
-	fmt.Fprintf(w, "%s\n\nUsage: paisans %s <command> [flags]\n\nCommands:\n", groupSummary[group], group)
+	fmt.Fprintf(w, "%s\n\nUsage: %s %s <command> [flags]\n\nCommands:\n", groupSummary[group], progname.Cmd(), group)
 	width := 0
 	for _, c := range subs {
 		width = max(width, len(strings.TrimPrefix(c.name, group+" ")))
@@ -596,7 +621,7 @@ func printGroupHelp(w io.Writer, group string) {
 	for _, c := range subs {
 		fmt.Fprintf(w, "  %-*s  %s\n", width, strings.TrimPrefix(c.name, group+" "), c.summary)
 	}
-	fmt.Fprintf(w, "\nRun 'paisans %s <command> --help' for a command's usage, details and flags.\n", group)
+	fmt.Fprintf(w, "\nRun '%s %s <command> --help' for a command's usage, details and flags.\n", progname.Cmd(), group)
 }
 
 // printCommandHelp writes one command's page: its usage, what it does, and,
@@ -604,7 +629,7 @@ func printGroupHelp(w io.Writer, group string) {
 func printCommandHelp(w io.Writer, c *helpCommand, fs *flag.FlagSet) {
 	fmt.Fprint(w, "Usage:\n")
 	for _, u := range c.usage {
-		fmt.Fprintf(w, "  %s\n", u)
+		fmt.Fprintf(w, "  %s\n", invokedUsage(u))
 	}
 	for _, p := range strings.Split(c.detail, "\n\n") {
 		fmt.Fprintf(w, "\n%s\n", wrap(p, helpWidth))
@@ -617,6 +642,18 @@ func printCommandHelp(w io.Writer, c *helpCommand, fs *flag.FlagSet) {
 	fs.SetOutput(w)
 	fs.PrintDefaults()
 	fs.SetOutput(out)
+}
+
+// invokedUsage is a usage line from helpCommands, which names the command
+// paisans, with the command named as it was invoked and its continuation
+// lines moved by the difference, so they stay under its flags. A line run
+// with sudo is the host's owner's, on the host, and keeps paisans.
+func invokedUsage(u string) string {
+	if strings.HasPrefix(u, "sudo ") {
+		return u
+	}
+	u = strings.Replace(u, progname.Default, progname.Cmd(), 1)
+	return strings.ReplaceAll(u, "\n"+strings.Repeat(" ", len(progname.Default)), "\n"+strings.Repeat(" ", len(progname.Cmd())))
 }
 
 // wrap breaks text into lines of at most width columns, at spaces.
@@ -658,7 +695,7 @@ func newFlagSet(name string, handling flag.ErrorHandling) *flag.FlagSet {
 			printCommandHelp(os.Stdout, c, fs)
 			return
 		}
-		fmt.Fprintf(fs.Output(), "Run 'paisans %s --help' for its usage and flags.\n", name)
+		fmt.Fprintf(fs.Output(), "Run '%s %s --help' for its usage and flags.\n", progname.Cmd(), name)
 	}
 	return fs
 }
@@ -681,7 +718,7 @@ func resolveHelp(args []string) (page func(io.Writer), asked bool, run []string)
 		case len(topic) == 0:
 			return printTopHelp, true, nil
 		case len(topic) == 1 && topic[0] == "execute":
-			return func(w io.Writer) { fmt.Fprint(w, executeTopic) }, true, nil
+			return func(w io.Writer) { fmt.Fprint(w, executeTopic()) }, true, nil
 		default:
 			args = append(slices.Clone(topic), "--help")
 		}

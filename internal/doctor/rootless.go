@@ -10,6 +10,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // The rootless checks ask whether a site is still what its owner's site
@@ -125,7 +126,7 @@ func User(probes []UserProbe) []Finding {
 				"The deployment's user is the boundary between this deployment and the rest of the host, and each of these groups reaches past it, to root, to every user's logs, to the owner's system Docker daemon, or to the host's disks and secrets.",
 				"recover:",
 				fmt.Sprintf("  1. The host's owner takes %s out of each, with `sudo gpasswd -d %s <group>` on %s.", name, name, p.Site),
-				fmt.Sprintf("  2. `paisans doctor --site %s` again.", p.Site),
+				fmt.Sprintf("  2. `%s doctor --site %s` again.", progname.Cmd(), p.Site),
 			}})
 	}
 	return out
@@ -181,7 +182,7 @@ func DockerSocket(probes []DockerProbe) []Finding {
 				More: []string{
 					"It runs as root, and a daemon running as root is root on the host to anyone who can reach its socket, which undoes what admitting the deployment to a user of its own draws.",
 					"recover:",
-					fmt.Sprintf("  1. The host's owner finds what runs a root daemon at that socket and stops it, then runs `paisans site admit` for %s again, which sets up the user's own rootless daemon.", p.Site),
+					fmt.Sprintf("  1. The host's owner finds what runs a root daemon at that socket and stops it, then runs `%s site admit` for %s again, which sets up the user's own rootless daemon.", progname.Default, p.Site),
 				}})
 		default:
 			out = append(out, Finding{Section: SectionDocker, Level: OK, Line: fmt.Sprintf("%s: its rootless Docker answers at %s", p.Site, at)})
@@ -240,7 +241,7 @@ func SourceMark(probes []DockerProbe) []Finding {
 					More: []string{
 						"The host's own value is 1, which a new namespace copies, and the user's manager has not loaded the drop-in apply installs to set it to 0 at every start of the daemon. At 1 every new connection to an app waits a second.",
 						"recover:",
-						fmt.Sprintf("  1. `paisans deployment apply --execute`, which installs the drop-in on %s and has the user's manager reload it.", p.Site),
+						fmt.Sprintf("  1. `%s deployment apply --execute`, which installs the drop-in on %s and has the user's manager reload it.", progname.Cmd(), p.Site),
 					}})
 				break
 			}
@@ -251,7 +252,7 @@ func SourceMark(probes []DockerProbe) []Finding {
 				More: []string{
 					"RootlessKit hands each connection to a published port in with the client's address, and at 1 the kernel drops the replies as coming from one of the namespace's own addresses. RootlessKit dials again a second later without the address, so the app also sees the Docker bridge's gateway, not the client. The namespace copies the value from its host, and Tailscale sets the host's to 1.",
 					"recover:",
-					fmt.Sprintf("  1. `paisans deployment apply --execute`, which sets it to 0 in the namespace as the deployment's user on %s, and installs the drop-in that sets it again at every start of the daemon. The host's own value, which Tailscale needs, is left as it is.", p.Site),
+					fmt.Sprintf("  1. `%s deployment apply --execute`, which sets it to 0 in the namespace as the deployment's user on %s, and installs the drop-in that sets it again at every start of the daemon. The host's own value, which Tailscale needs, is left as it is.", progname.Cmd(), p.Site),
 				}})
 		default:
 			out = append(out, Finding{Section: SectionDocker, Level: Warn,
@@ -280,7 +281,7 @@ func Linger(d deployment.Deployment, probes []LingerProbe) []Finding {
 				More: []string{
 					"Without it the user's systemd instance, and with it its Docker daemon and every container, stops when the last login to the user ends, and nothing of the deployment starts at boot.",
 					"recover:",
-					fmt.Sprintf("  1. The host's owner runs `paisans site admit` for %s again, which turns it on.", p.Site),
+					fmt.Sprintf("  1. The host's owner runs `%s site admit` for %s again, which turns it on.", progname.Default, p.Site),
 				}})
 		default:
 			why := p.Err
@@ -299,7 +300,7 @@ func Linger(d deployment.Deployment, probes []LingerProbe) []Finding {
 				More: []string{
 					fmt.Sprintf("site admit's drop-in, which starts the user's manager after %s, is missing. At boot its Docker daemon can then start a container before %s is up, and one that publishes on the mesh address fails with cannot assign requested address, which Docker does not retry.", d.WireGuardUnit(), d.Interface()),
 					"recover:",
-					fmt.Sprintf("  1. The host's owner runs `paisans site admit` for %s again, which writes it; it takes effect at the next boot.", p.Site),
+					fmt.Sprintf("  1. The host's owner runs `%s site admit` for %s again, which writes it; it takes effect at the next boot.", progname.Default, p.Site),
 				}})
 		default:
 			why := "the answer has no mesh-order line"

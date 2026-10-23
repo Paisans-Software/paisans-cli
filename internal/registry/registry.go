@@ -54,6 +54,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/mesh"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
@@ -224,7 +225,7 @@ func (e *NoBuildError) Error() string {
 	if len(e.IDs) > 1 {
 		which = "the entries of deployments " + strings.Join(e.IDs, ", ") + " do"
 	}
-	return fmt.Sprintf("%s: %s not say which build of paisans claimed the host (%s). The host's owner admits each again: `paisans site request`, then `paisans site admit`", Path, which, strings.Join(e.Why, "; "))
+	return fmt.Sprintf("%s: %s not say which build of paisans claimed the host (%s). The host's owner admits each again: `%s site request`, then `%s site admit`", Path, which, strings.Join(e.Why, "; "), progname.Cmd(), progname.Default)
 }
 
 // Conflict is another deployment holding what a claim needs.
@@ -600,7 +601,9 @@ func refused(t Runner, e Entry, why error) error {
 
 // clashError is a Conflict over what two deployments cannot share on a
 // host, the listen port, the mesh subnet or a role, said one short sentence
-// a clash: a role or a port with what frees it, the mesh subnet alone.
+// a clash: a role or a port with what frees it, the mesh subnet alone. A
+// role clash leaves the listen port unsaid, since no port frees the host
+// while the role is held.
 type clashError struct {
 	c    Conflict
 	ours Entry
@@ -608,8 +611,12 @@ type clashError struct {
 
 func (r clashError) Error() string {
 	who := "deployment " + r.c.who()
+	role := r.c.Holds("the gateway role") || r.c.Holds("the data role")
 	out := make([]string, 0, len(r.c.Clashes))
 	for _, clash := range r.c.Clashes {
+		if role && strings.HasPrefix(clash, "WireGuard listen port") {
+			continue
+		}
 		var s string
 		switch {
 		case strings.HasPrefix(clash, "mesh subnet"):

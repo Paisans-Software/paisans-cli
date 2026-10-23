@@ -14,6 +14,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/localstore"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -120,7 +121,7 @@ var fetchGather = func(l configstore.Local, host string, t apply.Transport, id s
 func runDeploymentFetch(args []string) error {
 	fs := newFlagSet("deployment fetch", flag.ContinueOnError)
 	reporter := commonFlags(fs)
-	sshFlag := fs.String("ssh", "", "the host to fetch from, user@host[:port]")
+	sshFlag := fs.String("ssh", "", "the host to fetch from, user@host[:port] or an alias of your ssh config, [user@]alias[:port]")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -128,9 +129,9 @@ func runDeploymentFetch(args []string) error {
 		return &ui.Problem{Hint: "deployment fetch takes no argument", Explain: "Got " + strings.Join(fs.Args(), " ") + "."}
 	}
 	if *sshFlag == "" {
-		return &ui.Problem{Hint: "deployment fetch needs --ssh", Explain: "Name the host with --ssh user@host[:port], Eg: --ssh admin@203.0.113.9."}
+		return &ui.Problem{Hint: "deployment fetch needs --ssh", Explain: "Name the host with --ssh user@host[:port], or an alias of your ssh config, Eg: --ssh admin@203.0.113.9 or --ssh home-a."}
 	}
-	dest, err := config.ParseDestination(*sshFlag)
+	dest, err := parseDestination(*sshFlag)
 	if err != nil {
 		return sshFlagProblem(*sshFlag, err)
 	}
@@ -158,12 +159,16 @@ func runDeploymentFetch(args []string) error {
 		r.Result("%s holds no deployment; nothing was fetched.", dest)
 		return nil
 	}
+	// The source saved with each copy is dest as messages show it: for an
+	// alias, both the alias and the address it resolved to, since the alias
+	// means something only in this workstation's ssh config and may later
+	// name another host.
 	source := "fetched from " + dest.String()
 	var saved, unverified, failed int
 	for _, id := range slices.Sorted(maps.Keys(reg.Deployments)) {
 		e := reg.Deployments[id]
 		r.Section(fmt.Sprintf("%s (%s)", id, orDash(e.Domain)))
-		switch fetchOne(r, st, dest.String(), t, id, e.Domain, source) {
+		switch fetchOne(r, st, dest.Arg(), t, id, e.Domain, source) {
 		case localstore.Verified:
 			saved++
 		case localstore.Unverified, localstore.Fork:
@@ -172,7 +177,7 @@ func runDeploymentFetch(args []string) error {
 			failed++
 		}
 	}
-	r.Result("%d saved, %d set aside unverified, %d not fetched, in %s. paisans deployment list shows them.", saved, unverified, failed, st.Base)
+	r.Result("%d saved, %d set aside unverified, %d not fetched, in %s. %s deployment list shows them.", saved, unverified, failed, st.Base, progname.Cmd())
 	if failed > 0 {
 		return &ui.Problem{Hint: fmt.Sprintf("%d deployment(s) were not fetched", failed), Explain: "Each is listed above with why. The others were saved."}
 	}
@@ -224,7 +229,7 @@ func fetchOne(r ui.Reporter, st localstore.Store, host string, t apply.Transport
 				return ""
 			}
 		}
-		r.Warn("a fork", fmt.Sprintf("Each head's files are in %s/<sha>/. Merge them in the deployment's own directory and publish with paisans deployment publish --merge.", l.Incoming()))
+		r.Warn("a fork", fmt.Sprintf("Each head's files are in %s/<sha>/. Merge them in the deployment's own directory and publish with %s deployment publish --merge.", l.Incoming(), progname.Cmd()))
 		head := g.Verdict.Heads[0]
 		if err := st.Record(localstore.Saved{ID: id, Domain: domain, SHA: head, Revision: g.Versions[head].Revision, Status: localstore.Fork, Source: source, SavedAt: configNow().UTC()}); err != nil {
 			r.Warn("not recorded", errLine(err))
@@ -279,8 +284,7 @@ func setAsideUnverified(r ui.Reporter, st localstore.Store, l configstore.Local,
 		}
 	}
 	r.Warn(fmt.Sprintf("unverified: revision %d, %s", top, strings.Join(newest, ", ")),
-		fmt.Sprintf("This workstation never applied or recovered this deployment, so it holds no key or root to judge what %s serves, and anyone with root there could have written it. Its files are in %s/<sha>/ only. "+
-			"Check the hash with another operator, then pin it: paisans deployment recover --from %s --id %s --root <sha> --config <empty directory>/%s --execute.", host, l.Incoming(), host, id, config.FileName))
+		fmt.Sprintf("This workstation never applied or recovered this deployment, so it holds no key or root to judge what %s serves, and anyone with root there could have written it. Its files are in %s/<sha>/ only. Check the hash with another operator, then pin it: %s deployment recover --from %s --id %s --root <sha> --config <empty directory>/%s --execute.", host, l.Incoming(), progname.Cmd(), host, id, config.FileName))
 	if err := st.Record(localstore.Saved{ID: id, Domain: domain, SHA: newest[0], Revision: top, Status: localstore.Unverified, Source: source, SavedAt: configNow().UTC()}); err != nil {
 		r.Warn("not recorded", errLine(err))
 	}

@@ -1,6 +1,7 @@
 package apply
 
 import (
+	"errors"
 	"io"
 	"os/exec"
 	"slices"
@@ -57,6 +58,38 @@ func TestForwardEndSaysWhy(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "Connection refused") || !strings.Contains(err.Error(), "smtp.example.org:587") {
 		t.Errorf("err = %v", err)
 	}
+	if !errors.Is(err, ErrForwardNotOpened) || !errors.Is(err, io.EOF) {
+		t.Errorf("err = %v, want ErrForwardNotOpened and io.EOF", err)
+	}
+}
+
+// A forward that opened and then ended, with nothing from ssh or with a
+// reason that is not the channel failing to open, is not ErrForwardNotOpened:
+// something at the address answered the connection.
+func TestForwardEndAfterOpenIsNotNotOpened(t *testing.T) {
+	for _, script := range []string{`exit 0`, `echo "Connection to home-a closed by remote host." >&2; exit 0`} {
+		c, err := forward(exec.Command("sh", "-c", script), "deploy@home-a to smtp.example.org:587")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = c.Read(make([]byte, 1))
+		c.Close()
+		if !errors.Is(err, io.EOF) || errors.Is(err, ErrForwardNotOpened) {
+			t.Errorf("%s: err = %v, want io.EOF alone", script, err)
+		}
+	}
+}
+
+// ssh's own words for a forward the host refused to open.
+func TestForwardSessionRefusedIsNotOpened(t *testing.T) {
+	c, err := forward(exec.Command("sh", "-c", `echo "Stdio forwarding request failed: Session open refused by peer" >&2; exit 255`), "deploy@home-b to 10.44.0.1:25")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if _, err = c.Read(make([]byte, 1)); !errors.Is(err, ErrForwardNotOpened) {
+		t.Errorf("err = %v, want ErrForwardNotOpened", err)
+	}
 }
 
 func TestForwardCloseEndsTheCommand(t *testing.T) {
@@ -70,5 +103,30 @@ func TestForwardCloseEndsTheCommand(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Close did not end the command")
+	}
+}
+
+// Without a shared master, ssh -W is a connection of its own: ssh says the
+// channel failed to open, then exits with its own fatal line. Any line of
+// stderr saying so is a forward not opened, and the reason given is the
+// channel's.
+func TestForwardOwnConnectionNotOpened(t *testing.T) {
+	for _, script := range []string{
+		`printf 'channel 0: open failed: connect failed: No route to host\nstdio forwarding failed\n' >&2; exit 255`,
+		`printf 'channel 0: open failed: administratively prohibited: open failed\nstdio forwarding failed\n' >&2; exit 255`,
+		`echo "stdio forwarding failed" >&2; exit 255`,
+	} {
+		c, err := forward(exec.Command("sh", "-c", script), "deploy@home-b to 10.44.0.1:25")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = c.Read(make([]byte, 1))
+		c.Close()
+		if !errors.Is(err, ErrForwardNotOpened) || !errors.Is(err, io.EOF) {
+			t.Errorf("%s: err = %v, want ErrForwardNotOpened", script, err)
+		}
+		if strings.Contains(script, "channel 0") && !strings.Contains(err.Error(), "channel 0: open failed") {
+			t.Errorf("%s: err = %v, want the channel's reason", script, err)
+		}
 	}
 }

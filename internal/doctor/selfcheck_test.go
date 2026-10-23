@@ -3,6 +3,8 @@ package doctor
 import (
 	"strings"
 	"testing"
+
+	"github.com/paisans-software/paisans-cli/internal/selfcheck"
 )
 
 // ourCaddy is a site that answered as this deployment.
@@ -54,6 +56,45 @@ func TestSelfCheckNamesThePortThatWasSilent(t *testing.T) {
 		text := strings.Join(f.More, "\n")
 		if !strings.Contains(text, "203.0.113.20 for http://health.example.org/.well-known/paisans/f2a9 from this workstation, once, and nothing answered") || strings.Contains(text, "https://") {
 			t.Errorf("down %v:\n%s", down, text)
+		}
+	}
+}
+
+// A refusal and a timeout each get their own advice: a refusal points at
+// what holds the address, a timeout at what lies on the way.
+func TestSelfCheckAdvisesByHowThePortWasSilent(t *testing.T) {
+	cfg := fixture(t)
+	for name, c := range map[string]struct {
+		why       selfcheck.Silence
+		want, not []string
+	}{
+		"refused": {selfcheck.Refused,
+			[]string{"203.0.113.20 for https://health.example.org/.well-known/paisans/f2a9 from this workstation, once, and the connection was refused", "nothing listens on 443", "containers watch", "public_address is the address they arrive on"},
+			[]string{"nothing answered"}},
+		"timed out": {selfcheck.TimedOut,
+			[]string{"203.0.113.20 for https://health.example.org/.well-known/paisans/f2a9 from this workstation, once, and nothing answered before it timed out", "dropped", "accepted it and never answered", "Caddy is not hung", "hairpin NAT", "forwards 80 and 443 to watch"},
+			nil},
+		"unexplained": {selfcheck.Unexplained,
+			[]string{"once, and nothing answered.", "hairpin NAT"},
+			nil},
+	} {
+		silent := ourCaddy
+		silent.Silent, silent.Why = 443, c.why
+		silent.Err = "443 on watch does not answer https://health.example.org/.well-known/paisans/f2a9 through 203.0.113.20: whatever"
+		f := SelfChecks(cfg, []SelfCheckProbe{silent})[0]
+		text := strings.Join(f.More, "\n")
+		if f.Level != Fail {
+			t.Errorf("%s: level %v", name, f.Level)
+		}
+		for _, w := range c.want {
+			if !strings.Contains(text, w) {
+				t.Errorf("%s lacks %q:\n%s", name, w, text)
+			}
+		}
+		for _, w := range c.not {
+			if strings.Contains(text, w) {
+				t.Errorf("%s has %q:\n%s", name, w, text)
+			}
 		}
 	}
 }

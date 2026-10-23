@@ -71,6 +71,13 @@ func TestMain(m *testing.M) {
 		}
 		return rec, nil
 	}
+	// No test reads the workstation's ssh config: a destination resolves
+	// through a stub ssh -G, which knows no alias, so every host is itself.
+	// A test about aliases sets its own (withSSHAliases).
+	operatorSSHConfig = func() config.SSHConfig { return stubSSHConfig(nil) }
+	// No test reads the ssh-agent of the shell running the tests: a test
+	// about keys says which the agent holds.
+	agentKeys = func() []string { return nil }
 	// Every run classifies every site: here each host lets the run in and
 	// has admitted the deployment as its site, so every site is ready. A
 	// test about a site missing sets its own (classifyWith).

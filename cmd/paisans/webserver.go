@@ -9,6 +9,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/webserver"
 )
@@ -42,7 +43,7 @@ func recordedWebServer(cfg *config.Config, target webserver.Target) (webserver.W
 // check fails, to name it.
 func runWebServer(args []string) error {
 	if len(args) < 1 || (args[0] != "show" && args[0] != "check") {
-		return fmt.Errorf("web-server takes one subcommand, show or check: paisans web-server show --app <name>")
+		return fmt.Errorf("web-server takes one subcommand, show or check: %s web-server show --app <name>", progname.Cmd())
 	}
 	sub := args[0]
 	fs := newFlagSet("web-server "+sub, flag.ContinueOnError)
@@ -105,7 +106,7 @@ func runWebServer(args []string) error {
 			if ws, err := ui.Get(r, "read the admission record of "+target.Site, func() (webserver.WebServer, error) {
 				return recordedWebServer(cfg, target)
 			}); err == nil {
-				r.Note(ws.Summary(), "paisans web-server show --app "+target.App+" prints what the host's owner installs in it")
+				r.Note(ws.Summary(), progname.Cmd()+" web-server show --app "+target.App+" prints what the host's owner installs in it")
 			}
 		}
 		return fmt.Errorf("web-server check for %s: fix what is marked FAIL and run it again", target.App)

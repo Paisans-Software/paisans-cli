@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // The DNS token check asks the provider, from one place, whether it accepts
@@ -181,6 +182,10 @@ func (c TokenCheck) fail(r TokenResult) TokenResult {
 // errNoToken is a host whose caddy.env holds no token.
 var errNoToken = errors.New("no token")
 
+// errLineBreak is a host whose caddy.env holds a token with a newline or a
+// carriage return in it, which the check refuses to send (remoteGet).
+var errLineBreak = errors.New("the token holds a line break")
+
 // unreadableEnv is a host whose caddy.env could not be read at all, with
 // why. It is not errNoToken: caddy.env is root's and 0600, so a check that
 // runs without root sees a file it cannot read, which says nothing about
@@ -306,6 +311,9 @@ func (l *zoneLookup) Records(context.Context, string, string) ([]Record, error) 
 func (l *zoneLookup) Create(context.Context, string, Record) error {
 	return errors.New("dns: the token check writes nothing")
 }
+func (l *zoneLookup) Update(context.Context, string, Record) error {
+	return errors.New("dns: the token check writes nothing")
+}
 func (l *zoneLookup) AllRecords(context.Context, string) ([]Record, error) {
 	return nil, errors.New("dns: the token check reads no records")
 }
@@ -318,6 +326,12 @@ func (c TokenCheck) unanswered(caller tokenCaller, err error) TokenResult {
 		return c.fail(TokenResult{
 			Finding: "caddy.env on " + c.from() + " holds no ACME_DNS_TOKEN",
 			Advice:  "apply renders it from external.acme_dns_token. Set that in the secrets and apply again.",
+		})
+	}
+	if errors.Is(err, errLineBreak) {
+		return c.fail(TokenResult{
+			Finding: "caddy.env on " + c.from() + " holds an ACME_DNS_TOKEN with a line break in it",
+			Advice:  "Nothing was sent to the provider. No token holds one, and curl would read the rest of it as another option. Set the token again with `" + progname.Cmd() + " secrets set external.acme_dns_token` and apply.",
 		})
 	}
 	var unreadable unreadableEnv
@@ -512,6 +526,8 @@ func (r *remoteCaller) get(_ context.Context, path string, query url.Values) (in
 	switch strings.TrimSpace(kind) {
 	case "none":
 		return 0, nil, errNoToken
+	case "linebreak":
+		return 0, nil, errLineBreak
 	case "account":
 		r.account = true
 	case "user":
@@ -535,17 +551,45 @@ func (r *remoteCaller) get(_ context.Context, path string, query url.Values) (in
 // replaced by a POSIX loop rather than sed, because sed would need the
 // token in its arguments. A file sed cannot read, missing or not readable
 // by the user the command runs as, prints "unreadable" and sed's error
-// first, so that it is told apart from a file that holds no token.
+// first, so that it is told apart from a file that holds no token. A token
+// holding a newline or a carriage return prints "linebreak" and sends
+// nothing: curl reads its configuration a line at a time, so the rest of
+// such a token would be read as another option of a curl run through sudo.
 func remoteGet(envFile, target string) string {
 	return "f=" + quote(envFile) + "; " +
 		`e=$(sed -n 1p "$f" 2>&1 >/dev/null); if [ $? -ne 0 ]; then printf 'unreadable %s\n' "$e" | head -n 1; exit 0; fi; ` +
-		`t=$(sed -n 's/^ACME_DNS_TOKEN=//p' "$f"); ` +
+		envTokenRead +
 		`if [ -z "$t" ]; then echo none; exit 0; fi; ` +
+		`cr=$(printf '\r'); case $t in *"$cr"*|*'
+'*) echo linebreak; exit 0;; esac; ` +
 		`case $t in cfat_*) echo account;; *) echo user;; esac; ` +
-		`o=$(printf 'header = "Authorization: Bearer %s"\n' "$t" | curl -sS --max-time 20 -w '\n%{http_code}' -K - ` + quote(target) + `); s=$?; ` +
+		curlQuoted +
+		`o=$(printf 'header = "Authorization: Bearer %s"\n' "$q" | curl -sS --max-time 20 -w '\n%{http_code}' -K - ` + quote(target) + `); s=$?; ` +
 		`r=; while :; do case $o in *"$t"*) r=$r${o%%"$t"*}'[redacted]'; o=${o#*"$t"};; *) break;; esac; done; ` +
 		`printf '%s\n' "$r$o"; exit $s`
 }
+
+// envTokenRead is the host's commands that set t to ACME_DNS_TOKEN's value
+// in the file "$f" names, as docker compose hands it to Caddy. Render writes
+// it with configmerge.EnvValue: bare, or double quoted with backslash,
+// double quote, dollar and newline escaped, and this undoes that quoting
+// exactly, in the shell, one character at a time. Decoding it there rather
+// than on the workstation keeps the token on the host and out of every
+// argument list: [ is a shell builtin, as printf is.
+const envTokenRead = `t=$(sed -n 's/^ACME_DNS_TOKEN=//p' "$f"); ` +
+	`case $t in \"*\") t=${t#\"}; t=${t%\"}; u=; ` +
+	`while [ -n "$t" ]; do r=${t#?}; c=${t%"$r"}; t=$r; ` +
+	`if [ "$c" = '\' ]; then r=${t#?}; c=${t%"$r"}; t=$r; if [ "$c" = n ]; then c='
+'; fi; fi; u=$u$c; done; t=$u;; esac; `
+
+// curlQuoted is the host's commands that set q to the token in t, escaped
+// for a double quoted string in curl's configuration, where a backslash
+// starts an escape and a double quote ends the string: each is written
+// behind a backslash, so curl sends the token as it was issued. It walks the
+// token one character at a time, as envTokenRead does, so the token is in no
+// argument list.
+const curlQuoted = `q=; r0=$t; while [ -n "$r0" ]; do r=${r0#?}; c=${r0%"$r"}; r0=$r; ` +
+	`case $c in \\|\") q=$q\\$c;; *) q=$q$c;; esac; done; `
 
 // curlCause is the line of a failed command that says why: curl's own
 // error when it printed one, the transport's error otherwise.

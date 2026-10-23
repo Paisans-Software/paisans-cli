@@ -448,6 +448,11 @@ func (d doctorReads) Sudo(site string) doctor.SudoProbe {
 	return doctor.SudoProbe{Site: site, Out: out, Err: failure}
 }
 
+func (d doctorReads) Memory(site string) doctor.MemoryProbe {
+	out, failure := d.read(site, doctor.MemoryCommand)
+	return doctor.MemoryProbe{Site: site, Out: out, Err: failure}
+}
+
 func (d doctorReads) Mesh(site string) doctor.MeshProbe {
 	t := d.transports[site]
 	p := doctor.MeshProbe{Site: site}
@@ -591,7 +596,7 @@ func (d doctorReads) SelfCheck(site string) doctor.SelfCheckProbe {
 	}
 	var u *selfcheck.Unanswered
 	if errors.As(err, &u) {
-		p.Silent, p.URL = u.Port, u.URL
+		p.Silent, p.URL, p.Why = u.Port, u.URL, u.Why
 	}
 	if err != nil {
 		p.Err = err.Error()

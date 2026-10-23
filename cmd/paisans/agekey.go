@@ -12,6 +12,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/keystore"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -99,7 +100,7 @@ func ensureAgeKey(r ui.Reporter, id, configPath, secretsPath, keyFile string) er
 	case keyFile != "":
 		// paisans does not look for a key file on its own, so without this
 		// line the next command cannot decrypt.
-		r.Note("set this before running paisans or sops", "export "+export)
+		r.Note("set this before running "+progname.Cmd()+" or sops", "export "+export)
 	case export != "":
 		r.Detail("paisans finds the key on its own. To run sops by hand: export %s", export)
 	}
@@ -179,9 +180,15 @@ func writeKeyFile(id, configPath, path, key string) (string, error) {
 		return "", err
 	}
 	if inside(filepath.Dir(configPath), abs) {
+		// The directory is named in full: shortened relative to the
+		// current directory it is often ".", which says nothing.
+		dir := filepath.Dir(configPath)
+		if a, err := filepath.Abs(dir); err == nil {
+			dir = a
+		}
 		return "", &ui.Problem{
 			Hint:    "the age key file would sit beside " + config.FileName,
-			Explain: fmt.Sprintf("%s is inside %s, which is usually a git repository, so the key would be one git add from being committed. Name a path in an existing directory outside it, Eg: ~/.config/paisans/%s.key once ~/.config/paisans exists.", ui.ShortPath(abs), ui.ShortPath(filepath.Dir(configPath)), deployment.Deployment{ID: id}.Token()),
+			Explain: fmt.Sprintf("%s is inside %s, which is usually a git repository, so the key would be one git add from being committed. Name a path in an existing directory outside it, Eg: ~/.config/paisans/%s.key once ~/.config/paisans exists.", ui.ShortPath(abs), dir, deployment.Deployment{ID: id}.Token()),
 		}
 	}
 	f, err := os.OpenFile(abs, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)

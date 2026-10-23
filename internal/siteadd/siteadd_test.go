@@ -116,7 +116,7 @@ func TestAJoinCompletesAndLeavesNothingToDo(t *testing.T) {
 		t.Errorf("synchronous mode %v, HAProxy serves:\n%s", w.syncMode, w.served["home-a"])
 	}
 	for _, c := range w.hosts["home-a"].commands {
-		if strings.HasSuffix(c, "/srv/paisans/f2a9/infra/compose.yaml restart") || strings.Contains(c, "/srv/paisans/f2a9/infra/compose.yaml up -d") {
+		if strings.HasSuffix(c, "/srv/paisans/f2a9/infra/compose.yaml restart") || strings.HasSuffix(c, "/srv/paisans/f2a9/infra/compose.yaml restart --timeout 60") || strings.Contains(c, "/srv/paisans/f2a9/infra/compose.yaml up -d") {
 			t.Errorf("the primary's whole stack was acted on: %s", c)
 		}
 	}
@@ -210,8 +210,10 @@ func TestAStoppedEtcdJoinResumes(t *testing.T) {
 	if len(steps(p, 2)) != 0 {
 		t.Errorf("the mesh is planned again: %v", steps(p, 2))
 	}
-	if hasStep(p, 3, "vm", "add") || !hasStep(p, 3, "vm", "start") {
-		t.Errorf("the learner is added again, or not started: %v", steps(p, 3))
+	// The learner never started, so it is removed and added again under a
+	// new ID rather than started under the old one.
+	if !hasStep(p, 3, "home-a", "remove") || !hasStep(p, 3, "vm", "add") || !hasStep(p, 3, "vm", "start") {
+		t.Errorf("the unstarted learner is not removed, added again and started: %v", steps(p, 3))
 	}
 	if err := siteadd.Execute(p); err != nil {
 		t.Fatal(err)

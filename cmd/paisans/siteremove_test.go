@@ -88,6 +88,7 @@ func TestConfirmSiteWantsTheSitesName(t *testing.T) {
 }
 
 func TestChooseHost(t *testing.T) {
+	withSSHAliases(t)
 	cfg, err := config.Load(fixtureConfig())
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +99,9 @@ func TestChooseHost(t *testing.T) {
 		{site: "home-b", ssh: "admin@198.51.100.4", want: "admin@198.51.100.4:22"},
 		{site: "never", ssh: "admin@192.0.2.1:2222", want: "admin@192.0.2.1:2222"},
 		{site: "never", err: "Name its host with --ssh"},
-		{site: "home-b", ssh: "myalias", err: "not user@host"},
+		{site: "home-b", ssh: "nouser", want: stubLocalUser + "@nouser:22"},
+		{site: "home-b", ssh: "home b", err: "alias of your ssh config"},
+		{site: "home-b", ssh: "myalias", want: "myalias -> admin@203.0.113.9:2222"},
 	} {
 		got, err := chooseHost(cfg, tc.site, tc.ssh)
 		switch {
@@ -117,7 +120,7 @@ func TestSiteRemoveForceRefusesBeforeReachingAHost(t *testing.T) {
 		"home-b --ssh admin@192.0.2.1":                                "only --force takes",
 		"home-b --force --host-gone":                                  "--host-gone cleans no host",
 		"never --force":                                               "Name its host with --ssh",
-		"home-b --force --ssh myalias":                                "not user@host",
+		"home-b --force --ssh -oProxyCommand=x":                       "alias of your ssh config",
 		"home-b --force --execute":                                    "terminal",
 		"never --force --ssh admin@192.0.2.1 --execute --delete-data": "terminal",
 	} {

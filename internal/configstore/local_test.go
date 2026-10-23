@@ -878,7 +878,7 @@ func attest(l Local, sites map[string]apply.Transport, keyLine, signWith string,
 	if err != nil {
 		return "", err
 	}
-	g, err := gather(l, sites, len(sites), local.ID, Anchor{Root: root, Signer: key.Fingerprint}, GatherOptions{Sync: true}, pull)
+	g, err := gather(l, sites, len(sites), local.ID, Anchor{Root: root, Signers: []string{key.Fingerprint}}, GatherOptions{Sync: true}, pull)
 	if err != nil {
 		return "", err
 	}
@@ -1002,5 +1002,207 @@ func TestAPlaintextVersionIsNeverWrittenToDisk(t *testing.T) {
 	}
 	if head, _ := l.Head(); head != "" {
 		t.Errorf("a refused attestation moved the head to %s", head)
+	}
+}
+
+// stateTree is every path under l's .paisans/ with its mode, modification
+// time and contents.
+func stateTree(t *testing.T, l Local) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	err := filepath.WalkDir(filepath.Join(l.Dir, stateDir), func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		v := fmt.Sprintf("%v %d", info.Mode(), info.ModTime().UnixNano())
+		if info.Mode().IsRegular() {
+			b, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			v += " " + string(b)
+		}
+		out[p] = v
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// HeldStore opens only a store that is there, and creates nothing when none
+// is.
+func TestHeldStoreCreatesNothing(t *testing.T) {
+	needTools(t, "git")
+	l := Local{Dir: t.TempDir()}
+	if _, ok, err := l.HeldStore(); ok || err != nil {
+		t.Fatalf("HeldStore with no store: %v, %v", ok, err)
+	}
+	if _, err := os.Lstat(filepath.Join(l.Dir, stateDir)); !os.IsNotExist(err) {
+		t.Fatalf(".paisans/ was created: %v", err)
+	}
+	if _, err := l.Cache(); err != nil {
+		t.Fatal(err)
+	}
+	r, ok, err := l.HeldStore()
+	if !ok || err != nil || r.Dir != filepath.Join(l.Dir, stateDir, cacheDir) {
+		t.Fatalf("HeldStore of a store: %+v, %v, %v", r, ok, err)
+	}
+}
+
+// JudgeHeld judges what the store holds as a gather reaching no site would,
+// and writes nothing in .paisans/: no .gitignore put back, no store setting,
+// no seen record.
+func TestJudgeHeldWritesNothing(t *testing.T) {
+	needTools(t, "git", "ssh-keygen")
+	alice := newOperator(t)
+	operators := map[string]string{"alice": alice.pub}
+	sites := storeSites(t, "home-a")
+	l := workstation(t, edit(testFiles(), "1", operators))
+	v1, _, err := alice.publish(t, l, reach(sites, "home-a"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.WriteFiles(edit(testFiles(), "2", operators))
+	v2, _, err := alice.publish(t, l, reach(sites, "home-a"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _ := l.Cache()
+	bundle, err := src.Bundle()
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := Local{Dir: t.TempDir()}
+	to, _ := other.Cache()
+	if err := to.FetchBundle(bundle); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(other.Dir, stateDir, ".gitignore")); err != nil {
+		t.Fatal(err)
+	}
+	before := stateTree(t, other)
+	r, ok, err := other.HeldStore()
+	if !ok || err != nil {
+		t.Fatalf("HeldStore: %v, %v", ok, err)
+	}
+	g, err := JudgeHeld(other, r, testID, Anchor{Root: v1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g.Verdict.Heads) != 1 || g.Verdict.Heads[0] != v2 || !g.Verdict.Trusted[v1] || g.Versions[v2].Revision != 2 {
+		t.Fatalf("verdict %+v", g.Verdict)
+	}
+	if g.Seen == nil || g.Seen.Revision != 2 || len(g.Reached) != 0 {
+		t.Fatalf("carried %+v, reached %+v", g.Seen, g.Reached)
+	}
+	after := stateTree(t, other)
+	if !maps.Equal(before, after) {
+		for p, v := range after {
+			if before[p] != v {
+				t.Errorf("%s was written", p)
+			}
+		}
+	}
+	if rev, _, _ := other.Seen(); rev != 0 {
+		t.Errorf("seen %d was recorded", rev)
+	}
+}
+
+// Declaring finds the newest version in the head's history that declares
+// an app, after the app has left paisans-stack.yaml: a re-added app's newest
+// declaration wins, and a version that does not load is passed over.
+func TestDeclaringIsTheNewestVersionThatDeclaresTheApp(t *testing.T) {
+	needTools(t, "git", "ssh-keygen")
+	alice := newOperator(t)
+	ops := map[string]string{"alice": alice.pub}
+	news := func(note, name string) Files {
+		f := edit(testFiles(), note, ops)
+		if name != "" {
+			f.Paisans = append(f.Paisans, "apps:\n  news:\n    blueprint: writefreely\n    hostname: news.example.org\n    display_name: "+name+"\n"...)
+		}
+		return f
+	}
+	l := workstation(t, news("0", ""))
+	if d, err := l.Declaring("news"); d.History || d.Config != nil || err != nil {
+		t.Fatalf("with no head: %+v, %v", d, err)
+	}
+	if err := l.SetHead(strings.Repeat("a", 40)); err != nil {
+		t.Fatal(err)
+	}
+	if d, err := l.Declaring("news"); d.History || err != nil {
+		t.Fatalf("with a head and no store: %+v, %v", d, err)
+	}
+	if _, err := os.Stat(l.state(cacheDir)); !os.IsNotExist(err) {
+		t.Fatalf("Declaring made a store: %v", err)
+	}
+	cache, err := l.Cache()
+	if err != nil {
+		t.Fatal(err)
+	}
+	unloadable := news("x", "")
+	unloadable.Paisans = []byte("version: 1\nnot_a_field: true\n")
+	var shas []string
+	for i, f := range []Files{news("1", "Old News"), news("2", "Test News"), news("3", ""), news("4", "Back News"), news("5", ""), unloadable} {
+		sha, err := cache.Commit(f, shas[max(len(shas)-1, 0):], i+1, alice.key, testNow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		shas = append(shas, sha)
+	}
+	for _, tc := range []struct {
+		head       int
+		want       string
+		unreadable int
+	}{{2, "Test News", 0}, {5, "Back News", 1}} {
+		if err := l.SetHead(shas[tc.head]); err != nil {
+			t.Fatal(err)
+		}
+		d, err := l.Declaring("news")
+		if err != nil || d.Config == nil || !d.History {
+			t.Fatalf("head %d: %+v, %v", tc.head, d, err)
+		}
+		if got := d.Config.ClientName("news"); got != tc.want || len(d.Unreadable) != tc.unreadable {
+			t.Errorf("head %d: news's client is %q, passed over %v", tc.head, got, d.Unreadable)
+		}
+	}
+	if d, err := l.Declaring("talk"); d.Config != nil || d.SHA != "" || !d.History || len(d.Unreadable) != 1 || err != nil {
+		t.Errorf("an app no version declares: %+v, %v", d, err)
+	}
+}
+
+// paisansFiles leaves out a version without a paisans-stack.yaml and reads
+// the versions after it in the same answer.
+func TestPaisansFilesLeavesOutAVersionWithoutOne(t *testing.T) {
+	needTools(t, "git", "ssh-keygen")
+	key, _ := testSSHKey(t)
+	cache, err := InitRepo(filepath.Join(t.TempDir(), "c.git"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, err := cache.Commit(testFiles(), nil, 1, key, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree, err := cache.git(strings.NewReader(""), nil, "mktree")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := cache.git(nil, []string{"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.org", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.org"}, "commit-tree", "-m", "empty", strings.TrimSpace(string(tree)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty := strings.TrimSpace(string(out))
+	files, err := cache.paisansFiles([]string{empty, held, empty})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := files[empty]; ok || string(files[held]) != "p\n" || len(files) != 1 {
+		t.Errorf("files %q", files)
 	}
 }

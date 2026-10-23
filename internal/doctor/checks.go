@@ -31,6 +31,8 @@ type Reads interface {
 	Linger(site string) LingerProbe
 	// Sudo runs SudoCommand on the site.
 	Sudo(site string) SudoProbe
+	// Memory runs MemoryCommand on the site.
+	Memory(site string) MemoryProbe
 	// Mesh reads the site's mesh interface and the networks on the host.
 	Mesh(site string) MeshProbe
 	// EtcdHealth runs EtcdHealthCommand on a member's host.
@@ -221,6 +223,30 @@ func Checks(cfg *config.Config, sites []string, reads Reads) *Graph {
 				return func(in *Input) { in.SudoRights = append(in.SudoRights, p) }
 			},
 			Judge: func(in Input) []Finding { return SudoRights(cfg, bySite(in.SudoRights, site, SudoProbe.site)) },
+		})
+	}
+	for _, site := range sites {
+		g.Add(Node{Name: SectionSwap + " " + site, Section: SectionSwap, Site: site, Subject: site,
+			Hard: []Need{Hard(admitted(site))},
+			Gather: func(Input) func(*Input) {
+				p := reads.Memory(site)
+				return func(in *Input) { in.Memory = append(in.Memory, p) }
+			},
+			Outcome: func(in Input) Outcome {
+				for _, p := range bySite(in.Memory, site, MemoryProbe.site) {
+					if p.Answered() {
+						return Passed
+					}
+				}
+				return Failed
+			},
+			Judge: func(in Input) []Finding { return Swap(bySite(in.Memory, site, MemoryProbe.site)) },
+		})
+	}
+	for _, site := range sites {
+		g.Add(Node{Name: SectionMemory + " " + site, Section: SectionMemory, Site: site, Subject: site,
+			Hard:  []Need{Hard(SectionSwap + " " + site)},
+			Judge: func(in Input) []Finding { return Memory(cfg, bySite(in.Memory, site, MemoryProbe.site)) },
 		})
 	}
 	for _, site := range sites {

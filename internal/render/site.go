@@ -21,6 +21,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // The `all:` prefix matters: without it embed skips files beginning with a
@@ -329,6 +330,7 @@ func (p *planner) renderSite(site *siteView) ([]File, error) {
 		"Scope":                   p.scope(),
 		"EtcdInitialCluster":      initial.Cluster,
 		"EtcdInitialState":        initial.State,
+		"EtcdInitialToken":        initial.EtcdToken(),
 		"HeartbeatMS":             p.heartbeatMS(),
 		"ElectionTimeoutMS":       p.electionTimeoutMS(),
 		"PostgresVersion":         p.postgresVersion(),
@@ -431,7 +433,7 @@ func (p *planner) renderSite(site *siteView) ([]File, error) {
 		// `paisans init`, which generates one in the right shape.
 		rpcSecret := p.secrets.Storage.Garage.RPCSecret
 		if rpcSecret == "" {
-			return nil, fmt.Errorf("secrets storage.garage.rpc_secret: required for a site with a Garage role, and there is no fallback. Garage parses it as 64 hex characters and will not start without one. Run `paisans init` to generate it")
+			return nil, fmt.Errorf("secrets storage.garage.rpc_secret: required for a site with a Garage role, and there is no fallback. Garage parses it as 64 hex characters and will not start without one. Run `%s init` to generate it", progname.Cmd())
 		}
 		toml, err := p.renderTemplate("garage.toml.tmpl", map[string]any{
 			"Site":        site,

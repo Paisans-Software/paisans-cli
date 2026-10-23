@@ -225,8 +225,8 @@ func TestDNSTokenAskedForIsRotated(t *testing.T) {
 	}
 }
 
-// An answer that is empty, or the value every host runs, is refused with
-// nothing changed; the empty one names the other ways out.
+// An answer that is empty, the value every host runs, or one holding a line
+// break is refused with nothing changed; the empty one names the other ways out.
 func TestDNSTokenAnswerRefusesEmptyAndUnchanged(t *testing.T) {
 	w := newWrapWorld(t)
 	e := w.env()
@@ -243,6 +243,10 @@ func TestDNSTokenAnswerRefusesEmptyAndUnchanged(t *testing.T) {
 	err = run.Answer(e, "external.acme_dns_token", oldDNSToken)
 	if err == nil || !strings.Contains(err.Error(), "unchanged") || strings.Contains(err.Error(), oldDNSToken) {
 		t.Errorf("unchanged: %v", err)
+	}
+	err = run.Answer(e, "external.acme_dns_token", newDNSToken+"\nSTATIC_API_KEY=x")
+	if err == nil || !strings.Contains(err.Error(), "control character") || strings.Contains(err.Error(), "STATIC_API_KEY") {
+		t.Errorf("a line break: %v", err)
 	}
 	if err := run.Execute(e, nil); err == nil {
 		t.Error("a refused answer let the run go on")
@@ -286,6 +290,7 @@ func (zoneLookup) Records(context.Context, string, string) ([]dns.Record, error)
 	return nil, errors.New("not read here")
 }
 func (zoneLookup) Create(context.Context, string, dns.Record) error { return errors.New("not here") }
+func (zoneLookup) Update(context.Context, string, dns.Record) error { return errors.New("not here") }
 func (zoneLookup) AllRecords(context.Context, string) ([]dns.Record, error) {
 	return nil, errors.New("not read here")
 }

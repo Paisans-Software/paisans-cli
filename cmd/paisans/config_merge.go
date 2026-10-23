@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -34,7 +36,7 @@ func secretsOnlyEdits(local, base, head configstore.Files) bool {
 //
 // handled is false when this is not that case, and the caller refuses as it
 // always has.
-func pullMergingSecrets(r ui.Reporter, l configstore.Local, g configstore.Gathered, id, head, base, root string, configured int, local, theirs configstore.Files, execute bool, ans answerer, stdin io.Reader, stdout io.Writer) (handled bool, err error) {
+func pullMergingSecrets(r ui.Reporter, l configstore.Local, g configstore.Gathered, id, head, base, root string, held map[string]string, configured int, local, theirs configstore.Files, execute bool, ans answerer, stdin io.Reader, stdout io.Writer) (handled bool, err error) {
 	if base == "" {
 		return false, nil
 	}
@@ -55,6 +57,11 @@ func pullMergingSecrets(r ui.Reporter, l configstore.Local, g configstore.Gather
 		return true, secretsMergeProblem("the head " + head[:12])
 	}
 	ours, err := config.LoadDeploymentSecrets(filepath.Join(l.Dir, "secrets.enc.yaml"), id)
+	if errors.Is(err, config.ErrPastedControl) {
+		// It names the key and `secrets set`, the repair, and never the
+		// value, so it is said as it is.
+		return true, err
+	}
 	if err != nil {
 		return true, secretsMergeProblem("the local secrets.enc.yaml")
 	}
@@ -116,10 +123,10 @@ func pullMergingSecrets(r ui.Reporter, l configstore.Local, g configstore.Gather
 	if err := l.SetHead(head); err != nil {
 		return true, err
 	}
-	if err := recordPull(l, g, root); err != nil {
+	if err := recordPull(l, g, root, held); err != nil {
 		return true, err
 	}
-	r.Result("merged the local secrets into %s; paisans deployment publish makes the merge a version", describe(g, head))
+	r.Result("merged the local secrets into %s; %s deployment publish makes the merge a version", describe(g, head), progname.Cmd())
 	return true, nil
 }
 
@@ -173,10 +180,10 @@ func secretsConflictAdvice(conflicts []string) string {
 		"To take the head's value, set that key locally to the head's value and pull again.",
 		"To keep the local value, take the head's first so the pull can merge the rest, pull, then set the key back to your value and publish."}
 	if settable {
-		out = append(out, "paisans secrets set sets a key it accepts.")
+		out = append(out, progname.Cmd()+" secrets set sets a key it accepts.")
 	}
 	if recorded {
-		out = append(out, "A pocket_id_groups key is recorded by apply, and paisans secrets set does not accept it; edit the file with sops.")
+		out = append(out, "A pocket_id_groups key is recorded by apply, and "+progname.Cmd()+" secrets set does not accept it; edit the file with sops.")
 	}
 	return strings.Join(out, " ")
 }

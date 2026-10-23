@@ -10,6 +10,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -18,15 +19,19 @@ import (
 // read as an option.
 var sshAlias = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
-// grantsDestination is --ssh as operator grants takes it, as ssh is given
-// it: user@host[:port], or an alias of the operator's own ssh config.
+// grantsDestination is --ssh as operator grants takes it: user@host, or
+// user@host:port for a port other than 22, or an alias of the operator's own
+// ssh config. grantsTransport gives it to ssh.
 func grantsDestination(s string) (string, error) {
 	if strings.Contains(s, "@") {
 		dest, err := config.ParseDestination(s)
 		if err != nil {
 			return "", err
 		}
-		return destinationArg(dest), nil
+		if dest.Port != config.DefaultSSHPort {
+			return dest.String(), nil
+		}
+		return dest.User + "@" + dest.Host, nil
 	}
 	if !sshAlias.MatchString(s) {
 		return "", fmt.Errorf("%q is neither user@host[:port] nor an alias of your ssh config, Eg: admin@203.0.113.9 or home-a", s)
@@ -40,8 +45,15 @@ func grantsDestination(s string) (string, error) {
 var reachGrantsHost = func(dest string) apply.Transport { return grantsTransport(dest) }
 
 // grantsTransport is plain ssh to dest, as whoever dest logs in as: not a
-// deployment's user, so nothing points docker at a user's daemon.
-func grantsTransport(dest string) apply.SSHTransport { return apply.SSHTransport{Destination: dest} }
+// deployment's user, so nothing points docker at a user's daemon. An alias
+// and user@host go to ssh as they are, so the ssh config's Port applies; a
+// port other than 22 goes as -p, which also carries it to an IPv6 address.
+func grantsTransport(dest string) apply.SSHTransport {
+	if d, err := config.ParseDestination(dest); err == nil && d.Port != config.DefaultSSHPort {
+		return apply.SSHTransport{Destination: d.User + "@" + d.Host, DestinationPort: d.Port, User: d.User, Host: d.Host}
+	}
+	return apply.SSHTransport{Destination: dest}
+}
 
 // admitFlags are the site admit flags rec records, in the order site admit
 // lists them: --watchdog and --public-ports as granted, --data-dir as the
@@ -115,7 +127,7 @@ func runOperatorGrants(args []string) error {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return fmt.Errorf("operator grants takes no argument: paisans operator grants --ssh <user@host[:port] or alias>. Got extra argument(s): %s", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("operator grants takes no argument: %s operator grants --ssh <user@host[:port] or alias>. Got extra argument(s): %s", progname.Cmd(), strings.Join(fs.Args(), " "))
 	}
 	if *sshFlag == "" {
 		return fmt.Errorf("operator grants: name the host with --ssh user@host[:port], or an alias of your ssh config, Eg: --ssh admin@203.0.113.9")
@@ -150,7 +162,7 @@ func runOperatorGrants(args []string) error {
 		if roles == "" {
 			roles = "no role"
 		}
-		command := strings.Join(append([]string{"paisans site admit --site", apply.ShellQuote(rec.Site)}, admitFlags(rec)...), " ")
+		command := strings.Join(append([]string{progname.Cmd() + " site admit --site", apply.ShellQuote(rec.Site)}, admitFlags(rec)...), " ")
 		r.Step(fmt.Sprintf("site %s of %s (%s), as %s, admitted %s", ui.Visible(rec.Site), rec.Deployment, roles, rec.User, rec.AdmittedAt)).End(ui.OK, "")
 		r.Explain(grantLines(rec) + "\nadmit again: " + ui.Visible(command))
 		read++

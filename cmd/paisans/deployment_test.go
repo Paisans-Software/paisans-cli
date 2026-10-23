@@ -289,6 +289,25 @@ func TestConfigRecoverDryRunAndWrongWordWriteNothing(t *testing.T) {
 	}
 }
 
+// A recovery names the directory it writes into as a full path, even when
+// --config is relative: "recover into ." does not say where the files went.
+func TestConfigRecoverPrintsTheDirectoryInFull(t *testing.T) {
+	sha, answer, _ := storedVersion(t)
+	recoverHosts(t, answer)
+	t.Chdir(t.TempDir())
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := plainReporter(t)
+	if err := runDeployment([]string{"recover", "--from", "ubuntu@203.0.113.9", "--root", sha}, noTerminalStdin(), &bytes.Buffer{}); err != nil {
+		t.Fatal(problemText(err))
+	}
+	if !strings.Contains(out.String(), "recover into "+dir+"\n") {
+		t.Fatalf("want recover into %s:\n%s", dir, out.String())
+	}
+}
+
 // Recovery is onto a workstation with nothing, and needs an anchor.
 func TestConfigRecoverRefusals(t *testing.T) {
 	sha, answer, _ := storedVersion(t)
@@ -296,7 +315,7 @@ func TestConfigRecoverRefusals(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
 	err := runDeployment([]string{"recover", "--from", "ubuntu@203.0.113.9", "--config", filepath.Join(dir, "paisans-stack.yaml")}, noTerminalStdin(), &out)
-	if err == nil || !strings.Contains(problemText(err), "--root") || !strings.Contains(problemText(err), "operator register") {
+	if err == nil || !strings.Contains(problemText(err), "--root") || !strings.Contains(problemText(err), "--key") {
 		t.Fatalf("no anchor: %v", problemText(err))
 	}
 	os.WriteFile(filepath.Join(dir, "paisans-stack.yaml"), []byte("x"), 0o644)
@@ -449,18 +468,58 @@ func synced(runs []string) bool {
 	return false
 }
 
-// A recovery learns the deployment from the admission record that names
-// the login it reaches the host as: one under the deployment's own user is
-// recovered as that deployment, and a login no record names is refused.
-func TestConfigRecoverReadsTheLoginsAdmissionRecord(t *testing.T) {
-	hosts := map[string]apply.Transport{"ubuntu@203.0.113.9": &storeHost{name: "ubuntu@203.0.113.9", login: "paisans-f2a9", files: ownRecord(t)}}
-	if id, err := recoverID(hosts, ""); err != nil || id != exampleID {
-		t.Errorf("recoverID = %q, %v", id, err)
+// A recovery learns the deployment from the hosts' admission records. A
+// login with a record of its own names that record's deployment. Any other
+// login, the owner's, names every deployment the host admits, and the host
+// is reached again as the user the chosen deployment's record names, so
+// recovering needs no name the lost workstation held. More than one
+// deployment needs --id, and a host with no record names none.
+func TestConfigRecoverReadsTheHostsAdmissionRecords(t *testing.T) {
+	saved := reachDestination
+	t.Cleanup(func() { reachDestination = saved })
+	files := ownRecord(t)
+	reachDestination = func(dest config.Destination) apply.Transport {
+		return &storeHost{name: dest.String(), login: dest.User, files: files}
 	}
-	hosts = map[string]apply.Transport{"ubuntu@203.0.113.9": &storeHost{name: "ubuntu@203.0.113.9", login: "ubuntu", files: ownRecord(t)}}
-	_, err := recoverID(hosts, "")
-	if text := problemText(err); err == nil || !strings.Contains(text, "no admission record names this login") || !strings.Contains(text, "ubuntu@203.0.113.9") {
-		t.Errorf("a login no record names: %v\n%s", err, text)
+	find := func(from, id string) (string, []string, string, error) {
+		var b bytes.Buffer
+		dest := must(config.ParseDestination(from))
+		got, hosts, err := recoverID(ui.NewPlain(&b, false), []config.Destination{dest}, id)
+		return got, slices.Sorted(maps.Keys(hosts)), b.String(), err
+	}
+
+	for _, from := range []string{"paisans-f2a9@203.0.113.9", "ubuntu@203.0.113.9"} {
+		id, hosts, out, err := find(from, "")
+		if err != nil || id != exampleID || !slices.Equal(hosts, []string{"paisans-f2a9@203.0.113.9:22"}) {
+			t.Errorf("%s: recoverID = %q, %v, %v", from, id, hosts, err)
+		}
+		if moved := strings.Contains(out, "reached as paisans-f2a9"); moved != strings.HasPrefix(from, "ubuntu") {
+			t.Errorf("%s: the note of the login it moved to: %q", from, out)
+		}
+	}
+
+	const otherID = "0b0bc4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
+	for p, c := range ownRecord(t) {
+		files[strings.Replace(p, "f2a9", "0b0b", 1)] = strings.ReplaceAll(strings.ReplaceAll(c, "f2a9c4e1", "0b0bc4e1"), "paisans-f2a9", "paisans-0b0b")
+	}
+	if id, _, _, err := find("paisans-f2a9@203.0.113.9", ""); err != nil || id != exampleID {
+		t.Errorf("the login's own record beside another: %q, %v", id, err)
+	}
+	_, _, _, err := find("ubuntu@203.0.113.9", "")
+	if text := problemText(err); err == nil || !strings.Contains(text, "more than one deployment") || !strings.Contains(text, exampleID) || !strings.Contains(text, otherID) {
+		t.Errorf("an owner's login on a host of two deployments: %v\n%s", err, text)
+	}
+	if id, hosts, _, err := find("ubuntu@203.0.113.9", otherID); err != nil || id != otherID || !slices.Equal(hosts, []string{"paisans-0b0b@203.0.113.9:22"}) {
+		t.Errorf("--id on a host of two deployments: %q, %v, %v", id, hosts, err)
+	}
+
+	clear(files)
+	_, _, _, err = find("ubuntu@203.0.113.9", "")
+	if text := problemText(err); err == nil || !strings.Contains(text, "no admission record for any deployment") || !strings.Contains(text, "ubuntu@203.0.113.9") {
+		t.Errorf("a host with no record: %v\n%s", err, text)
+	}
+	if id, hosts, _, err := find("ubuntu@203.0.113.9", exampleID); err != nil || id != exampleID || !slices.Equal(hosts, []string{"ubuntu@203.0.113.9:22"}) {
+		t.Errorf("--id on a host with no record keeps the login: %q, %v, %v", id, hosts, err)
 	}
 }
 
@@ -482,7 +541,7 @@ func TestConfigRecoverRefusesAnInjectedID(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
 	err := runDeployment([]string{"recover", "--from", "ubuntu@203.0.113.9", "--root", strings.Repeat("a", 40), "--config", filepath.Join(dir, "paisans-stack.yaml"), "--execute"}, answering(t, "partial\n"), &out)
-	if text := problemText(err); err == nil || !strings.Contains(text, "no admission record names this login") || strings.Contains(text, "touch /pwned") {
+	if text := problemText(err); err == nil || !strings.Contains(text, "no admission record for any deployment") || strings.Contains(text, "touch /pwned") {
 		t.Fatalf("got %v: %s", err, text)
 	}
 	for _, r := range runs {

@@ -5,6 +5,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // clusteredDatabaseHost is what a clustered application instance connects to:
@@ -64,7 +65,7 @@ func (p *planner) appDatabasePassword(planned plannedApp) (string, error) {
 func (p *planner) requireAppSecrets(planned plannedApp) error {
 	for _, need := range blueprints.RequiredSecrets(planned.Blueprint) {
 		if p.appSecret(planned.Name, need.Key) == "" {
-			return fmt.Errorf("secrets apps.%s.%s: required, and there is no fallback: %s. Run `paisans init` to generate it", planned.Name, need.Key, need.Why)
+			return fmt.Errorf("secrets apps.%s.%s: required, and there is no fallback: %s. Run `%s init` to generate it", planned.Name, need.Key, need.Why, progname.Cmd())
 		}
 	}
 	// The fork treats ADMIN_PASS=admin exactly as it treats an unset one

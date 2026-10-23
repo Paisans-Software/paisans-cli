@@ -14,7 +14,9 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/appremove"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -73,10 +75,10 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	// the reporter and the login recording take --execute and -v from them.
 	r := reporter()
 	if fs.NArg() > 0 {
-		return fmt.Errorf("app remove takes one app: paisans app remove <app> [--execute] [--delete-data]. Got extra argument(s): %s", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("app remove takes one app: %s app remove <app> [--execute] [--delete-data]. Got extra argument(s): %s", progname.Cmd(), strings.Join(fs.Args(), " "))
 	}
 	if app == "" {
-		return fmt.Errorf("app remove: name the app: paisans app remove <app> [--execute] [--delete-data]")
+		return fmt.Errorf("app remove: name the app: %s app remove <app> [--execute] [--delete-data]", progname.Cmd())
 	}
 
 	cfg, err := config.Load(*configPath)
@@ -131,9 +133,15 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 			return fmt.Errorf("app remove: secrets apps.%s.static_api_key is empty, so Pocket ID cannot be asked for %s's client. Nothing was changed", idp, app)
 		}
 		clients = removeClients(cfg, where, key)
+		name, from, err := removedClientName(r, *configPath, cfg, app, secrets.OIDCClients[app].ClientID)
+		if err != nil {
+			return fmt.Errorf("app remove: %w. Nothing was changed", err)
+		}
 		if in.Client, err = ui.Get(r, "read "+app+"'s client", func() (appremove.ClientState, error) {
 			ctx := context.Background()
-			return appremove.ProbeClient(ctx, clients, app, cfg.ClientName(app), idp, where, secrets.OIDCClients[app].ClientID)
+			st, err := appremove.ProbeClient(ctx, clients, app, name, idp, where, secrets.OIDCClients[app].ClientID)
+			st.NameFrom = from
+			return st, err
 		}); err != nil {
 			return fmt.Errorf("app remove: %w. Nothing was changed", err)
 		}
@@ -249,6 +257,48 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	reportRemains(r, appremove.Remains(plan, secrets, runner.Kept))
 	r.Result("%s is removed.", app)
 	return nil
+}
+
+// shownVersions is how many passed over versions removedClientName names.
+const shownVersions = 3
+
+// removedClientName is the name app's client is looked for by, and where it
+// came from: the name in the newest version of this workstation's
+// configuration history that declares app, else the name cfg gives app. app
+// has left paisans-stack.yaml, and its display_name with it, so cfg alone
+// names the client after the app. When a client ID is recorded for app, it
+// warns that the name is cfg's, and of the versions passed over because they
+// do not load.
+func removedClientName(r ui.Reporter, configPath string, cfg *config.Config, app, recordedID string) (name, from string, err error) {
+	var found configstore.Declaration
+	if l, err := workstationOf(configPath); err == nil {
+		if found, err = l.Declaring(app); err != nil {
+			return "", "", fmt.Errorf("reading this workstation's configuration history for %s: %w", app, err)
+		}
+	}
+	if recordedID != "" && len(found.Unreadable) > 0 {
+		var short []string
+		for _, sha := range found.Unreadable[:min(len(found.Unreadable), shownVersions)] {
+			short = append(short, sha[:12])
+		}
+		list := strings.Join(short, ", ")
+		if more := len(found.Unreadable) - len(short); more > 0 {
+			list += fmt.Sprintf(" and %d more", more)
+		}
+		r.Warn(fmt.Sprintf("%d version(s) of this workstation's configuration history do not load, so the search for %s's client name passed over them", len(found.Unreadable), app), "Their paisans-stack.yaml is not one this "+progname.Cmd()+" reads: "+list+".")
+	}
+	if found.Config != nil {
+		return found.Config.ClientName(app), "the name in version " + found.SHA[:12] + ", the newest of this workstation's configuration history that declares " + app + "; `" + progname.Cmd() + " deployment pull --execute` fetches a newer one", nil
+	}
+	name = cfg.ClientName(app)
+	why := "no version in this workstation's configuration history declares it"
+	if !found.History {
+		why = "this workstation holds no configuration history"
+	}
+	if recordedID != "" {
+		r.Warn(app+"'s client is looked for as "+name+", the name the current configuration gives it", why+", so a client named by its display_name is kept. `"+progname.Cmd()+" deployment pull --execute` fetches the history the sites hold.")
+	}
+	return name, "the name the current configuration gives it, as " + why, nil
 }
 
 // confirmName asks for the app's name at the terminal and refuses anything
