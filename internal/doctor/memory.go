@@ -70,7 +70,7 @@ func Swap(probes []MemoryProbe) []Finding {
 		case f.HasZRAM():
 			out = append(out, Finding{Section: SectionSwap, Level: Warn,
 				Line: fmt.Sprintf("%s: only zram on this host", p.Site),
-				More: []string{hostmem.SwapNeeded, "zram swap compresses what it holds into RAM, so it stretches the host's memory rather than adding to it.", "The host's owner runs `" + progname.Default + " site admit` again, which offers a swapfile beside it where it can make one (`--swapfile`)."}})
+				More: []string{hostmem.SwapNeeded, hostmem.ZRAMNotEnough, "The host's owner runs `" + progname.Default + " site admit` again, which offers a swapfile beside it where it can make one (`--swapfile`)."}})
 		default:
 			out = append(out, Finding{Section: SectionSwap, Level: Warn,
 				Line: fmt.Sprintf("%s: none on this host", p.Site),

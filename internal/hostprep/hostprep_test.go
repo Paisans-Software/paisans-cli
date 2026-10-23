@@ -1160,15 +1160,20 @@ func TestADaemonThatCannotBeAskedIsNotRestarted(t *testing.T) {
 	}
 }
 
-// Prepare warns about a host with no swap on, reading /proc/swaps as the
-// deployment's user, and plans nothing for it: admit makes a swapfile.
+// Prepare warns about a host with no swap on beyond zram, reading
+// /proc/swaps as the deployment's user, and plans nothing for it: admit
+// makes a swapfile.
 func TestPrepareWarnsWithoutSwap(t *testing.T) {
+	const header = "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n"
+	const file = "/swapfile                               file\t\t8388604\t\t0\t\t-2\n"
+	const zram = "/dev/zram0                              partition\t4194300\t\t0\t\t100\n"
 	for _, c := range []struct {
-		name, swaps string
-		warns       bool
+		name, swaps, warns string
 	}{
-		{"none", "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n", true},
-		{"on", "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n/swapfile                               file\t\t8388604\t\t0\t\t-2\n", false},
+		{"none", header, "swap: none on"},
+		{"on", header + file, ""},
+		{"zram only", header + zram, "swap: only zram on"},
+		{"zram and a swapfile", header + zram + file, ""},
 	} {
 		host := preparedHost(false)
 		host.files["/proc/swaps"] = c.swaps
@@ -1176,9 +1181,17 @@ func TestPrepareWarnsWithoutSwap(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
-		warns := slices.ContainsFunc(plan.Warnings, func(w hostprep.Warning) bool { return strings.HasPrefix(w.Hint, "swap: none on") })
-		if warns != c.warns {
-			t.Errorf("%s: warned %v, want %v: %+v", c.name, warns, c.warns, plan.Warnings)
+		var warned []string
+		for _, w := range plan.Warnings {
+			if strings.HasPrefix(w.Hint, "swap:") {
+				warned = append(warned, w.Hint)
+			}
+		}
+		switch {
+		case c.warns == "" && len(warned) > 0:
+			t.Errorf("%s: warned %q, want no swap warning", c.name, warned)
+		case c.warns != "" && (len(warned) != 1 || !strings.HasPrefix(warned[0], c.warns)):
+			t.Errorf("%s: warned %q, want one %q", c.name, warned, c.warns)
 		}
 		if slices.ContainsFunc(plan.Steps, func(s hostprep.Step) bool { return strings.Contains(s.Title, "swap") }) {
 			t.Errorf("%s: prepare planned a swap step", c.name)

@@ -7,6 +7,7 @@ package hostmem
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -20,6 +21,12 @@ const Swapfile = "/swapfile"
 
 // SwapNeeded is why a host with no swap should have some.
 const SwapNeeded = "Without swap, a host that runs short of memory has the kernel kill a process, which may be the database, instead of slowing down."
+
+// ZRAMNotEnough is why zram swap does not count as swap.
+const ZRAMNotEnough = "zram swap compresses what it holds into RAM, so it stretches the host's memory rather than adding to it."
+
+// ZRAMDevice matches the name /proc/swaps gives a zram device.
+var ZRAMDevice = regexp.MustCompile(`^/dev/zram[0-9]+$`)
 
 // Probe is shell that prints one "key value" line per fact through a
 // function say, which the script it is part of defines: the host's RAM and
