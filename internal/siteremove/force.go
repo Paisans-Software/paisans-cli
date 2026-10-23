@@ -33,13 +33,13 @@ func BuildForced(cfg *config.Config, secrets *config.Secrets, site string, dest 
 	}
 	declared, isDeclared := cfg.Sites[site]
 	p := &Plan{Site: site, Options: o, secrets: secrets, transports: map[string]apply.Transport{site: t}, forced: true, declared: isDeclared}
-	p.Current = isDeclared && declared.Destination() == dest
+	p.Current = isDeclared && declared.Destination().Same(dest)
 
 	if err := answers(site, dest, t); err != nil {
 		return nil, err
 	}
 	s := declared
-	s.SSH.User, s.SSH.Host, s.SSH.Port = dest.User, dest.Host, dest.Port
+	s.SSH.User, s.SSH.Host, s.SSH.Port = dest.User, dest.SSHHost(), dest.Port
 	rec, err := admission.Read(t, cfg.Deployment().Token())
 	switch {
 	case errors.Is(err, admission.ErrNotAdmitted):
@@ -149,7 +149,7 @@ func BuildForcedByID(dest config.Destination, t apply.Transport, ref string, o O
 	}
 
 	s := config.Site{Roles: recordRoles(rec)}
-	s.SSH.User, s.SSH.Host, s.SSH.Port = dest.User, dest.Host, dest.Port
+	s.SSH.User, s.SSH.Host, s.SSH.Port = dest.User, dest.SSHHost(), dest.Port
 	cfg := &config.Config{ID: d.ID, Sites: map[string]config.Site{rec.Site: s}}
 	p := &Plan{Site: rec.Site, Options: o, transports: map[string]apply.Transport{rec.Site: t}, forced: true, byID: true, dest: dest, cfg: cfg}
 	host, err := p.buildHost()

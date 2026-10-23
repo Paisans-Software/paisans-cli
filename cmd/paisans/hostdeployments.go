@@ -4,10 +4,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"net"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
@@ -18,13 +16,37 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
-// destinationArg is dest as ssh takes it: user@host, or an ssh:// URL for a
-// port other than 22, the one destination form that carries it.
-func destinationArg(dest config.Destination) string {
-	if dest.Port != 0 && dest.Port != config.DefaultSSHPort {
-		return "ssh://" + dest.User + "@" + net.JoinHostPort(dest.Host, strconv.Itoa(dest.Port))
+// operatorSSHConfig is the operator's own ssh config, which a destination
+// that names an alias is resolved through. Tests replace it with a stub, so
+// no test reads the workstation's ssh config.
+var operatorSSHConfig = config.OperatorSSHConfig
+
+// parseDestination is a destination flag's value in every form ssh takes:
+// user@host[:port], or a Host alias of the operator's ssh config with or
+// without a user and a port. See config.ResolveDestination.
+func parseDestination(s string) (config.Destination, error) {
+	return config.ResolveDestination(s, operatorSSHConfig())
+}
+
+// destinationTransport is the operator's own ssh to dest: user@host after
+// --, with the port as -p, always written. A destination's port is the one
+// written or the one ssh -G reported, so -p keeps a port given on the
+// command line ahead of the ssh config's Port, as ssh does. The host goes
+// unbracketed, IPv6 too, which ssh reads as a host given alone, and -p
+// carries the port to every host alike.
+//
+// An alias is given to ssh as the alias, never as the host it resolves to,
+// so the connection takes its ProxyJump, IdentityFile and every other option
+// from the operator's ssh config exactly as a plain ssh to it does, with
+// host key checking unchanged. KnownHost names the entry known_hosts holds
+// for it (config.Destination.KnownHostsName).
+func destinationTransport(dest config.Destination) apply.SSHTransport {
+	port := dest.Port
+	if port == 0 {
+		port = config.DefaultSSHPort
 	}
-	return dest.User + "@" + dest.Host
+	host := dest.SSHHost()
+	return apply.SSHTransport{Destination: dest.User + "@" + host, DestinationPort: port, User: dest.User, Host: host, KnownHost: dest.KnownHostsName()}
 }
 
 // reachDestination is how a command with no configuration reaches the host
@@ -32,7 +54,9 @@ func destinationArg(dest config.Destination) string {
 // reaches it, with their agent, keys and ssh config, since there are no
 // declared keys to offer. Tests replace it.
 var reachDestination = func(dest config.Destination) apply.Transport {
-	return siteTransport("", config.Site{}, destinationArg(dest))
+	t := destinationTransport(dest)
+	t.Login = loginFor(t.Describe(), "", nil)
+	return t
 }
 
 // ownerTransport is how site deployments reaches a host as its owner: the
@@ -41,7 +65,8 @@ var reachDestination = func(dest config.Destination) apply.Transport {
 // root's. It is the one transport the CLI gives sudo: every other command
 // logs in as the deployment's user, which has none.
 func ownerTransport(dest config.Destination, sudo bool) apply.SSHTransport {
-	t := apply.SSHTransport{Destination: destinationArg(dest), Sudo: sudo}
+	t := destinationTransport(dest)
+	t.Sudo = sudo
 	if sudo {
 		t.Auth = sudoAuthFor(t.Describe())
 	}
@@ -150,18 +175,18 @@ func yesNo(b bool) string {
 func runSiteDeployments(args []string) error {
 	fs := newFlagSet("site deployments", flag.ContinueOnError)
 	reporter := commonFlags(fs)
-	sshFlag := fs.String("ssh", "", "the host to read, user@host[:port]")
+	sshFlag := fs.String("ssh", "", "the host to read, user@host[:port] or an alias of your ssh config, [user@]alias[:port]")
 	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since the registry is root's; --sudo=false lists admission records only, which are readable without sudo")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return fmt.Errorf("site deployments takes no argument: paisans site deployments --ssh user@host[:port]. Got extra argument(s): %s", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("site deployments takes no argument: paisans site deployments --ssh <user@host[:port] or ssh alias>. Got extra argument(s): %s", strings.Join(fs.Args(), " "))
 	}
 	if *sshFlag == "" {
-		return fmt.Errorf("site deployments: name the host with --ssh user@host[:port], Eg: --ssh admin@203.0.113.9")
+		return fmt.Errorf("site deployments: name the host with --ssh user@host[:port], or an alias of your ssh config, Eg: --ssh admin@203.0.113.9 or --ssh home-a")
 	}
-	dest, err := config.ParseDestination(*sshFlag)
+	dest, err := parseDestination(*sshFlag)
 	if err != nil {
 		return fmt.Errorf("site deployments: --ssh: %w", err)
 	}
@@ -282,4 +307,21 @@ func registryLine(id string, e registry.Entry) string {
 		roles = "none"
 	}
 	return fmt.Sprintf("%s: token %s, %s, site %s, roles %s, root %s, claimed by paisans %s", id, e.Token, e.Domain, e.Site, roles, e.Root, e.Build)
+}
+
+// distinctLogins is dests with each login once: the same user and port to
+// the same host as ssh is given it, which for an alias is the alias. Two
+// aliases of one address, or an alias and its address, stay apart, since
+// each may take another route there (ProxyJump, ProxyCommand), and each is
+// tried.
+func distinctLogins(dests []config.Destination) []config.Destination {
+	var out []config.Destination
+	for _, d := range dests {
+		if !slices.ContainsFunc(out, func(o config.Destination) bool {
+			return o.User == d.User && o.Port == d.Port && strings.EqualFold(o.SSHHost(), d.SSHHost())
+		}) {
+			out = append(out, d)
+		}
+	}
+	return out
 }

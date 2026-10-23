@@ -51,7 +51,7 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	hostGone := fs.Bool("host-gone", false, "the site's host is not reached, dead or no longer the deployment's: cut it out of the mesh first, then take it out of the cluster without reaching it; asks for the site's name at a terminal")
 	deleteData := fs.Bool("delete-data", false, "also delete this deployment's data on the host (its directory and named volumes); asks for the site's name at a terminal")
 	force := fs.Bool("force", false, "clean this deployment off one host and nothing else: no cluster stage or refusal, and neither "+config.FileName+" nor the secrets file edited")
-	sshFlag := fs.String("ssh", "", "with --force: the host to clean, user@host[:port], any host; only what carries this deployment's id or token is removed")
+	sshFlag := fs.String("ssh", "", "with --force: the host to clean, user@host[:port] or an alias of your ssh config, any host; only what carries this deployment's id or token is removed")
 	idFlag := fs.String("id", "", "with --force and --ssh, and no "+config.FileName+": the deployment to clean off the host, by its full id or its token, as paisans site deployments lists it")
 	answers := yesFlag(fs)
 	var site string
@@ -75,7 +75,7 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	// the reporter and the login recording take --execute and -v from them.
 	r := reporter()
 	if fs.NArg() > 0 {
-		return &ui.Problem{Hint: "site remove takes one site", Explain: "Got extra argument(s): " + strings.Join(fs.Args(), " ") + ". Usage: paisans site remove <site> [--execute] [--host-gone] [--delete-data] [--force [--ssh user@host[:port]]]"}
+		return &ui.Problem{Hint: "site remove takes one site", Explain: "Got extra argument(s): " + strings.Join(fs.Args(), " ") + ". Usage: paisans site remove <site> [--execute] [--host-gone] [--delete-data] [--force [--ssh user@host[:port] or ssh alias]]"}
 	}
 	if *hostGone {
 		switch {
@@ -277,7 +277,7 @@ func runSiteRemoveForced(r ui.Reporter, site string, a forcedArgs, stdin io.Read
 		return err
 	}
 	declared, isDeclared := cfg.Sites[site]
-	own := isDeclared && declared.Destination() == dest
+	own := isDeclared && declared.Destination().Same(dest)
 	// Refused before any host is read, so an unattended run stops with
 	// nothing asked of anything.
 	if a.execute && (own || a.deleteData) && !a.answers.canAnswer(stdin) {
@@ -298,10 +298,15 @@ func runSiteRemoveForced(r ui.Reporter, site string, a forcedArgs, stdin io.Read
 		warnUnencrypted(r, a.secrets)
 	}
 	// The declared entry's public keys, if any, still say which key the
-	// operator logs in with; only where is dest.
+	// operator logs in with; only where is dest. An alias stays the host ssh
+	// is given, so its ProxyJump and the rest of its ssh config still apply.
 	reach := declared
-	reach.SSH.User, reach.SSH.Host, reach.SSH.Port = dest.User, dest.Host, dest.Port
+	reach.SSH.User, reach.SSH.Host, reach.SSH.Port = dest.User, dest.SSHHost(), dest.Port
 	t := removeSiteHost(site, reach)
+	if st, ok := t.(apply.SSHTransport); ok {
+		st.KnownHost = dest.KnownHostsName()
+		t = st
+	}
 	opts := siteremove.Options{DeleteData: a.deleteData, ConfigPath: a.config, DNSProvider: dnsProviderFor}
 	plan, err := ui.Get(r, "read "+dest.String(), func() (*siteremove.Plan, error) {
 		return siteremove.BuildForced(cfg, secrets, site, dest, t, opts)
@@ -382,11 +387,11 @@ func runSiteRemoveByID(r ui.Reporter, site string, a byIDArgs, stdin io.Reader, 
 	case a.secrets:
 		return &ui.Problem{Hint: "--id takes no --secrets", Explain: "--id reads no secrets file. Drop --secrets."}
 	case a.ssh == "":
-		return &ui.Problem{Hint: "--id needs --ssh", Explain: "With no configuration there is no ssh section to reach the host through, so name it with --ssh user@host[:port]."}
+		return &ui.Problem{Hint: "--id needs --ssh", Explain: "With no configuration there is no ssh section to reach the host through, so name it with --ssh user@host[:port] or an alias of your ssh config."}
 	case !deployment.ValidID(a.id) && !tokenShape.MatchString(a.id):
 		return &ui.Problem{Hint: fmt.Sprintf("--id %q is not a deployment id or token", a.id), Explain: fmt.Sprintf("Give the full id or its %d hex digit token, as paisans site deployments lists them, Eg: --id f2a9", deployment.TokenLength)}
 	}
-	dest, err := config.ParseDestination(a.ssh)
+	dest, err := parseDestination(a.ssh)
 	if err != nil {
 		return sshFlagProblem(a.ssh, err)
 	}
@@ -477,7 +482,7 @@ func forcedNothingToDo(r ui.Reporter, plan *siteremove.Plan, dest config.Destina
 // deployment's id or token is removed.
 func chooseHost(cfg *config.Config, site, ssh string) (config.Destination, error) {
 	if ssh != "" {
-		d, err := config.ParseDestination(ssh)
+		d, err := parseDestination(ssh)
 		if err != nil {
 			return config.Destination{}, sshFlagProblem(ssh, err)
 		}
@@ -486,7 +491,7 @@ func chooseHost(cfg *config.Config, site, ssh string) (config.Destination, error
 	if s, ok := cfg.Sites[site]; ok {
 		return s.Destination(), nil
 	}
-	return config.Destination{}, &ui.Problem{Hint: site + " is not declared", Explain: "Name its host with --ssh user@host[:port]."}
+	return config.Destination{}, &ui.Problem{Hint: site + " is not declared", Explain: "Name its host with --ssh user@host[:port] or an alias of your ssh config."}
 }
 
 // noTerminal refuses a removal that must ask for the site's name, for why,

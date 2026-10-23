@@ -120,7 +120,7 @@ var fetchGather = func(l configstore.Local, host string, t apply.Transport, id s
 func runDeploymentFetch(args []string) error {
 	fs := newFlagSet("deployment fetch", flag.ContinueOnError)
 	reporter := commonFlags(fs)
-	sshFlag := fs.String("ssh", "", "the host to fetch from, user@host[:port]")
+	sshFlag := fs.String("ssh", "", "the host to fetch from, user@host[:port] or an alias of your ssh config, [user@]alias[:port]")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -128,9 +128,9 @@ func runDeploymentFetch(args []string) error {
 		return &ui.Problem{Hint: "deployment fetch takes no argument", Explain: "Got " + strings.Join(fs.Args(), " ") + "."}
 	}
 	if *sshFlag == "" {
-		return &ui.Problem{Hint: "deployment fetch needs --ssh", Explain: "Name the host with --ssh user@host[:port], Eg: --ssh admin@203.0.113.9."}
+		return &ui.Problem{Hint: "deployment fetch needs --ssh", Explain: "Name the host with --ssh user@host[:port], or an alias of your ssh config, Eg: --ssh admin@203.0.113.9 or --ssh home-a."}
 	}
-	dest, err := config.ParseDestination(*sshFlag)
+	dest, err := parseDestination(*sshFlag)
 	if err != nil {
 		return sshFlagProblem(*sshFlag, err)
 	}
@@ -158,12 +158,16 @@ func runDeploymentFetch(args []string) error {
 		r.Result("%s holds no deployment; nothing was fetched.", dest)
 		return nil
 	}
+	// The source saved with each copy is dest as messages show it: for an
+	// alias, both the alias and the address it resolved to, since the alias
+	// means something only in this workstation's ssh config and may later
+	// name another host.
 	source := "fetched from " + dest.String()
 	var saved, unverified, failed int
 	for _, id := range slices.Sorted(maps.Keys(reg.Deployments)) {
 		e := reg.Deployments[id]
 		r.Section(fmt.Sprintf("%s (%s)", id, orDash(e.Domain)))
-		switch fetchOne(r, st, dest.String(), t, id, e.Domain, source) {
+		switch fetchOne(r, st, dest.Arg(), t, id, e.Domain, source) {
 		case localstore.Verified:
 			saved++
 		case localstore.Unverified, localstore.Fork:

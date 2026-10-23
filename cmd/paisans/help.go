@@ -187,12 +187,12 @@ var helpCommands = []helpCommand{
 		summary: "Admit a deployment to this host, as its owner.",
 		usage: []string{
 			"sudo paisans site admit --request <file> [--watchdog] [--public-ports] [--data-dir <path>]\n                        [--bridge-netfilter] [--mesh-lan] [--enable-ufw] [--execute]\n                        [--digest <digest>] [--yes]",
-			"paisans site admit --site <name> [--ssh <user>|<user@host[:port]>] [--config " + config.FileName + "] [the same grants]\n                   [--execute] [--yes]",
+			"paisans site admit --site <name> [--ssh <user>|<user@host[:port] or ssh alias>] [--config " + config.FileName + "] [the same grants]\n                   [--execute] [--yes]",
 		},
 		detail: "The one root step for a deployment on a host, run by the host's owner: the deployment's own unprivileged user with its own rootless Docker, the WireGuard helper and its sudoers line, the firewall, the egress table, the grants given and the admission record. " +
 			"ufw must be installed. When it is not active, --enable-ufw, or a yes at a terminal, has admit allow every port sshd listens on, arm a timer that turns ufw off again in 10 minutes, enable ufw, and stop the timer once a new SSH login gets through: with --site, admit's own login as the user; with --request, one you open and confirm. Without it admit refuses, and prints the commands that enable ufw by hand, every allow before the enable. Admit never enables ufw while it holds a deny or reject rule of yours, or with IPV6 not yes, as ufw reads /etc/default/ufw and /etc/ufw/ufw.conf, while sshd listens on IPv6, and then asks nothing. " +
 			"--watchdog and --public-ports are the owner's to give: at a terminal, admit asks for each one the site's roles need and the flags leave out; elsewhere a data site without --watchdog, or a gateway or Caddy monitor without --public-ports, stops before the host is reached. " +
-			"With --site, --ssh may be your login alone, for the site's declared ssh host and port, and is asked for at a terminal when left out. " +
+			"With --site, --ssh may be your login alone, for the site's declared ssh host and port, or an alias of your ssh config for that host, alias:port or a word your config maps to the declared host and port, and is asked for at a terminal when left out. " +
 			"--execute with --request asks for the request's digest at a terminal, or takes it as --digest, compared the same way; with --site it ends by logging in as the user with your own key.\n\n" +
 			"--yes grants each grant the site's roles need and answers the ufw question with --site. It never answers the digest: --yes --request --execute needs --digest. With --request it refuses where admit would enable ufw, since only a person can open the new SSH session that shows SSH still works; --site proves it with admit's own login. With --site it needs --ssh. " + yesTopic + "\n\n" +
 			"Never run by an agent unattended.",
@@ -217,10 +217,10 @@ var helpCommands = []helpCommand{
 		summary: "Take a site out of the running deployment, reaching its host or not.",
 		usage: []string{
 			"paisans site remove <site> [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n" +
-				"                    [--delete-data] [--force --ssh <user@host[:port]>] [--execute] [--yes]",
+				"                    [--delete-data] [--force --ssh <user@host[:port] or ssh alias>] [--execute] [--yes]",
 			"paisans site remove <site> --host-gone [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n" +
 				"                    [--execute] [--yes]",
-			"paisans site remove --force --ssh <user@host[:port]> --id <id or token>\n" +
+			"paisans site remove --force --ssh <user@host[:port] or ssh alias> --id <id or token>\n" +
 				"                    [--delete-data] [--execute] [--yes]",
 		},
 		detail: "Take a site out of the running deployment in gated stages: its data out (the Patroni leader switched to the Sync Standby, its Garage node out of the layout and the objects moved), out of the cluster (its etcd member, and the mesh, HAProxy and gateway routes on every remaining site, and each replica's patroni.env, one at a time; one data site out of two and a witness takes the witness out of etcd too), its host cleaned of everything provably this deployment's (a gateway's Caddy kept, reduced to the host owner's sites in its caddy.d, /srv/paisans/<token>/caddy.d, while there are any), the A and AAAA records dns init made for its public address deleted at the DNS provider, and its entry out of " + config.FileName + ".\n\n" +
@@ -237,12 +237,12 @@ var helpCommands = []helpCommand{
 		usage: []string{
 			"sudo paisans site evict --request <file> [--data-dir <path>] [--execute] [--yes]",
 			"sudo paisans site evict --deployment <id> --user <name> [--data-dir <path>] [--execute] [--yes]",
-			"paisans site evict --site <name> [--ssh <user>|<user@host[:port]>] [--config " + config.FileName + "] [--data-dir <path>]\n                   [--execute] [--yes]",
+			"paisans site evict --site <name> [--ssh <user>|<user@host[:port] or ssh alias>] [--config " + config.FileName + "] [--data-dir <path>]\n                   [--execute] [--yes]",
 		},
 		detail: "Undo site admit for one deployment: its mesh, its user with its home and data, the helper, the egress table, its firewall rules, the record and the registry entry. " +
 			"Host-wide files and sysctls go only when no other deployment is admitted. Evict never disables ufw, which stays as it is with its paisans: ssh allows when admit enabled it. " +
 			"--data-dir, the one admit was given, is needed only when the host holds no admission record.\n\n" +
-			"Run it as root on the host with --request or --deployment and --user, or from a workstation with --site, which reads the site from " + config.FileName + ". With --site, --ssh may be your login alone, for the site's declared ssh host and port, and is asked for at a terminal when left out. " +
+			"Run it as root on the host with --request or --deployment and --user, or from a workstation with --site, which reads the site from " + config.FileName + ". With --site, --ssh may be your login alone, for the site's declared ssh host and port, or an alias of your ssh config for that host, alias:port or a word your config maps to the declared host and port, and is asked for at a terminal when left out. " +
 			"After site remove has taken the site out of " + config.FileName + ", use the --deployment and --user line it printed.\n\n" +
 			"--execute asks for the user's name at a terminal; --yes types it, and with --site needs --ssh. " + yesTopic + "\n\n" +
 			"Never run by an agent unattended.",
@@ -250,9 +250,9 @@ var helpCommands = []helpCommand{
 	{
 		name:    "site deployments",
 		summary: "List every deployment on a host.",
-		usage:   []string{"paisans site deployments --ssh <user@host[:port]> [--sudo=false]"},
+		usage:   []string{"paisans site deployments --ssh <user@host[:port] or ssh alias> [--sudo=false]"},
 		detail: "List every admission record on the host --ssh names (the deployment, its user, the site and roles it was admitted as, the grants and when), every deployment in its registry (id, token, domain, site, roles and root), and any deployment directory no registry entry names. " +
-			"--sudo=false lists admission records only, which are readable without sudo. Needs no " + config.FileName + "; changes nothing.",
+			"--sudo=false lists admission records only, which are readable without sudo. Needs no " + config.FileName + "; changes nothing.\n\n" + sshAliasTopic,
 	},
 	{
 		name:    "mesh rekey",
@@ -368,10 +368,10 @@ var helpCommands = []helpCommand{
 	{
 		name:    "deployment recover",
 		summary: "Write the newest configuration onto an empty directory.",
-		usage:   []string{"paisans deployment recover --from <user@host[:port]>... [--root <sha>] [--id <id>]\n                       [--config " + config.FileName + "] [--execute] [--yes]"},
+		usage:   []string{"paisans deployment recover --from <user@host[:port] or ssh alias>... [--root <sha>] [--id <id>]\n                       [--config " + config.FileName + "] [--execute] [--yes]"},
 		detail: "Onto an empty directory, gather from the --from hosts and every site the trusted heads name, and write the head's files, or each head's in .paisans/incoming/ with a fork. " +
 			"With --execute, the recovered version is also saved to this workstation's saved deployments (see deployment list)." +
-			configTrust,
+			configTrust + "\n\n" + sshAliasTopic,
 	},
 	{
 		name:    "deployment list",
@@ -385,10 +385,10 @@ var helpCommands = []helpCommand{
 	{
 		name:    "deployment fetch",
 		summary: "Save every deployment a host holds to this workstation.",
-		usage:   []string{"paisans deployment fetch --ssh <user@host[:port]>"},
+		usage:   []string{"paisans deployment fetch --ssh <user@host[:port] or ssh alias>"},
 		detail: "Read, through sudo, the registry of the host --ssh names and, for each deployment in it, every version of its configuration the host keeps, and save the newest trusted one with the saved deployments (see deployment list). " +
 			"A deployment this workstation saved before is judged from the key that signed it, as deployment pull judges; one it never saved has nothing to trust from, so its newest versions are put in .paisans/incoming/<sha>/ and listed as unverified, " +
-			"for deployment recover --root <sha> to pin once the hash is checked with another operator. Needs no " + config.FileName + "; changes nothing on the host.",
+			"for deployment recover --root <sha> to pin once the hash is checked with another operator. Needs no " + config.FileName + "; changes nothing on the host.\n\n" + sshAliasTopic,
 	},
 	{
 		name:    "operator magic-link",
@@ -487,6 +487,12 @@ var helpCommands = []helpCommand{
 }
 
 // yesTopic is what every command that takes --yes says of it.
+// sshAliasTopic is how a destination flag reads a Host alias of the
+// operator's ssh config.
+const sshAliasTopic = "A destination is user@host[:port], or a Host alias of your ssh config: alias, user@alias, alias:port or user@alias:port, a user or port given overriding the config's. " +
+	"The alias is resolved with ssh -G, so Match, Include and wildcards apply as they do for ssh, and ssh is given the alias, so its ProxyJump, IdentityFile and other options apply to the connection. " +
+	"Messages show it as alias -> user@host:port. A destination with no user takes the one ssh -G reports: its config's User, or your local login where none applies, as ssh does."
+
 const yesTopic = "--yes answers each confirmation as typing it would, with no terminal, and prints approved by --yes: and what it approved, a line for each. It needs PAISANS_ALLOW_YES=1 in the environment, so a command line copied alone never approves anything."
 
 // configTrust is what every config subcommand shares, after its own

@@ -15,7 +15,8 @@ import (
 func TestGrantsDestination(t *testing.T) {
 	for in, want := range map[string]string{
 		"admin@203.0.113.9":      "admin@203.0.113.9",
-		"admin@203.0.113.9:2222": "ssh://admin@203.0.113.9:2222",
+		"admin@203.0.113.9:2222": "admin@203.0.113.9:2222",
+		"admin@[2001:db8::1]:22": "admin@2001:db8::1",
 		"home-a":                 "home-a",
 		"vm.example.org":         "vm.example.org",
 	} {

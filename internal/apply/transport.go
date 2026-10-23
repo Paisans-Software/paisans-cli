@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	pathpkg "path"
@@ -75,6 +76,18 @@ type SSHTransport struct {
 	// Destination, when set, is whatever ssh accepts (a host, a user@host,
 	// or an alias from the operator's config), passed as given.
 	Destination string
+	// DestinationPort, with Destination, is ssh's -p, given with the
+	// destination after --, so a port the operator wrote goes ahead of the
+	// ssh config's Port. Destination is then user@host, the host unbracketed
+	// even for IPv6, as ssh reads a host given alone, and User and Host name
+	// the same login, for messages. Zero gives no -p, and Destination stays
+	// as given.
+	DestinationPort int
+	// KnownHost, when set, is the host as known_hosts names it, for a
+	// Destination or Host that is an alias of the operator's ssh config:
+	// its HostName, with the port in brackets when it is not 22. A changed
+	// host key's advice names it, since the alias is not what ssh records.
+	KnownHost string
 	// User and Host make the destination when Destination is empty.
 	User string
 	Host string
@@ -144,7 +157,7 @@ func Reach(t Transport) error {
 }
 
 func (t SSHTransport) Describe() string {
-	if t.Destination != "" {
+	if t.Destination != "" && t.DestinationPort == 0 {
 		return t.Destination
 	}
 	out := t.User + "@" + t.Host
@@ -169,6 +182,9 @@ func (t SSHTransport) connectTimeout() int {
 }
 
 func (t SSHTransport) port() int {
+	if t.Destination != "" && t.DestinationPort != 0 {
+		return t.DestinationPort
+	}
 	if t.Port == 0 {
 		return 22
 	}
@@ -219,6 +235,9 @@ func (t SSHTransport) port() int {
 func (t SSHTransport) SSHArgs(keyFiles []string, command string) []string {
 	command = RemoteCommand(t.DockerHost, command)
 	args := append(muxArgs(), "-T")
+	if t.Destination != "" && t.DestinationPort != 0 {
+		return append(args, "-p", strconv.Itoa(t.DestinationPort), "--", t.Destination, command)
+	}
 	if t.Destination != "" {
 		return append(args, t.Destination, command)
 	}
@@ -675,7 +694,7 @@ func (t SSHTransport) authProblem(err error, out string) error {
 	}
 	last := lastLine(out)
 	user, host := t.User, t.Host
-	if t.Destination != "" {
+	if t.Destination != "" && t.DestinationPort == 0 {
 		if u, h, found := strings.Cut(t.Destination, "@"); found {
 			user, host = u, h
 		} else {
@@ -714,7 +733,7 @@ func (t SSHTransport) authProblem(err error, out string) error {
 // connectCommand is the ssh command an operator runs to reach the host by
 // hand.
 func (t SSHTransport) connectCommand() string {
-	if t.Destination != "" {
+	if t.Destination != "" && t.DestinationPort == 0 {
 		return "ssh " + t.Destination
 	}
 	if p := t.port(); p != 22 {
@@ -725,12 +744,24 @@ func (t SSHTransport) connectCommand() string {
 
 // knownHostsName is the host as known_hosts names it.
 func (t SSHTransport) knownHostsName() string {
-	if t.Destination != "" {
-		_, host, found := strings.Cut(t.Destination, "@")
-		if !found {
-			return t.Destination
+	if t.KnownHost != "" {
+		return t.KnownHost
+	}
+	if t.Destination != "" && t.DestinationPort == 0 {
+		dest, uri := strings.CutPrefix(t.Destination, "ssh://")
+		if _, host, found := strings.Cut(dest, "@"); found {
+			dest = host
 		}
-		return host
+		if uri {
+			// ssh://[user@]host[:port], the one form with a port.
+			if h, p, err := net.SplitHostPort(dest); err == nil {
+				if p == "22" {
+					return h
+				}
+				return "[" + h + "]:" + p
+			}
+		}
+		return dest
 	}
 	if p := t.port(); p != 22 {
 		return fmt.Sprintf("[%s]:%d", t.Host, p)
