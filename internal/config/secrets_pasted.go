@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -109,6 +110,12 @@ func (s *Secrets) checkPasted(replacing string) error {
 	return nil
 }
 
+// ErrPastedControl is what a secrets file refused for a pasted secret
+// holding a control character wraps, so a caller that otherwise words its
+// own refusal can pass this one through: it names the key and the repair,
+// and never the value.
+var ErrPastedControl = errors.New("a pasted secret holds a control character")
+
 // pastedProblem is a secrets file refused for a pasted value checkPasted
 // found, said by key.
 func pastedProblem(path, key string, err error) error {
@@ -123,6 +130,6 @@ func pastedProblem(path, key string, err error) error {
 	return &ui.Problem{
 		Hint:    fmt.Sprintf("%s: %s holds a control character", name, key),
 		Explain: "Each pasted secret is rendered onto one line of an env file, where a line break in it would add a line setting another variable of that service, so the file is not read. " + fix,
-		Cause:   fmt.Errorf("%s: %w", name, err),
+		Cause:   fmt.Errorf("%s: %w: %w", name, ErrPastedControl, err),
 	}
 }

@@ -1,6 +1,8 @@
 package dns
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -105,5 +107,54 @@ func TestTheHostSendsTheTokenItRead(t *testing.T) {
 				t.Errorf("%s: %q arrived as %q, want %q", filepath.Base(sh), token, got, want)
 			}
 		}
+	}
+}
+
+// shRunner runs a host's command in a local shell.
+type shRunner string
+
+func (sh shRunner) Run(command string) (string, error) {
+	out, err := exec.Command(string(sh), "-c", command).CombinedOutput()
+	return string(out), err
+}
+
+// A token holding a newline or a carriage return would split curl's
+// configuration line, and the rest of the token would be read as another
+// curl option, so the host refuses it and sends nothing.
+func TestTheHostRefusesATokenWithALineBreak(t *testing.T) {
+	if _, err := exec.LookPath("curl"); err != nil {
+		t.Skip("no curl on this machine")
+	}
+	hit := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hit = true }))
+	defer srv.Close()
+	shells := []string{"/bin/sh"}
+	if dash, err := exec.LookPath("dash"); err == nil {
+		shells = append(shells, dash)
+	}
+	for _, sh := range shells {
+		for name, line := range map[string]string{
+			"an escaped newline":       `"tok\nurl = http://example.org"`,
+			"a raw carriage return":    "tok\rurl = http://example.org",
+			"a quoted carriage return": "\"tok\rurl = http://example.org\"",
+		} {
+			f := filepath.Join(t.TempDir(), "caddy.env")
+			if err := os.WriteFile(f, []byte("ACME_DNS_TOKEN="+line+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			hit = false
+			c := &remoteCaller{host: shRunner(sh), envFile: f, base: srv.URL}
+			_, _, err := c.get(context.Background(), "/user/tokens/verify", nil)
+			if !errors.Is(err, errLineBreak) {
+				t.Errorf("%s, %s: got %v, want errLineBreak", filepath.Base(sh), name, err)
+			}
+			if hit {
+				t.Errorf("%s, %s: a request was sent", filepath.Base(sh), name)
+			}
+		}
+	}
+	r := TokenCheck{Provider: "cloudflare", Place: "vm"}.unanswered(nil, errLineBreak)
+	if r.Status != TokenFailed || !strings.Contains(r.Finding, "line break") || !strings.Contains(r.Advice, "secrets set external.acme_dns_token") {
+		t.Errorf("reported as %+v", r)
 	}
 }

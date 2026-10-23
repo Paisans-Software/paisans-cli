@@ -181,6 +181,10 @@ func (c TokenCheck) fail(r TokenResult) TokenResult {
 // errNoToken is a host whose caddy.env holds no token.
 var errNoToken = errors.New("no token")
 
+// errLineBreak is a host whose caddy.env holds a token with a newline or a
+// carriage return in it, which the check refuses to send (remoteGet).
+var errLineBreak = errors.New("the token holds a line break")
+
 // unreadableEnv is a host whose caddy.env could not be read at all, with
 // why. It is not errNoToken: caddy.env is root's and 0600, so a check that
 // runs without root sees a file it cannot read, which says nothing about
@@ -321,6 +325,12 @@ func (c TokenCheck) unanswered(caller tokenCaller, err error) TokenResult {
 		return c.fail(TokenResult{
 			Finding: "caddy.env on " + c.from() + " holds no ACME_DNS_TOKEN",
 			Advice:  "apply renders it from external.acme_dns_token. Set that in the secrets and apply again.",
+		})
+	}
+	if errors.Is(err, errLineBreak) {
+		return c.fail(TokenResult{
+			Finding: "caddy.env on " + c.from() + " holds an ACME_DNS_TOKEN with a line break in it",
+			Advice:  "Nothing was sent to the provider. No token holds one, and curl would read the rest of it as another option. Set the token again with `paisans secrets set external.acme_dns_token` and apply.",
 		})
 	}
 	var unreadable unreadableEnv
@@ -515,6 +525,8 @@ func (r *remoteCaller) get(_ context.Context, path string, query url.Values) (in
 	switch strings.TrimSpace(kind) {
 	case "none":
 		return 0, nil, errNoToken
+	case "linebreak":
+		return 0, nil, errLineBreak
 	case "account":
 		r.account = true
 	case "user":
@@ -538,12 +550,17 @@ func (r *remoteCaller) get(_ context.Context, path string, query url.Values) (in
 // replaced by a POSIX loop rather than sed, because sed would need the
 // token in its arguments. A file sed cannot read, missing or not readable
 // by the user the command runs as, prints "unreadable" and sed's error
-// first, so that it is told apart from a file that holds no token.
+// first, so that it is told apart from a file that holds no token. A token
+// holding a newline or a carriage return prints "linebreak" and sends
+// nothing: curl reads its configuration a line at a time, so the rest of
+// such a token would be read as another option of a curl run through sudo.
 func remoteGet(envFile, target string) string {
 	return "f=" + quote(envFile) + "; " +
 		`e=$(sed -n 1p "$f" 2>&1 >/dev/null); if [ $? -ne 0 ]; then printf 'unreadable %s\n' "$e" | head -n 1; exit 0; fi; ` +
 		envTokenRead +
 		`if [ -z "$t" ]; then echo none; exit 0; fi; ` +
+		`cr=$(printf '\r'); case $t in *"$cr"*|*'
+'*) echo linebreak; exit 0;; esac; ` +
 		`case $t in cfat_*) echo account;; *) echo user;; esac; ` +
 		curlQuoted +
 		`o=$(printf 'header = "Authorization: Bearer %s"\n' "$q" | curl -sS --max-time 20 -w '\n%{http_code}' -K - ` + quote(target) + `); s=$?; ` +

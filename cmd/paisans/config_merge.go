@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -55,6 +56,11 @@ func pullMergingSecrets(r ui.Reporter, l configstore.Local, g configstore.Gather
 		return true, secretsMergeProblem("the head " + head[:12])
 	}
 	ours, err := config.LoadDeploymentSecrets(filepath.Join(l.Dir, "secrets.enc.yaml"), id)
+	if errors.Is(err, config.ErrPastedControl) {
+		// It names the key and `secrets set`, the repair, and never the
+		// value, so it is said as it is.
+		return true, err
+	}
 	if err != nil {
 		return true, secretsMergeProblem("the local secrets.enc.yaml")
 	}

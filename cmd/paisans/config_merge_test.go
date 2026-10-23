@@ -301,6 +301,22 @@ func TestConfigPullMergeRefusesWhileARekeyIsUnderWay(t *testing.T) {
 	}
 }
 
+// A local file holding a pasted value with a line break in it is refused by
+// that refusal, naming the key and the command that repairs it, not as a
+// file that could not be decrypted.
+func TestConfigPullMergeSaysWhyTheLocalSecretsAreRefused(t *testing.T) {
+	ours := append(append([]string{}, mergeOurs...), "external.c", "bad\nc")
+	m := newMergeCase(t, mergeBase, ours, mergeTheirs, "")
+	_, err := m.pull(t, true)
+	text := problemText(err)
+	if err == nil || strings.Contains(text, "could not be decrypted") || !strings.Contains(text, "external.c") || !strings.Contains(text, "paisans secrets set external.c") {
+		t.Errorf("got %q", text)
+	}
+	if strings.Contains(text, "bad") {
+		t.Errorf("the refusal shows the value: %q", text)
+	}
+}
+
 // A published version holding a pasted value with a line break in it is
 // still read as the merge's base or head: the check that refuses it belongs
 // to the local file, which the next command loads, and a version in the
