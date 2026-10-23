@@ -7,6 +7,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/mesh"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -48,7 +49,7 @@ func Mesh(cfg *config.Config, probes []MeshProbe) []Finding {
 						"Every service on the site binds its mesh address, which exists only while the interface is up, so nothing on this site can reach another one.",
 						"recover:",
 						journalAdvice(iface, p.Site, d.WireGuardUnit()),
-						fmt.Sprintf("  2. `paisans deployment apply --site %s --execute` starts it and enables it at boot.", p.Site),
+						fmt.Sprintf("  2. `%s deployment apply --site %s --execute` starts it and enables it at boot.", progname.Cmd(), p.Site),
 					}})
 			default:
 				out = append(out, Finding{Section: SectionMesh, Level: OK, Line: fmt.Sprintf("%s: %s is up", p.Site, iface)})
@@ -83,7 +84,7 @@ func Mesh(cfg *config.Config, probes []MeshProbe) []Finding {
 				"The mesh subnet is fixed once deployed: every app trusts it for forwarded client addresses and every service binds an address in it. The other network has to move.",
 				"recover:",
 				"  1. Move it to a range clear of " + cfg.Mesh.Subnet + ": a LAN or VPN in its own configuration; a Docker network by recreating it with another subnet; Docker's pools with default-address-pools in " + mesh.UserDaemonConfig + " and a restart of the deployment's Docker.",
-				fmt.Sprintf("  2. `paisans doctor --site %s` again.", p.Site),
+				fmt.Sprintf("  2. `%s doctor --site %s` again.", progname.Cmd(), p.Site),
 			}})
 	}
 	return out

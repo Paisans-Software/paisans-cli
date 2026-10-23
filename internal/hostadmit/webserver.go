@@ -7,6 +7,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/webserver"
 )
@@ -41,7 +42,7 @@ func planWebServer(p *planner) error {
 		// as it should be, so admit does not warn about it.
 		p.present("web server: Caddy's admin API is not on TCP, so admit read none of its certificates")
 	case ws.Why != "":
-		p.warn("web server: "+hostText(ws.Why), "Admit records what it could tell; paisans web-server show asks you for the rest when the operators run it.")
+		p.warn("web server: "+hostText(ws.Why), "Admit records what it could tell; "+progname.Default+" web-server show asks you for the rest when the operators run it.")
 	default:
 		p.present(hostText(ws.Summary()))
 	}

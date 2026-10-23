@@ -12,6 +12,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/dns"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // Probes are how a move reaches the world besides ssh and the DNS
@@ -113,5 +114,5 @@ func (p *Plan) verify() error {
 	if len(failed) == 0 {
 		return nil
 	}
-	return fmt.Errorf("%s does not answer for every hostname yet, so nothing that depends on it is done:\n  %s\nApply it (paisans deployment apply --site %s --execute) and read its Caddy's log for a certificate it could not obtain. An address this machine has no route to (IPv6 on many home connections) cannot be checked from here; run the move from a machine that can reach it", p.To, strings.Join(failed, "\n  "), p.To)
+	return fmt.Errorf("%s does not answer for every hostname yet, so nothing that depends on it is done:\n  %s\nApply it (%s deployment apply --site %s --execute) and read its Caddy's log for a certificate it could not obtain. An address this machine has no route to (IPv6 on many home connections) cannot be checked from here; run the move from a machine that can reach it", p.To, strings.Join(failed, "\n  "), progname.Cmd(), p.To)
 }

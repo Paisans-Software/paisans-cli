@@ -8,6 +8,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/mesh"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -32,7 +33,7 @@ func planDeploymentDir(p *planner) error {
 		p.step(Step{Title: "create " + p.d.Root(), Describe: "directory: the deployment's own, " + user + "'s, mode 750",
 			Command: "install -d -m 750 -o " + user + " -g " + apply.ShellQuote(groupOf(p)) + " " + p.d.Root(), Kinds: []string{"directory"}, Provisional: !p.f.User.Exists})
 	case !strings.HasPrefix(root.Mode, "d") || !p.f.User.Exists || root.UID != p.f.User.UID:
-		return fmt.Errorf("%s exists and is not a directory of %s's (%q, owner %d). It is an earlier deployment run as root, which is redeployed rather than taken over: remove it with paisans site remove, or by hand once nothing in it is wanted, and admit again. Nothing was changed", p.d.Root(), ui.Visible(user), root.Mode, root.UID)
+		return fmt.Errorf("%s exists and is not a directory of %s's (%q, owner %d). It is an earlier deployment run as root, which is redeployed rather than taken over: remove it with %s site remove, or by hand once nothing in it is wanted, and admit again. Nothing was changed", p.d.Root(), ui.Visible(user), root.Mode, root.UID, progname.Default)
 	case strings.HasSuffix(root.Mode, "+"):
 		return fmt.Errorf("%s carries an ACL (%s), which chmod cannot take away, and another local user could plant what the deployment runs through it. Remove it with setfacl -b %s and admit again. Nothing was changed", p.d.Root(), ui.Visible(root.Mode), p.d.Root())
 	case root.Mode != "drwxr-x---" || root.GID != p.f.User.GID:

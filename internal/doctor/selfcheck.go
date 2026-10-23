@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/selfcheck"
 )
 
@@ -62,7 +63,7 @@ func SelfChecks(cfg *config.Config, probes []SelfCheckProbe) []Finding {
 			out = append(out, Finding{Section: SectionSelfCheck, Level: absentLevel(cfg, p.Site),
 				Line: fmt.Sprintf("%s: %s", p.Site, firstLine(p.Err)),
 				More: []string{asked,
-					fmt.Sprintf("The run's classification found %s down (see reach): its absence is the cause to look at first. Once its ssh answers, `paisans doctor --site %s` again.", p.Site, p.Site),
+					fmt.Sprintf("The run's classification found %s down (see reach): its absence is the cause to look at first. Once its ssh answers, `%s doctor --site %s` again.", p.Site, progname.Cmd(), p.Site),
 				}})
 		case p.Conflict != 0:
 			out = append(out, Finding{Section: SectionSelfCheck, Level: Fail,
@@ -71,8 +72,8 @@ func SelfChecks(cfg *config.Config, probes []SelfCheckProbe) []Finding {
 					fmt.Sprintf("doctor asked %s for https://%s%s from this workstation, as apply does at the end of the gateway's step, and another server answered on %d: a listener of the host owner's, a container of their system Docker, or a DNAT rule, which only root on the host can see.", p.Address, p.Host, path, p.Conflict),
 					"recover:",
 					fmt.Sprintf("  1. The host's owner finds what holds %d on %s: `sudo ss -Hltnp`, `sudo docker ps` for the system daemon, and `sudo nft list ruleset` for a DNAT rule.", p.Conflict, p.Site),
-					"  2. They free the port; or the site runs behind their web server (web_server.managed_by: external, on a monitor), or the gateway moves to another site with `paisans gateway move`.",
-					fmt.Sprintf("  3. `paisans doctor --site %s` again.", p.Site),
+					"  2. They free the port; or the site runs behind their web server (web_server.managed_by: external, on a monitor), or the gateway moves to another site with `" + progname.Cmd() + " gateway move`.",
+					fmt.Sprintf("  3. `%s doctor --site %s` again.", progname.Cmd(), p.Site),
 				}})
 		default:
 			out = append(out, Finding{Section: SectionSelfCheck, Level: Fail,

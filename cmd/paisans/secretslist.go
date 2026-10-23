@@ -13,6 +13,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
 	"github.com/paisans-software/paisans-cli/internal/secretsrotate"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -97,9 +98,9 @@ func runSecretsList(args []string, stdout io.Writer) error {
 	}
 
 	if orphans > 0 {
-		r.Note(fmt.Sprintf("secrets: %d more path(s) in the file name something %s does not declare, and are not listed", orphans, config.FileName), "`paisans secrets prune` lists them")
+		r.Note(fmt.Sprintf("secrets: %d more path(s) in the file name something %s does not declare, and are not listed", orphans, config.FileName), "`"+progname.Cmd()+" secrets prune` lists them")
 	}
-	r.Result("%d secret(s), %d unset. A generated one is filled by `paisans init`, a pasted one by `paisans secrets set`, and a captured one by `paisans deployment apply --execute`.", len(rows), unset)
+	r.Result("%d secret(s), %d unset. A generated one is filled by `%s init`, a pasted one by `%s secrets set`, and a captured one by `%s deployment apply --execute`.", len(rows), unset, progname.Cmd(), progname.Cmd(), progname.Cmd())
 	return nil
 }
 
@@ -188,7 +189,7 @@ func markRotation(cfg *config.Config, rows []listedSecret, rotate []secretsrotat
 		for _, k := range kept {
 			if ok, _ := path.Match(k.Path, rows[i].Path); ok {
 				rows[i].Rotate = "kept"
-				if k.Reason == wireguardKept {
+				if k.Reason == wireguardKept() {
 					rows[i].Rotate = "mesh rekey"
 				}
 				break

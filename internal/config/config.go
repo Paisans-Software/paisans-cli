@@ -18,6 +18,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostarch"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -931,7 +932,7 @@ func LoadWithBytes(path string) (*Config, []byte, error) { return loadBytes(path
 func loadBytes(path string, noSubnet bool) (*Config, []byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, nil, readProblem(path, "Run paisans from the directory that holds "+FileName+", or name the file with --config.", err)
+		return nil, nil, readProblem(path, "Run "+progname.Cmd()+" from the directory that holds "+FileName+", or name the file with --config.", err)
 	}
 	cfg, err := parse(data, path, noSubnet)
 	return cfg, data, err
@@ -1166,9 +1167,9 @@ func (c *Config) structural(noSubnet bool) error {
 	}
 	switch {
 	case c.ID == "":
-		add("id: required. It is this deployment's identity, a random UUID every name and path on a host is derived from. Run `paisans init`, which adds one and never changes it afterwards.")
+		add("id: required. It is this deployment's identity, a random UUID every name and path on a host is derived from. Run `%s init`, which adds one and never changes it afterwards.", progname.Cmd())
 	case !deployment.ValidID(c.ID):
-		add("id: %q is not a lowercase version 4 UUID in canonical form (8-4-4-4-12 hex digits). It is written once by `paisans init`; remove the line and run `paisans init` to generate one, unless this deployment already runs somewhere, in which case restore the id it was deployed with.", c.ID)
+		add("id: %q is not a lowercase version 4 UUID in canonical form (8-4-4-4-12 hex digits). It is written once by `%s init`; remove the line and run `%s init` to generate one, unless this deployment already runs somewhere, in which case restore the id it was deployed with.", c.ID, progname.Cmd(), progname.Cmd())
 	}
 	if c.Community.Domain == "" {
 		add("community.domain: required. It is the community's federation identity and cannot be changed later.")
@@ -1178,18 +1179,18 @@ func (c *Config) structural(noSubnet bool) error {
 	switch {
 	case c.Mesh.Subnet == "" && noSubnet:
 	case c.Mesh.Subnet == "":
-		add("mesh.subnet: required. Run `paisans init`, which reaches every site, picks a /24 that overlaps nothing on any of them, and writes it here with each site's address moved into it. It is what applications trust for forwarded client addresses, so once a site is deployed it never changes.")
+		add("mesh.subnet: required. Run `%s init`, which reaches every site, picks a /24 that overlaps nothing on any of them, and writes it here with each site's address moved into it. It is what applications trust for forwarded client addresses, so once a site is deployed it never changes.", progname.Cmd())
 	default:
 		network, problems := CheckMeshSubnet(c.Mesh.Subnet)
 		for _, p := range problems {
 			advice := "Write it as an IPv4 network address and a prefix length, for example 10.44.0.0/24."
 			switch {
 			case network != nil && strings.HasPrefix(p, "is outside the private ranges"):
-				advice = "Choose a /24 inside one of them; `paisans init` picks a /24 in 10.0.0.0/8."
+				advice = "Choose a /24 inside one of them; `" + progname.Cmd() + " init` picks a /24 in 10.0.0.0/8."
 			case network != nil && strings.HasPrefix(p, "overlaps "):
-				advice = "A host's firewall lets the deployment reach the mesh before it stops it reaching loopback, link-local and other reserved ranges, so the mesh must lie outside them; `paisans init` picks a /24 in private space."
+				advice = "A host's firewall lets the deployment reach the mesh before it stops it reaching loopback, link-local and other reserved ranges, so the mesh must lie outside them; `" + progname.Cmd() + " init` picks a /24 in private space."
 			case network != nil:
-				advice = "The mesh is what the hosts' firewalls trust, so a larger one could cover a LAN; `paisans init` picks a /24."
+				advice = "The mesh is what the hosts' firewalls trust, so a larger one could cover a LAN; `" + progname.Cmd() + " init` picks a /24."
 			}
 			add("mesh.subnet: %q %s. %s", c.Mesh.Subnet, p, advice)
 		}
@@ -1342,7 +1343,7 @@ func (c *Config) structural(noSubnet bool) error {
 		// import internal/acme, by design, so any list written out would be a
 		// second copy in prose that nothing keeps in step with the catalogue.
 		// `validate` names them, built from acme.Providers.
-		add("acme.provider: required, because %s runs the toolkit's Caddy (a gateway, or a monitor with managed_by: paisans). Certificates are issued over DNS-01, so the provider that answers the challenge has to be named. It must be one this toolkit publishes an image for, which `paisans validate` will list, or any other provider together with an acme.image carrying its module.", strings.Join(c.CaddySites(), ", "))
+		add("acme.provider: required, because %s runs the toolkit's Caddy (a gateway, or a monitor with managed_by: paisans). Certificates are issued over DNS-01, so the provider that answers the challenge has to be named. It must be one this toolkit publishes an image for, which `%s validate` will list, or any other provider together with an acme.image carrying its module.", strings.Join(c.CaddySites(), ", "), progname.Cmd())
 	}
 	problems = append(problems, c.catalogProblems()...)
 	// Resolving reads the catalogs, which may mean fetching them, so it runs

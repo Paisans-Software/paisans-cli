@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -107,7 +108,7 @@ func checkDNS(ctx context.Context, t Target, p Probes) Result {
 	if t.PublicAddress6 != "" {
 		want = append(want, t.PublicAddress6)
 	}
-	fix := fmt.Sprintf("point %s at %s (A%s), as sites.%s.public_address%s says; `paisans dns init` creates exactly these records", t.Hostname, addresses(t), aaaa(t), t.Site, v6key(t))
+	fix := fmt.Sprintf("point %s at %s (A%s), as sites.%s.public_address%s says; `%s dns init` creates exactly these records", t.Hostname, addresses(t), aaaa(t), t.Site, v6key(t), progname.Cmd())
 	got, err := p.Resolver.LookupHost(ctx, t.Hostname)
 	if err != nil {
 		r.Detail = fmt.Sprintf("%s does not resolve: %v", t.Hostname, err)
@@ -138,7 +139,7 @@ func checkDNS(ctx context.Context, t Target, p Probes) Result {
 		r.Detail = fmt.Sprintf("%s resolves to %s: %s", t.Hostname, strings.Join(got, ", "), strings.Join(why, ", "))
 		r.Fix = fix
 		if len(stray) > 0 {
-			r.Fix += fmt.Sprintf(".\nRun paisans dns init, which updates a record for %s pointing at %s that it made for this deployment; delete any other by hand at the provider, since dns prune keeps one whose name is still wanted", t.Hostname, strings.Join(stray, ", "))
+			r.Fix += fmt.Sprintf(".\nRun %s dns init, which updates a record for %s pointing at %s that it made for this deployment; delete any other by hand at the provider, since dns prune keeps one whose name is still wanted", progname.Cmd(), t.Hostname, strings.Join(stray, ", "))
 		}
 		return r
 	}
@@ -150,7 +151,7 @@ func checkDNS(ctx context.Context, t Target, p Probes) Result {
 func checkCertificate(ctx context.Context, t Target, p Probes) Result {
 	r := Result{Name: CheckCertificate}
 	address := fmt.Sprintf("https://%s%s", t.Hostname, t.HealthPath)
-	certFix := fmt.Sprintf("give your web server a certificate for %s, on the lines marked YOUR CERTIFICATE in `paisans web-server show --app %s`, and renew it before it expires", t.Hostname, t.App)
+	certFix := fmt.Sprintf("give your web server a certificate for %s, on the lines marked YOUR CERTIFICATE in `%s web-server show --app %s`, and renew it before it expires", t.Hostname, progname.Cmd(), t.App)
 	if !t.External() {
 		certFix = fmt.Sprintf("the Caddy on %s obtains it over DNS-01: check that secrets external.acme_dns_token is set and scoped to the zone, then read the caddy container's log there", t.Site)
 	}
@@ -176,7 +177,7 @@ func checkCertificate(ctx context.Context, t Target, p Probes) Result {
 	}
 	if !expected(t.HealthExpect, resp.StatusCode) {
 		r.Detail = fmt.Sprintf("%s answered %d, want %s%s", address, resp.StatusCode, t.HealthExpect, expiry)
-		r.Fix = fmt.Sprintf("the web server must proxy every path to %s, and the app must be running there (`paisans deployment apply --site %s`)", upstreamOf(t), t.Site)
+		r.Fix = fmt.Sprintf("the web server must proxy every path to %s, and the app must be running there (`%s deployment apply --site %s`)", upstreamOf(t), progname.Cmd(), t.Site)
 		return r
 	}
 	r.OK = true
@@ -215,13 +216,13 @@ func checkSignIn(ctx context.Context, t Target, p Probes) Result {
 	}
 	if next.Host == "" || strings.EqualFold(next.Hostname(), t.Hostname) {
 		r.Detail = fmt.Sprintf("%s sent the browser back to %s, not to the identity provider", address, next.Path)
-		r.Fix = fmt.Sprintf("create the app's client at the identity provider (`paisans oidc client create --app %s`), apply it (`paisans deployment apply --site %s`), and check the identity provider is up", t.App, t.Site)
+		r.Fix = fmt.Sprintf("create the app's client at the identity provider (`%s oidc client create --app %s`), apply it (`%s deployment apply --site %s`), and check the identity provider is up", progname.Cmd(), t.App, progname.Cmd(), t.Site)
 		return r
 	}
 	callback := next.Query().Get("redirect_uri")
 	if want := "https://" + t.Hostname + "/"; !strings.HasPrefix(callback, want) {
 		r.Detail = fmt.Sprintf("the sign in redirect names %q as its callback, not one under %s", callback, want)
-		r.Fix = fmt.Sprintf("the app builds its callback from PUBLIC_BASE_URL, which apply renders as https://%s: run `paisans deployment apply --site %s`, and make sure your web server passes Host through unchanged and does not rewrite Location", t.Hostname, t.Site)
+		r.Fix = fmt.Sprintf("the app builds its callback from PUBLIC_BASE_URL, which apply renders as https://%s: run `%s deployment apply --site %s`, and make sure your web server passes Host through unchanged and does not rewrite Location", t.Hostname, progname.Cmd(), t.Site)
 		return r
 	}
 	r.OK = true

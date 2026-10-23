@@ -12,6 +12,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/garage"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // differs reports whether a node's garage.toml names another factor than the
@@ -40,7 +41,7 @@ func (p *Plan) buildNodes() *Stage {
 		title = "read Garage on " + n.site
 		switch {
 		case !n.deployed:
-			text = fmt.Sprintf("Run `paisans deployment apply --site %s` first: it writes %s and starts Garage there", n.site, garageToml(p.dep()))
+			text = fmt.Sprintf("Run `%s deployment apply --site %s` first: it writes %s and starts Garage there", progname.Cmd(), n.site, garageToml(p.dep()))
 			level, title = "refuse", n.site+" has no garage.toml yet"
 		case !n.answers():
 			text = fmt.Sprintf("garage.toml at replication %d; the node does not answer: %s", n.factor, n.answerErr)
@@ -63,7 +64,7 @@ func (p *Plan) buildNodes() *Stage {
 		var problems []string
 		for _, n := range p.nodes {
 			if !n.deployed {
-				problems = append(problems, fmt.Sprintf("%s has no %s. Run `paisans deployment apply --site %s` first: it writes the file and starts Garage there", n.site, garageToml(p.dep()), n.site))
+				problems = append(problems, fmt.Sprintf("%s has no %s. Run `%s deployment apply --site %s` first: it writes the file and starts Garage there", n.site, garageToml(p.dep()), progname.Cmd(), n.site))
 				continue
 			}
 			// A node the reset stopped is started again by it, so only an

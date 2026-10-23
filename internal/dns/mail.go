@@ -10,6 +10,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // A name that publishes an address can be the sender of a forged message,
@@ -543,8 +544,8 @@ func ownNoMail(w Want, records []Record, comment string) (Record, bool) {
 // now has mail of its own.
 func leftover(w Want, r Record) string {
 	name := strings.TrimPrefix(strings.TrimPrefix(w.Name, "_dmarc."), "*._domainkey.")
-	return fmt.Sprintf("%s has mail of its own (%s), but the no-mail %s %s that this deployment's dns init made is still here. That name's mail records are whoever runs its mail's to set, and this one says it has none. Run paisans dns prune --execute to delete it, then run again.",
-		name, strings.Join(w.Sources, ", "), r.Type, display(strings.ToUpper(r.Type), r.Content, r.Priority))
+	return fmt.Sprintf("%s has mail of its own (%s), but the no-mail %s %s that this deployment's dns init made is still here. That name's mail records are whoever runs its mail's to set, and this one says it has none. Run %s dns prune --execute to delete it, then run again.",
+		name, strings.Join(w.Sources, ", "), r.Type, display(strings.ToUpper(r.Type), r.Content, r.Priority), progname.Cmd())
 }
 
 // isLockdown reports whether r is exactly one of the records mailWants

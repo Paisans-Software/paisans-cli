@@ -23,6 +23,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/meshkey"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/storageadd"
 )
@@ -323,7 +324,7 @@ func (p *Plan) checkToken() error {
 	ctx, cancel := context.WithTimeout(context.Background(), dnsTimeout)
 	defer cancel()
 	if _, err := dns.FindZone(ctx, provider, strings.TrimSuffix(strings.ToLower(strings.TrimSpace(p.cfg.Community.Domain)), "."), nil); err != nil {
-		return fmt.Errorf("site remove %s: the DNS token in the secrets file does not work against %s: %v. %s held the token as it was rendered, so it is revoked at %s and a new one set before the site is cut off: paisans secrets set external.acme_dns_token < token-file. Nothing was changed", p.Site, name, err, p.Site, name)
+		return fmt.Errorf("site remove %s: the DNS token in the secrets file does not work against %s: %v. %s held the token as it was rendered, so it is revoked at %s and a new one set before the site is cut off: %s secrets set external.acme_dns_token < token-file. Nothing was changed", p.Site, name, err, p.Site, name, progname.Cmd())
 	}
 	return nil
 }
@@ -886,7 +887,7 @@ func (p *Plan) CutoffReport() []string {
 		out = append(out, fmt.Sprintf("dns: the DNS token was not checked; check it yourself. %s held the token it was rendered, and %s, so this command could not try the one in the secrets file. Revoke the old one at the provider", p.Site, p.cutoff.tokenUnchecked))
 	}
 	if joining := p.Joining(); len(joining) > 0 {
-		out = append(out, fmt.Sprintf("apply: run `paisans deployment apply` to bring up %s. It prepares the new host, applies it, creates its DNS records, and adds it as a peer on every remaining site; until then it is in "+config.FileName+" and nowhere else", joinAnd(joining)))
+		out = append(out, fmt.Sprintf("apply: run `%s deployment apply` to bring up %s. It prepares the new host, applies it, creates its DNS records, and adds it as a peer on every remaining site; until then it is in "+config.FileName+" and nowhere else", progname.Cmd(), joinAnd(joining)))
 	}
 	if len(p.cutoff.dark) > 0 {
 		out = append(out, fmt.Sprintf("names: the community answers nothing until that apply. %s was the only remaining %s site", p.Site, strings.Join(p.cutoff.dark, " and ")))
@@ -894,7 +895,7 @@ func (p *Plan) CutoffReport() []string {
 	out = append(out,
 		fmt.Sprintf("%s: the host still holds what it was rendered. Its WireGuard key no longer works on any remaining site. Rotate the rest in this order: the DNS token first (secrets set, and revoked at the provider), since it can point the community's names anywhere; the OIDC client secrets (oidc client create --rotate-secret); the apps' S3 keys (storage rotate-key --app); then the Postgres, Garage and heartbeat secrets, which secrets rotate will change where they are checked and where they are used together", p.Site),
 		fmt.Sprintf("%s: a copy of the database and the objects stays on the host; it cannot be taken back", p.Site),
-		"operators: when an operator who left could decrypt the secrets file, re-encrypt it without them. Take their age key out of .sops.yaml and re-encrypt under a new data key (sops rotate --rm-age), then rotate every remaining site's WireGuard key with paisans mesh rekey --all before the replacement joins. docs/guides/when-an-operator-leaves.md is the whole order",
+		"operators: when an operator who left could decrypt the secrets file, re-encrypt it without them. Take their age key out of .sops.yaml and re-encrypt under a new data key (sops rotate --rm-age), then rotate every remaining site's WireGuard key with "+progname.Cmd()+" mesh rekey --all before the replacement joins. docs/guides/when-an-operator-leaves.md is the whole order",
 	)
 	return out
 }

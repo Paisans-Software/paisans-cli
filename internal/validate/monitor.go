@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
@@ -147,7 +148,7 @@ func (c *checker) webServer() {
 		if !site.WebServer.IncludeDir.Unset() {
 			c.refuse("web-server-include-dir", key+".include_dir",
 				"web_server include_dir is not a setting",
-				"is set. apply writes nothing into your web server's configuration: it writes a reference snippet for each app under %s/web-server/ on the site, and the host's owner installs it in their web server (paisans web-server show --app <app> prints it). Remove include_dir.", c.cfg.Deployment().Root())
+				"is set. apply writes nothing into your web server's configuration: it writes a reference snippet for each app under %s/web-server/ on the site, and the host's owner installs it in their web server (%s web-server show --app <app> prints it). Remove include_dir.", c.cfg.Deployment().Root(), progname.Cmd())
 		}
 		switch {
 		case managedBy == config.ManagedByPaisans && listen != "":

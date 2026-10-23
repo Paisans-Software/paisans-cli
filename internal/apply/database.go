@@ -11,6 +11,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -87,7 +88,7 @@ func Databases(cfg *config.Config, secrets *config.Secrets, site string) (*Boots
 		}
 		password, _ := secrets.Apps[name]["database_password"].(string)
 		if password == "" {
-			return nil, fmt.Errorf("secrets apps.%s.database_password: required to create the app's database role. Run `paisans init` to generate it", name)
+			return nil, fmt.Errorf("secrets apps.%s.database_password: required to create the app's database role. Run `%s init` to generate it", name, progname.Cmd())
 		}
 		if strings.ContainsRune(password, 0) {
 			return nil, fmt.Errorf("secrets apps.%s.database_password: contains a NUL byte, which Postgres cannot store", name)

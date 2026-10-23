@@ -13,6 +13,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/oidcclient"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -26,7 +27,7 @@ var oidcTransport = func(t apply.SSHTransport) pocketid.Transport { return t }
 // runOIDC dispatches `paisans oidc <subcommand>`.
 func runOIDC(args []string) error {
 	if len(args) < 2 || args[0] != "client" || args[1] != "create" {
-		return fmt.Errorf("oidc takes one subcommand, client create: paisans oidc client create --app <name> [--execute]")
+		return fmt.Errorf("oidc takes one subcommand, client create: %s oidc client create --app <name> [--execute]", progname.Cmd())
 	}
 	return runOIDCClientCreate(args[2:])
 }
@@ -111,7 +112,7 @@ func runOIDCClientCreate(args []string) error {
 	}
 	key, _ := secrets.Apps[idp]["static_api_key"].(string)
 	if key == "" {
-		return fmt.Errorf("oidc client create: secrets apps.%s.static_api_key is empty. Run `paisans init` to generate it and `paisans deployment apply` to render it into Pocket ID, then re-run", idp)
+		return fmt.Errorf("oidc client create: secrets apps.%s.static_api_key is empty. Run `%s init` to generate it and `%s deployment apply` to render it into Pocket ID, then re-run", idp, progname.Cmd(), progname.Cmd())
 	}
 
 	ctx := context.Background()
@@ -149,7 +150,7 @@ func runOIDCClientCreate(args []string) error {
 			warnPlaintext(r, *secretsPath)
 		}
 	}
-	r.Detail("`paisans deployment apply --site <site> --execute` on each site running %s renders the client", *appName)
+	r.Detail("`%s deployment apply --site <site> --execute` on each site running %s renders the client", progname.Cmd(), *appName)
 	r.Result("%s's client is in place.", *appName)
 	return nil
 }
