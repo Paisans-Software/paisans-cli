@@ -357,13 +357,13 @@ var helpCommands = []helpCommand{
 		summary: "Move the local files to the sites' newest version.",
 		usage:   []string{"paisans deployment pull [--config " + config.FileName + "] [--root <sha>] [--key <path.pub>] [--execute] [--yes]"},
 		detail: "Move the local files to the sites' newest version, or, over local edits, show the difference and put its files in .paisans/incoming/." +
-			configTrust + "\n\n" + agentTrust,
+			configTrust + "\n\n" + keyTrust,
 	},
 	{
 		name:    "deployment log",
 		summary: "List every version, its signer, and the sites holding it.",
 		usage:   []string{"paisans deployment log [--config " + config.FileName + "] [--root <sha>] [--key <path.pub>]"},
-		detail:  "List every version of the configuration the sites keep, its signer, and the sites holding it." + configTrust + "\n\n" + agentTrust,
+		detail:  "List every version of the configuration the sites keep, its signer, and the sites holding it." + configTrust + "\n\n" + keyTrust,
 	},
 	{
 		name:    "deployment recover",
@@ -371,7 +371,7 @@ var helpCommands = []helpCommand{
 		usage:   []string{"paisans deployment recover --from <user@host[:port] or ssh alias>... [--root <sha>] [--key <path.pub>] [--id <id>]\n                       [--config " + config.FileName + "] [--execute] [--yes]"},
 		detail: "Onto an empty directory, gather from the --from hosts and every site the trusted heads name, and write the head's files, or each head's in .paisans/incoming/ with a fork. " +
 			"With --execute, the recovered version is also saved to this workstation's saved deployments (see deployment list)." +
-			configTrust + "\n\n" + agentTrust + "\n\n" + sshAliasTopic,
+			configTrust + "\n\n" + keyTrust + "\n\n" + sshAliasTopic,
 	},
 	{
 		name:    "deployment list",
@@ -503,11 +503,11 @@ const configTrust = "\n\n" +
 	"--yes types partial and rollback for each command but log, which asks nothing. " + yesTopic + " " +
 	"With --execute each site first syncs with its peers; without it, and in log, no site is changed and only .paisans/ here is written."
 
-// agentTrust is how pull, log and recover find the operator's key on a
-// workstation that records none.
-const agentTrust = "With no key recorded in .paisans/signing-key, name your own operator key with --key <path.pub>: trust starts from the newest version it signed among the versions the trust rules trust from their root, and a key no operator of the newest version lists, removed or never listed, is refused. No key is tried because your ssh-agent holds it. " +
-	"A pinned root anchors alone, and --key does not change it. A named key whose versions lead to different heads is a fork. " +
-	"pull and recover with --execute record the named key in .paisans/signing-key when your ssh-agent holds it (load it with ssh-add) and an operator of the head lists it; log records nothing. With neither --key nor a root, they refuse and say so."
+// keyTrust is how pull, log and recover start trust from --key on a
+// workstation that records no signing key.
+const keyTrust = "With no key recorded in .paisans/signing-key, name your own operator key with --key <path.pub>. It anchors only on versions it signed itself, under one root, that the trust rules trust from that root: every head must be signed by it and list it under an operator, and every trusted version must declare the deployment's id. " +
+	"A newer version by another operator, or the key's versions under two roots, need --root <sha>, since a key alone cannot tell this deployment's history from one it signed before a redeploy under the same id. " +
+	"A pinned root anchors alone, and --key is then ignored, with a note. pull and recover with --execute record the named key in .paisans/signing-key when your ssh-agent holds it (load it with ssh-add) and an operator of the head lists it; log records nothing. With neither --key nor a root, they refuse and say so."
 
 // executeTopic is `paisans help execute`: which commands reach a host, and
 // what --execute lets each of them change.

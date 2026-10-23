@@ -583,14 +583,26 @@ func TestJudgeNamedKeyAnchors(t *testing.T) {
 		t.Fatalf("AnchorAt = %s, want v4", v.AnchorAt)
 	}
 	wantHeads(t, v, "v4")
-	v = judgeOK(t, f, named("", "fp-alice"))
-	if v.AnchorAt != "v3" {
-		t.Fatalf("AnchorAt = %s, want v3", v.AnchorAt)
-	}
-	wantHeads(t, v, "v4")
 	if _, err := Judge(f.graph(), named("", "fp-zed")); !errors.Is(err, ErrNoAnchor) {
 		t.Fatalf("err = %v, want ErrNoAnchor", err)
 	}
+}
+
+// A named key trusts only versions it signed: a newer version by another
+// operator is refused, since a key alone cannot tell this deployment's line
+// from one it signed before a redeploy under the same id, where an operator
+// since removed may still be listed.
+func TestJudgeNamedKeyRefusesAnotherOperatorsHead(t *testing.T) {
+	f := newFake()
+	f.add("o1", 1, "fp-alice", nil, "alice", "mallory")
+	f.add("o2", 2, "fp-alice", on("o1"), "alice", "mallory")
+	f.add("o3", 3, "fp-mallory", on("o2"), "alice", "mallory")
+	_, err := Judge(f.graph(), named("", "fp-alice"))
+	if !errors.Is(err, ErrNoAnchor) || !strings.Contains(err.Error(), "o3") || !strings.Contains(err.Error(), "--root") {
+		t.Fatalf("err = %v, want ErrNoAnchor naming o3 and --root", err)
+	}
+	// Pinned, the same line is judged as any pinned history is.
+	wantHeads(t, judgeOK(t, f, named("o1", "fp-alice")), "o3")
 }
 
 // A named key a version removed is refused, whether its last version is on
@@ -636,13 +648,14 @@ func TestJudgeNamedKeyPinnedRootWins(t *testing.T) {
 	}
 }
 
-// A co-operator's merge on a named key's head is one line, not a fork.
-func TestJudgeNamedKeyMergedByAnotherOperator(t *testing.T) {
+// A merge the named key signed over another operator's version is one line,
+// not a fork.
+func TestJudgeNamedKeyMergeIsOneLine(t *testing.T) {
 	f := newFake()
-	f.add("v1", 1, "fp-k1", nil, "k1", "k2", "carol")
-	f.add("a2", 2, "fp-k1", on("v1"), "k1", "k2", "carol")
-	f.add("b2", 2, "fp-k2", on("v1"), "k1", "k2", "carol")
-	f.add("m3", 3, "fp-carol", on("a2", "b2"), "k1", "k2", "carol")
+	f.add("v1", 1, "fp-k1", nil, "k1", "carol")
+	f.add("a2", 2, "fp-k1", on("v1"), "k1", "carol")
+	f.add("b2", 2, "fp-carol", on("v1"), "k1", "carol")
+	f.add("m3", 3, "fp-k1", on("a2", "b2"), "k1", "carol")
 	v := judgeOK(t, f, named("", "fp-k1"))
 	wantHeads(t, v, "m3")
 }
@@ -662,12 +675,15 @@ func TestJudgeNamedKeyHeadsAreTheRulesHeads(t *testing.T) {
 	wantHeads(t, v, "b4", "a3")
 }
 
-// A named key that signed two roots' histories anchors in each, and their
-// heads differ: a fork, never chosen by revision.
-func TestJudgeNamedKeyUnderTwoRootsIsFork(t *testing.T) {
+// A named key that signed versions under two roots is refused: which root
+// is this deployment's is for a pin to say, never a revision.
+func TestJudgeNamedKeyUnderTwoRootsIsRefused(t *testing.T) {
 	f := chain()
 	f.add("o1", 1, "fp-alice", nil, "alice")
 	f.add("o2", 2, "fp-alice", on("o1"), "alice")
-	v := judgeOK(t, f, named("", "fp-alice"))
-	wantHeads(t, v, "v3", "o2")
+	_, err := Judge(f.graph(), named("", "fp-alice"))
+	if !errors.Is(err, ErrNoAnchor) || !strings.Contains(err.Error(), "more than one root") {
+		t.Fatalf("err = %v, want ErrNoAnchor for two roots", err)
+	}
+	wantHeads(t, judgeOK(t, f, named("v1", "fp-alice")), "v3")
 }

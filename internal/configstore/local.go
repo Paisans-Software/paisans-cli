@@ -581,6 +581,23 @@ func gather(l Local, sites map[string]apply.Transport, configured int, id string
 	if err != nil || len(g.Verdict.Heads) == 0 {
 		return g, err
 	}
+	// A key named with --key carries no pin of its own, so every version it
+	// leads to trusting must declare the deployment being gathered: a history
+	// the key signed for another deployment is never this one's.
+	if a.Named && a.Root == "" {
+		for _, sha := range slices.Sorted(maps.Keys(g.Verdict.Trusted)) {
+			if !g.Verdict.Trusted[sha] {
+				continue
+			}
+			cfg, err := configs(sha)
+			if err != nil {
+				return g, fmt.Errorf("version %s: %w", sha, err)
+			}
+			if cfg.ID != id {
+				return g, &anchorError{fmt.Sprintf("version %s, trusted from the key --key names, declares deployment %s, not %s", sha, cfg.ID, id)}
+			}
+		}
+	}
 	top := g.Verdict.Heads[0]
 	rev := g.Versions[top].Revision
 	seenRev, seenSHA, err := l.Seen()

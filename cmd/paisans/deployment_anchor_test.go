@@ -168,7 +168,8 @@ func TestConfigRecoverAnchorsOnKeyFile(t *testing.T) {
 }
 
 // A pinned root anchors alone: a named key whose versions are under another
-// root neither blocks nor overrides it, and is not recorded.
+// root neither blocks nor overrides it, the run says it was ignored, and it
+// is not recorded.
 func TestConfigRecoverPinnedRootWins(t *testing.T) {
 	key, pub := testKey(t)
 	okey, opub := testKey(t)
@@ -180,10 +181,15 @@ func TestConfigRecoverPinnedRootWins(t *testing.T) {
 	recoverHosts(t, answer)
 	allSitesUp(answer, nil)
 	agentHolding(t, pub)
+	var rep bytes.Buffer
+	reporterOverride = ui.NewPlain(&rep, false)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	if err := runDeployment(recoverArgs(dir, "--root", other, "--key", pubFile(t, pub), "--execute"), noTerminalStdin(), &out); err != nil {
 		t.Fatal(problemText(err), err)
+	}
+	if !strings.Contains(rep.String(), "--key ignored: a root is pinned") {
+		t.Fatalf("no note that --key was ignored:\n%s", rep.String())
 	}
 	l := configstore.Local{Dir: dir}
 	if got, _ := l.Files(); !got.Equal(f) {
@@ -194,18 +200,17 @@ func TestConfigRecoverPinnedRootWins(t *testing.T) {
 	}
 }
 
-// A named key that signed two histories, here from two roots, anchors in
-// each, and their heads differ: a fork, each head's files go to
-// incoming/<sha>, and no key is recorded.
-func TestConfigRecoverNamedKeyUnderTwoRootsIsAFork(t *testing.T) {
+// A named key that signed versions under two roots is refused: which is this
+// deployment's is for --root to say. Nothing is written or recorded.
+func TestConfigRecoverNamedKeyUnderTwoRootsIsRefused(t *testing.T) {
 	akey, apub := testKey(t)
 	_, bpub := testKey(t)
 	_, cpub := testKey(t)
 	s := newStore(t)
 	ra, _ := s.commit(t, operatorsAs(t, apub, cpub), "", nil, 1, akey)
-	a, fa := s.commit(t, operatorsAs(t, apub, cpub), "# a\n", []string{ra}, 2, akey)
+	s.commit(t, operatorsAs(t, apub, cpub), "# a\n", []string{ra}, 2, akey)
 	rb, _ := s.commit(t, operatorsAs(t, apub, bpub), "# b\n", nil, 1, akey)
-	b, fb := s.commit(t, operatorsAs(t, apub, bpub), "# b2\n", []string{rb}, 2, akey)
+	s.commit(t, operatorsAs(t, apub, bpub), "# b2\n", []string{rb}, 2, akey)
 	answer := s.answer(t)
 	recoverHosts(t, answer)
 	allSitesUp(answer, nil)
@@ -213,21 +218,77 @@ func TestConfigRecoverNamedKeyUnderTwoRootsIsAFork(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
 	err := runDeployment(recoverArgs(dir, "--key", pubFile(t, apub), "--execute"), noTerminalStdin(), &out)
-	if !strings.Contains(problemText(err), "the sites hold a fork") {
+	if !strings.Contains(problemText(err), "more than one root") || !strings.Contains(problemText(err), "--root <sha>") {
 		t.Fatalf("got %v", problemText(err))
 	}
 	l := configstore.Local{Dir: dir}
 	if l.HasFiles() {
-		t.Fatal("a fork's recovery wrote the files")
+		t.Fatal("a refused recovery wrote the files")
 	}
 	if k, _ := l.SigningKey(); k != "" {
-		t.Fatalf("a fork's recovery recorded the signing key %q", k)
+		t.Fatalf("a refused recovery recorded the signing key %q", k)
 	}
-	for sha, want := range map[string]configstore.Files{a: fa, b: fb} {
-		got, err := (configstore.Local{Dir: l.IncomingFor(sha)}).Files()
-		if err != nil || !got.Equal(want) {
-			t.Fatalf("incoming %s: %v", sha[:12], err)
-		}
+}
+
+// A host serving only an older incarnation of the deployment, where a
+// co-operator since removed by a redeploy is still listed and signed on
+// after the operator's last version, gets nothing trusted from --key alone:
+// the key trusts only versions it signed, and the refusal asks for --root.
+func TestConfigRecoverNamedKeyRefusesAnOldIncarnationsNewerVersion(t *testing.T) {
+	akey, apub := testKey(t)
+	mkey, mpub := testKey(t)
+	s := newStore(t)
+	yaml := operatorsAs(t, apub, mpub)
+	o1, _ := s.commit(t, yaml, "", nil, 1, akey)
+	o2, _ := s.commit(t, yaml, "# alice\n", []string{o1}, 2, akey)
+	s.commit(t, yaml, "# mallory\n", []string{o2}, 3, mkey)
+	answer := s.answer(t)
+	recoverHosts(t, answer)
+	allSitesUp(answer, nil)
+	agentHolding(t, apub)
+	dir := t.TempDir()
+	var out bytes.Buffer
+	err := runDeployment(recoverArgs(dir, "--key", pubFile(t, apub), "--execute"), noTerminalStdin(), &out)
+	if !strings.Contains(problemText(err), "not by the key --key names") || !strings.Contains(problemText(err), "--root <sha>") {
+		t.Fatalf("got %v", problemText(err))
+	}
+	l := configstore.Local{Dir: dir}
+	if l.HasFiles() {
+		t.Fatal("a refused recovery wrote the files")
+	}
+	if k, _ := l.SigningKey(); k != "" {
+		t.Fatalf("a refused recovery recorded the signing key %q", k)
+	}
+	if r, _ := l.Root(); r != "" {
+		t.Fatalf("a refused recovery pinned %s", r)
+	}
+}
+
+// Every version a named key leads to trusting must declare the deployment
+// being recovered: a history that names another id is refused.
+func TestConfigRecoverNamedKeyRefusesAnotherDeploymentsVersion(t *testing.T) {
+	key, pub := testKey(t)
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	yaml := fixtureAs(t, pub)
+	elsewhere := strings.Replace(yaml, "id: "+cfg.ID, "id: 0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", 1)
+	s := newStore(t)
+	r, _ := s.commit(t, elsewhere, "", nil, 1, key)
+	s.commit(t, yaml, "# here\n", []string{r}, 2, key)
+	answer := s.answer(t)
+	recoverHosts(t, answer)
+	allSitesUp(answer, nil)
+	agentHolding(t, pub)
+	dir := t.TempDir()
+	var out bytes.Buffer
+	err = runDeployment(recoverArgs(dir, "--key", pubFile(t, pub), "--execute"), noTerminalStdin(), &out)
+	if !strings.Contains(problemText(err), "declares deployment 0a1b2c3d") {
+		t.Fatalf("got %v", problemText(err))
+	}
+	if (configstore.Local{Dir: dir}).HasFiles() {
+		t.Fatal("a refused recovery wrote the files")
 	}
 }
 
