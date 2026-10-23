@@ -757,7 +757,8 @@ func (h *host) Run(command string) (string, error) {
 	case strings.Contains(command, `case "${f##*/}" in`), strings.Contains(command, `rootlesskit rm -rf -- "$f"; done`):
 		h.deleteBesideKept(command)
 		return "", nil
-	case strings.Contains(command, "-type d -empty !"):
+	case strings.HasPrefix(command, "for d in '") && strings.Contains(command, "-maxdepth 0 -type d -empty -delete"):
+		// Files hold the directories, so the fake has none to remove.
 		return "", nil
 	case strings.Contains(command, "caddy validate"), strings.Contains(command, "caddy reload"):
 		return "", nil
@@ -787,14 +788,10 @@ func (h *host) Run(command string) (string, error) {
 		}
 		return "", nil
 	case strings.HasPrefix(command, "if [ -d '") && strings.Contains(command, "rootlesskit find '"):
-		// Files hold the directories, so the empty-directories form has
-		// nothing to delete.
-		if !strings.Contains(command, "-type d -empty") {
-			dir := quoted(command)[0]
-			for p := range h.files {
-				if strings.HasPrefix(p, dir+"/") {
-					delete(h.files, p)
-				}
+		dir := quoted(command)[0]
+		for p := range h.files {
+			if strings.HasPrefix(p, dir+"/") {
+				delete(h.files, p)
 			}
 		}
 		return "", nil

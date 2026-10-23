@@ -29,10 +29,10 @@ func TestARemovalResumesFromEachStage(t *testing.T) {
 			stage            int
 			site, verb, text string
 		}{{1, "home-a", "remove", "bbbbbbbbbbbbbbbb"}, {2, "home-a", "remove", "etcd member"}, {2, "home-a", "update", "haproxy.cfg"}}},
-		{3, "-type d -empty -delete; fi", []struct {
+		{3, "-maxdepth 0 -type d -empty -delete", []struct {
 			stage            int
 			site, verb, text string
-		}{{2, "home-a", "remove", "etcd member"}, {3, "home-b", "remove", "every container"}, {3, "home-b", "delete", "the manifest"}}},
+		}{{2, "home-a", "remove", "etcd member"}, {3, "home-b", "remove", "every container"}, {3, "home-b", "delete", "/srv/paisans/f2a9/infra/compose.yaml"}}},
 	} {
 		t.Run(tc.fail, func(t *testing.T) {
 			w := setup(t)
@@ -47,6 +47,10 @@ func TestARemovalResumesFromEachStage(t *testing.T) {
 					t.Errorf("the resumed plan does %s %s %q again:\n%s", d.verb, d.site, d.text, printed(again))
 				}
 			}
+			// The manifest still names the directories its files were in.
+			if tc.stage == 3 && !hasStep(again, 3, "home-b", "remove", "apply's files were in") {
+				t.Errorf("the resumed plan does not remove the empty directories:\n%s", printed(again))
+			}
 			if !again.Pending() {
 				t.Error("a stopped removal has nothing left to do")
 			}
@@ -55,7 +59,7 @@ func TestARemovalResumesFromEachStage(t *testing.T) {
 			if err := siteremove.Execute(again); err != nil {
 				t.Fatalf("resuming: %v\n%s", err, rec.Lines())
 			}
-			if _, manifest := w.hosts["home-b"].files[dep.Manifest()]; w.member("home-b") != nil || manifest || w.hosts["home-b"].ran("-type d -empty -delete; fi") == 0 {
+			if _, manifest := w.hosts["home-b"].files[dep.Manifest()]; w.member("home-b") != nil || manifest || w.hosts["home-b"].ran("-maxdepth 0 -type d -empty -delete") == 0 {
 				t.Error("the resumed removal did not finish")
 			}
 		})

@@ -196,7 +196,7 @@ func (h *host) Run(command string) (string, error) {
 			}
 		}
 		return "", nil
-	case strings.HasPrefix(command, "d='") && strings.Contains(command, "-empty -delete"):
+	case strings.HasPrefix(command, "if [ -d '") && strings.Contains(command, "{ rmdir '"):
 		return "", nil
 	case strings.Contains(command, "exec -T patroni curl"):
 		return fmt.Sprintf(`{"members":[{"name":%q,"role":"leader","state":"running"}]}`, h.db.leader), nil

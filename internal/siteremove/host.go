@@ -43,6 +43,12 @@ type hostPlan struct {
 	// run, sorted.
 	images []string
 	files  []appremove.File
+	// dirs are the directories the files were rendered in, deepest first,
+	// which the run removes once they are empty, but never one the kept
+	// Caddy mounts. Every other directory under the root stays: one a
+	// container wrote is its data, and so are the empty directories in it,
+	// which PostgreSQL's data directory cannot start without.
+	dirs []string
 	// webServer are the reference files for the host owner's web server
 	// the manifest records.
 	webServer []render.ManifestWebServer
@@ -120,19 +126,26 @@ func (p *Plan) removeUserUnitsCommand(home string) string {
 	return fmt.Sprintf(`for f in %[1]s/%[2]s-*; do [ -e "$f" ] || continue; %[3]s disable --now "$(basename "$f")" >/dev/null 2>&1 || true; rm -f -- "$f"; done; %[3]s daemon-reload`, hostprep.UserUnitDir(home), p.dep().Prefix(), hostprep.UserSystemctl)
 }
 
-// emptyRootCommand empties the deployment's root, as root of a new user
-// namespace that maps the user's subordinate range, which is what rootlesskit
-// runs a command as (Docker's rootless documentation, Uninstall: rootlesskit
-// rm -rf ~/.local/share/docker): a file a container's user owns is the
-// user's to remove there. With deleteData everything goes; without, only
-// the empty directories. The root itself stays: /srv/paisans is root's, and
-// site evict removes it.
-func emptyRootCommand(d deployment.Deployment, deleteData bool) string {
-	root := quote(d.Root())
-	if deleteData {
-		return fmt.Sprintf("if [ -d %[1]s ]; then rootlesskit find %[1]s -mindepth 1 -delete; fi", root)
+// emptyRootCommand empties the deployment's root, for --delete-data, as root
+// of a new user namespace that maps the user's subordinate range, which is
+// what rootlesskit runs a command as (Docker's rootless documentation,
+// Uninstall: rootlesskit rm -rf ~/.local/share/docker): a file a container's
+// user owns is the user's to remove there. The root itself stays:
+// /srv/paisans is root's, and site evict removes it.
+func emptyRootCommand(d deployment.Deployment) string {
+	return fmt.Sprintf("if [ -d %[1]s ]; then rootlesskit find %[1]s -mindepth 1 -delete; fi", quote(d.Root()))
+}
+
+// renderedDirs is the directories under the root that files were rendered
+// in, deepest first, but with a kept Caddy never one it mounts.
+func (p *Plan) renderedDirs(files []appremove.File, caddyKept bool) []string {
+	var dirs []string
+	for _, dir := range appremove.RenderedDirs(p.dep().Root(), files) {
+		if !caddyKept || !p.underKept(dir) {
+			dirs = append(dirs, dir)
+		}
 	}
-	return fmt.Sprintf("if [ -d %[1]s ]; then rootlesskit find %[1]s -mindepth 1 -depth -type d -empty -delete; fi", root)
+	return dirs
 }
 
 // containersCommand stops and removes every container and network carrying
@@ -455,6 +468,7 @@ func (p *Plan) buildHost() (*Stage, error) {
 		}
 	}
 	sort.Slice(hp.files, func(i, j int) bool { return hp.files[i].Entry.Path < hp.files[j].Entry.Path })
+	hp.dirs = p.renderedDirs(hp.files, cp != nil)
 	if err := p.planImages(t, hp, inv, refs); err != nil {
 		return nil, err
 	}
@@ -574,8 +588,8 @@ func cleanRel(p string) bool {
 	return true
 }
 
-// planRoot plans the deployment's directory: its empty directories, or with
-// --delete-data all of it unless a file in it was edited.
+// planRoot plans the deployment's directory: with --delete-data all of it
+// unless a file in it was edited, and without it the data it keeps.
 func (p *Plan) planRoot(t apply.Transport, hp *hostPlan, inv *hostcheck.Inventory, edited bool) error {
 	d := p.dep()
 	out, err := t.Run(appremove.DirCommand(d.Root()))
@@ -610,15 +624,15 @@ func (p *Plan) planRoot(t apply.Transport, hp *hostPlan, inv *hostcheck.Inventor
 
 // planKeptRoot plans the deployment's directory around a kept Caddy: with
 // --delete-data everything but Caddy's paths, unless a file was edited;
-// without it, the empty directories once the files are gone.
+// without it, the data it keeps.
 func (p *Plan) planKeptRoot(t apply.Transport, hp *hostPlan, edited bool) error {
 	d, cp := p.dep(), hp.caddy
 	out, err := t.Run(p.keptProbe())
 	if err != nil {
 		return fmt.Errorf("site remove %s: reading %s: %w: %s", p.Site, d.Root(), err, lastLines(out, 2))
 	}
-	others, empty, files := p.parseKeptProbe(out)
-	cp.others, cp.empty = others, empty
+	others, files := p.parseKeptProbe(out)
+	cp.others = others
 	hp.deleteRoot = p.DeleteData && !edited
 	switch {
 	case p.DeleteData && edited:
@@ -690,6 +704,9 @@ func (p *Plan) hostSteps(st *Stage) {
 			add("keep", "keep edited files", "/%s: edited on the host since apply wrote it", f.Entry.Path)
 		}
 	}
+	if !hp.deleteRoot && len(hp.dirs) > 0 {
+		add("remove", "remove empty directories", "the directories under %s that apply's files were in, each once it is empty; every other directory stays, the empty ones in the data too", d.Root())
+	}
 	if hp.manifest {
 		add("delete", "delete the manifest", "%s, the manifest", d.Manifest())
 	}
@@ -708,13 +725,8 @@ func (p *Plan) hostSteps(st *Stage) {
 	switch {
 	case cp != nil && hp.deleteRoot && len(cp.others) > 0:
 		add("delete", "delete "+d.Root()+" but Caddy's files", "everything in %s but the kept Caddy's files, which are kept with --delete-data, through rootlesskit: %s", d.Root(), strings.Join(cp.others, ", "))
-	case cp != nil && !p.DeleteData && (len(cp.empty) > 0 || len(hp.files) > 0):
-		add("remove", "remove empty directories", "the empty directories under %s, but never one the kept Caddy mounts", d.Root())
-	case cp != nil:
-	case hp.root.exists && hp.deleteRoot:
+	case cp == nil && hp.root.exists && hp.deleteRoot:
 		add("delete", "empty "+d.Root(), "everything in %s, through rootlesskit: %d file(s), %d bytes; %s itself stays for site evict", d.Root(), hp.root.files, hp.root.bytes, d.Root())
-	case hp.root.exists:
-		add("remove", "remove empty directories", "the empty directories under %s, which itself stays for site evict", d.Root())
 	}
 	if hp.granted {
 		add("delete", "delete the grant record", "%s, the keys and images this deployment last granted here", grant.Path(d))
@@ -797,6 +809,14 @@ func (p *Plan) runHost() error {
 			}
 		}
 	}
+	// Before the manifest goes: it names the directories, so a run that
+	// stops here finds them again.
+	if !hp.deleteRoot && len(hp.dirs) > 0 {
+		p.work("remove empty directories")
+		if err := run("removing the empty directories under "+d.Root(), appremove.EmptyDirsCommand(hp.dirs)); err != nil {
+			return err
+		}
+	}
 	if cp != nil && cp.manifest != "" {
 		p.work("rewrite the manifest")
 		if err := t.WriteFile(d.Manifest(), cp.manifest, 0o600); err != nil {
@@ -845,19 +865,9 @@ func (p *Plan) runHost() error {
 		if err := run("removing "+d.Root()+" but Caddy's files", p.deleteBesideKept()); err != nil {
 			return err
 		}
-	case cp != nil && !p.DeleteData && (len(cp.empty) > 0 || len(hp.files) > 0):
-		p.work("remove empty directories")
-		if err := run("removing the empty directories under "+d.Root(), p.emptyBesideKept()); err != nil {
-			return err
-		}
-	case cp != nil:
-	case hp.root.exists:
-		if hp.deleteRoot {
-			p.work("empty " + d.Root())
-		} else {
-			p.work("remove empty directories")
-		}
-		if err := run("emptying "+d.Root(), emptyRootCommand(d, hp.deleteRoot)); err != nil {
+	case cp == nil && hp.root.exists && hp.deleteRoot:
+		p.work("empty " + d.Root())
+		if err := run("emptying "+d.Root(), emptyRootCommand(d)); err != nil {
 			return err
 		}
 	}

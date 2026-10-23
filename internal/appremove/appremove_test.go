@@ -12,6 +12,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/garage"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
+	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
 const (
@@ -540,8 +541,8 @@ func TestTheDataDirectoryIsReadAndRemovedInTheUserNamespace(t *testing.T) {
 	// rmdir is left out: it removes the stack directory, the user's own
 	// entry in the deployment's root, and needs no namespace.
 	for name, command := range map[string]string{
-		"delete data": DirCommandFor(dir, true),
-		"empty dirs":  DirCommandFor(dir, false),
+		"delete data": DirCommandFor(dir, nil, true),
+		"empty dirs":  DirCommandFor(dir, []File{{Entry: render.ManifestFile{Path: "srv/paisans/f2a9/blog/etc/config.ini"}}}, false),
 	} {
 		for _, tool := range []string{"du ", "find ", "rm "} {
 			for i := 0; ; {

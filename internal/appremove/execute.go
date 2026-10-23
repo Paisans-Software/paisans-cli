@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"path"
 	"sort"
 	"strings"
 
@@ -59,8 +60,11 @@ func FilesCommand(files []File) string {
 }
 
 // DirCommandFor empties what can go of the stack directory. Without
-// deleteData it removes only empty directories, the stack directory last,
-// so whatever the app wrote stays. With it, the whole directory goes.
+// deleteData it removes only the directories files were rendered in, each
+// once it is empty, and then the stack directory if it is empty, so
+// whatever the app wrote stays, the empty directories inside its data too:
+// a database's data directory holds empty directories it needs. With it,
+// the whole directory goes.
 //
 // Both run under rootlesskit, for the reason DirCommand does: a file or
 // directory a container's non-root user wrote is the namespace root's to
@@ -69,11 +73,50 @@ func FilesCommand(files []File) string {
 // app has passed nameShape, so it is one segment under the deployment's
 // root. A find that fails fails the command. rmdir runs as the user: the stack directory is the deployment
 // root's entry, and the user owns the root.
-func DirCommandFor(dir string, deleteData bool) string {
+func DirCommandFor(dir string, files []File, deleteData bool) string {
 	if deleteData {
 		return "rootlesskit rm -rf -- " + quote(dir)
 	}
-	return fmt.Sprintf(`d=%s; if [ -d "$d" ]; then rootlesskit find "$d" -mindepth 1 -depth -type d -empty -delete && { rmdir "$d" 2>/dev/null || true; }; fi`, quote(dir))
+	empty := ""
+	if dirs := RenderedDirs(dir, files); len(dirs) > 0 {
+		empty = EmptyDirsCommand(dirs) + "; "
+	}
+	return fmt.Sprintf(`if [ -d %[1]s ]; then %[2]s{ rmdir %[1]s 2>/dev/null || true; }; fi`, quote(dir), empty)
+}
+
+// RenderedDirs is each directory below top that holds one of files, and
+// each between it and top, deepest first: the directories apply made to
+// write them. top is left out. A directory a container mounts and writes
+// holds no rendered file, so it is never one of them.
+func RenderedDirs(top string, files []File) []string {
+	seen := map[string]bool{}
+	var dirs []string
+	for _, f := range files {
+		for dir := path.Dir("/" + f.Entry.Path); strings.HasPrefix(dir, top+"/") && !seen[dir]; dir = path.Dir(dir) {
+			seen[dir] = true
+			dirs = append(dirs, dir)
+		}
+	}
+	sort.Slice(dirs, func(i, j int) bool {
+		if a, b := strings.Count(dirs[i], "/"), strings.Count(dirs[j], "/"); a != b {
+			return a > b
+		}
+		return dirs[i] < dirs[j]
+	})
+	return dirs
+}
+
+// EmptyDirsCommand removes each of dirs that is empty, in order, so a
+// directory emptied by removing the one before it goes too, and leaves one
+// that holds anything, with all it holds. find examines each directory
+// itself and never descends into it, and does not follow a symbolic link.
+// It runs under rootlesskit, as DirCommandFor's does.
+func EmptyDirsCommand(dirs []string) string {
+	quoted := make([]string, len(dirs))
+	for i, d := range dirs {
+		quoted[i] = quote(d)
+	}
+	return fmt.Sprintf(`for d in %s; do if [ -d "$d" ]; then rootlesskit find "$d" -maxdepth 0 -type d -empty -delete || exit 1; fi; done`, strings.Join(quoted, " "))
 }
 
 // Executor runs a plan.
@@ -169,7 +212,7 @@ func (e *Executor) execute(p *Plan) error {
 		} else {
 			e.work("remove empty directories")
 		}
-		if out, err := h.Run(DirCommandFor(dir, deleteDir)); err != nil {
+		if out, err := h.Run(DirCommandFor(dir, s.Files, deleteDir)); err != nil {
 			return fmt.Errorf("%s: %s: %w: %s", s.Site, dir, err, firstLine(out))
 		}
 		if p.DeleteData && !deleteDir {
@@ -177,7 +220,9 @@ func (e *Executor) execute(p *Plan) error {
 		}
 		if dd, err := probeDir(h, dir); err != nil {
 			return fmt.Errorf("%s: %w", s.Site, err)
-		} else if dd.Exists {
+		} else if dd.Files > 0 {
+			// Empty directories alone are kept data too, which dataKept
+			// names.
 			e.Kept = append(e.Kept, dirData(s.Site, dir, dd.Files, size(dd.Bytes)))
 		}
 		if p.DeleteData {
