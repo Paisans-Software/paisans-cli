@@ -65,7 +65,7 @@ func planSwap(p *planner) error {
 	// warning says why zram is not enough.
 	none, needed := "swap: none on this host", SwapNeeded
 	if s.HasZRAM() {
-		none, needed = "swap: only zram on this host", SwapNeeded+" zram swap compresses what it holds into RAM, so it stretches the host's memory rather than adding to it."
+		none, needed = "swap: only zram on this host", SwapNeeded+" "+hostmem.ZRAMNotEnough
 	}
 	if s.MemTotal == 0 {
 		if p.in.Flags.Swapfile {
