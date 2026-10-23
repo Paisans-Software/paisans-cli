@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
@@ -37,7 +38,7 @@ func PatroniEnv(d deployment.Deployment) string { return d.RelPath(infraStack, "
 // LeaderPatroniEnvNote is what a command that leaves the leader's
 // patroni.env out of date says about it.
 func LeaderPatroniEnvNote(site string) string {
-	return fmt.Sprintf("%s leads: run `paisans deployment apply --site %s`. This command leaves its patroni.env with the etcd hosts its Patroni was created with, since recreating the leader's Patroni would hand the leader key to a standby. Nothing depends on it while Patroni runs: Patroni uses that list to reach etcd when its container starts, and from then on asks etcd for its members (Patroni v4.1.0, patroni/dcs/etcd.py, _refresh_machines_cache). That apply writes the file without recreating Patroni when ETCD3_HOSTS is its only change; the container takes it when it is next recreated, since a restart of the same container keeps the list it was created with, and the plan recreates it once that list no longer names this site's own etcd member", site, site)
+	return fmt.Sprintf("%s leads: run `"+progname.Name()+" deployment apply --site %s`. This command leaves its patroni.env with the etcd hosts its Patroni was created with, since recreating the leader's Patroni would hand the leader key to a standby. Nothing depends on it while Patroni runs: Patroni uses that list to reach etcd when its container starts, and from then on asks etcd for its members (Patroni v4.1.0, patroni/dcs/etcd.py, _refresh_machines_cache). That apply writes the file without recreating Patroni when ETCD3_HOSTS is its only change; the container takes it when it is next recreated, since a restart of the same container keeps the list it was created with, and the plan recreates it once that list no longer names this site's own etcd member", site, site)
 }
 
 // ReplicaEnv is one replica site's patroni.env brought up to date: the file
@@ -184,7 +185,7 @@ func (r *ReplicaEnv) Execute(d deployment.Deployment, t Transport, g ReplicaEnvG
 	}
 	for _, m := range members {
 		if m.Member == r.Site && m.Role == "Leader" {
-			return fmt.Errorf("%s leads now, so its Patroni was not recreated, which would be a failover. Run again: the plan leaves the leader's patroni.env to `paisans deployment apply --site %s`, which writes it without recreating Patroni when ETCD3_HOSTS is its only change", r.Site, r.Site)
+			return fmt.Errorf("%s leads now, so its Patroni was not recreated, which would be a failover. Run again: the plan leaves the leader's patroni.env to `"+progname.Name()+" deployment apply --site %s`, which writes it without recreating Patroni when ETCD3_HOSTS is its only change", r.Site, r.Site)
 		}
 	}
 	// Built again, not run as planned, so the file is compared with the

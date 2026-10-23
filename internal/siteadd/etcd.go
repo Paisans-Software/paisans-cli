@@ -207,7 +207,7 @@ func (p *Plan) planEtcdData(j string, live []apply.EtcdMember) error {
 // etcdctl/ctlv3/command/printer_json.go).
 func (p *Plan) knowCluster(j string) error {
 	if p.clusterID == 0 {
-		return fmt.Errorf("site add %s: %s's etcd answered without a cluster ID, so the cluster ID could not be read, and %s's etcd data cannot be checked against it before it is cleared. Run paisans doctor on %s and run site add again. Nothing was changed", p.Site, p.control, j, p.control)
+		return fmt.Errorf("site add %s: %s's etcd answered without a cluster ID, so the cluster ID could not be read, and %s's etcd data cannot be checked against it before it is cleared. Run "+progname.Name()+" doctor on %s and run site add again. Nothing was changed", p.Site, p.control, j, p.control)
 	}
 	return nil
 }

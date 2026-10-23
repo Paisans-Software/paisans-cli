@@ -53,7 +53,7 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	deleteData := fs.Bool("delete-data", false, "also delete this deployment's data on the host (its directory and named volumes); asks for the site's name at a terminal")
 	force := fs.Bool("force", false, "clean this deployment off one host and nothing else: no cluster stage or refusal, and neither "+config.FileName+" nor the secrets file edited")
 	sshFlag := fs.String("ssh", "", "with --force: the host to clean, user@host[:port] or an alias of your ssh config, any host; only what carries this deployment's id or token is removed")
-	idFlag := fs.String("id", "", "with --force and --ssh, and no "+config.FileName+": the deployment to clean off the host, by its full id or its token, as paisans site deployments lists it")
+	idFlag := fs.String("id", "", "with --force and --ssh, and no "+config.FileName+": the deployment to clean off the host, by its full id or its token, as "+progname.Name()+" site deployments lists it")
 	answers := yesFlag(fs)
 	var site string
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
@@ -76,7 +76,7 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	// the reporter and the login recording take --execute and -v from them.
 	r := reporter()
 	if fs.NArg() > 0 {
-		return &ui.Problem{Hint: "site remove takes one site", Explain: "Got extra argument(s): " + strings.Join(fs.Args(), " ") + ". Usage: paisans site remove <site> [--execute] [--host-gone] [--delete-data] [--force [--ssh user@host[:port] or ssh alias]]"}
+		return &ui.Problem{Hint: "site remove takes one site", Explain: "Got extra argument(s): " + strings.Join(fs.Args(), " ") + ". Usage: " + progname.Name() + " site remove <site> [--execute] [--host-gone] [--delete-data] [--force [--ssh user@host[:port] or ssh alias]]"}
 	}
 	if *hostGone {
 		switch {

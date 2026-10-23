@@ -74,6 +74,9 @@ func TestAdviceNamesTheInvokedCommand(t *testing.T) {
 	if got := resumeAdvice(); got != "Run paisans-test deployment apply --execute again to resume." {
 		t.Errorf("resumeAdvice() = %q", got)
 	}
+	if got := noAnchorPublish(); !strings.Contains(got, "with paisans-test deployment pull --key <path.pub>") || !strings.Contains(got, "run paisans-test operator register") {
+		t.Errorf("noAnchorPublish() = %q", got)
+	}
 }
 
 // Advice for the host's owner, who runs the release on another machine,

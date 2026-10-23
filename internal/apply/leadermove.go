@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // LeaderMove is Patroni's leader key leaving a site during that site's
@@ -100,6 +102,6 @@ func (p *Plan) infraReason(to string) string {
 	if len(changed) > 0 {
 		why = "changed " + strings.Join(changed, ", ") + "; " + why
 	}
-	return fmt.Sprintf("this apply ran `%s` on %s (%s), which stopped Patroni there while it led, and %s took the leader key. %s leads from now on, and %s follows it as a replica; nothing moves the leader back on its own. `paisans doctor` shows the cluster as it is now",
+	return fmt.Sprintf("this apply ran `%s` on %s (%s), which stopped Patroni there while it led, and %s took the leader key. %s leads from now on, and %s follows it as a replica; nothing moves the leader back on its own. `"+progname.Name()+" doctor` shows the cluster as it is now",
 		ActionTitle(action), p.Site, why, to, to, p.Site)
 }

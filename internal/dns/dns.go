@@ -565,7 +565,7 @@ func Build(ctx context.Context, provider Provider, d deployment.Deployment, want
 		if action == Conflict && w.ViaGateway {
 			if rest, old := setAsideFormer(w, records, plan.comment); len(old) > 0 {
 				if a, _ := classify(w, rest, wantedTypes[w.Name]); a != Conflict {
-					action, detail = Moving, fmt.Sprintf("%s still points at %s, another declared site, through a record this deployment's dns init made. If that site held the gateway, paisans gateway move adds %s beside it once the new gateway answers, and deletes it once every hostname is verified. If the hostname's app left a monitor site there, no move follows: change the record to %s by hand at the provider", w.Name, strings.Join(old, ", "), w.Content, w.Content)
+					action, detail = Moving, fmt.Sprintf("%s still points at %s, another declared site, through a record this deployment's dns init made. If that site held the gateway, "+progname.Name()+" gateway move adds %s beside it once the new gateway answers, and deletes it once every hostname is verified. If the hostname's app left a monitor site there, no move follows: change the record to %s by hand at the provider", w.Name, strings.Join(old, ", "), w.Content, w.Content)
 				}
 			}
 		}
@@ -740,7 +740,7 @@ func (e conflictError) Unwrap() error {
 	}
 	return &ui.Problem{
 		Hint:    hint,
-		Explain: "Each is listed above. Nothing was written: a partial set of records is a deployment some names reach and others do not. Change each at your DNS provider, or run paisans dns prune --execute for one that says so, then run again.",
+		Explain: "Each is listed above. Nothing was written: a partial set of records is a deployment some names reach and others do not. Change each at your DNS provider, or run " + progname.Name() + " dns prune --execute for one that says so, then run again.",
 		Cause:   ErrConflict,
 	}
 }

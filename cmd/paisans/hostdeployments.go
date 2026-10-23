@@ -182,7 +182,7 @@ func runSiteDeployments(args []string) error {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return fmt.Errorf("site deployments takes no argument: paisans site deployments --ssh <user@host[:port] or ssh alias>. Got extra argument(s): %s", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("site deployments takes no argument: "+progname.Name()+" site deployments --ssh <user@host[:port] or ssh alias>. Got extra argument(s): %s", strings.Join(fs.Args(), " "))
 	}
 	if *sshFlag == "" {
 		return fmt.Errorf("site deployments: name the host with --ssh user@host[:port], or an alias of your ssh config, Eg: --ssh admin@203.0.113.9 or --ssh home-a")
