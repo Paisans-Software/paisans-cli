@@ -82,7 +82,7 @@ func runDeploymentCheckout(args []string) error {
 		return err
 	}
 	r := reporter()
-	what := fmt.Sprintf("revision %d, %s", saved.Revision, saved.SHA[:12])
+	what := fmt.Sprintf("revision %d, %s", saved.Revision, shortSHA(saved.SHA))
 	r.Section(fmt.Sprintf("check out %s (%s), %s, from %s", saved.ID, orDash(saved.Domain), what, saved.Dir))
 	if !*execute {
 		for _, p := range checkoutPaths(src, dst) {
@@ -98,19 +98,20 @@ func runDeploymentCheckout(args []string) error {
 		return &ui.Problem{Hint: "the copy does not judge as the saved copy does", Explain: errLine(err) + ". What was written is removed; the saved copy is as it was.", Cause: err}
 	} else if err != nil {
 		s.Fail(err)
-		return err
+		return &ui.Problem{Hint: "the checkout could not be written", Explain: errLine(err) + ". What was written is removed; the saved copy is as it was. Fix the cause and run paisans deployment checkout again, or check out into another empty directory with --config.", Cause: err}
 	}
-	s.Done(saved.SHA[:12] + " trusted, as in the saved copy")
+	s.Done(shortSHA(saved.SHA) + " trusted, as in the saved copy")
 	r.Note("the saved copy may be behind the sites", "Run paisans deployment pull --config "+path+" to bring any newer version the sites hold.")
 	r.Result("checked out %s of %s into %s", what, saved.ID, dst.Dir)
 	return nil
 }
 
-// heldState is the trust state already in dir's .paisans/, which a checkout
-// would replace.
+// heldState is the store state already in dir's .paisans/: the trust state
+// a checkout would replace, and incoming/, a pull's files to merge, which
+// belong to whatever workstation left them.
 func heldState(dir string) []string {
 	var held []string
-	for _, name := range append([]string{"store.git"}, checkoutState...) {
+	for _, name := range append([]string{"store.git", "incoming"}, checkoutState...) {
 		p := filepath.Join(dir, ".paisans", name)
 		if _, err := os.Lstat(p); err == nil {
 			held = append(held, p)
@@ -122,6 +123,9 @@ func heldState(dir string) []string {
 // findSaved is the saved deployment what names: its id, the one id that
 // starts with it, or the one deployment with it as its domain.
 func findSaved(st localstore.Store, what string) (localstore.Listed, error) {
+	if what == "" {
+		return localstore.Listed{}, &ui.Problem{Hint: "deployment checkout was given an empty name", Explain: "Name the deployment by its id, a unique start of the id, or its domain, as paisans deployment list prints them."}
+	}
 	listed, err := st.List()
 	if err != nil {
 		return localstore.Listed{}, err
@@ -171,6 +175,11 @@ type savedTrust struct {
 	anchor   configstore.Anchor
 	versions []string
 	files    configstore.Files
+	// seen is .paisans/config-seen as it reads: revision and hash.
+	seen string
+	// fork is whether the trusted versions the store holds end in more
+	// than one head.
+	fork bool
 }
 
 // judgeSaved judges the saved copy src as deployment log would, from its own
@@ -196,6 +205,9 @@ func judgeSaved(src configstore.Local, rec localstore.Saved) (savedTrust, error)
 	if err != nil {
 		return t, err
 	}
+	if t.fork {
+		return t, &ui.Problem{Hint: "the saved copy of " + rec.ID + " holds a fork", Explain: "Its store holds two trusted versions on one parent, so the version it records is not the one to start editing from. Recover the deployment into an empty directory instead: paisans deployment recover --from <user@host> --id " + rec.ID + " --root <sha> --config <empty directory>/" + config.FileName + " --execute."}
+	}
 	if t.head != head || t.revision != rec.Revision {
 		return t, &ui.Problem{Hint: "the saved copy of " + rec.ID + " is not trusted from its own anchor", Explain: fmt.Sprintf("Its record names revision %d, %s, and its store does not hold that as a trusted version. %s", rec.Revision, rec.SHA, again)}
 	}
@@ -204,7 +216,7 @@ func judgeSaved(src configstore.Local, rec localstore.Saved) (savedTrust, error)
 		return t, err
 	}
 	if !bytes.Equal(files.Paisans, t.files.Paisans) || !bytes.Equal(files.Secrets, t.files.Secrets) || !bytes.Equal(files.SOPS, t.files.SOPS) {
-		return t, &ui.Problem{Hint: "the saved copy of " + rec.ID + " has files that are not its version", Explain: fmt.Sprintf("The files in %s differ from revision %d, %s, which it records. %s", src.Dir, rec.Revision, rec.SHA[:12], again)}
+		return t, &ui.Problem{Hint: "the saved copy of " + rec.ID + " has files that are not its version", Explain: fmt.Sprintf("The files in %s differ from revision %d, %s, which it records. %s", src.Dir, rec.Revision, shortSHA(rec.SHA), again)}
 	}
 	return t, nil
 }
@@ -239,6 +251,12 @@ func judge(l configstore.Local, id string) (savedTrust, error) {
 		return t, err
 	}
 	t.versions = slices.Sorted(maps.Keys(g.Versions))
+	t.fork = g.Verdict.Fork
+	rev, sha, err := l.Seen()
+	if err != nil {
+		return t, err
+	}
+	t.seen = fmt.Sprintf("%d %s", rev, sha)
 	if !g.Verdict.Trusted[head] {
 		return t, nil
 	}
@@ -246,6 +264,9 @@ func judge(l configstore.Local, id string) (savedTrust, error) {
 	t.files, err = cache.Files(head)
 	return t, err
 }
+
+// judgeCopy is how sameTrust judges the copy: judge. Tests replace it.
+var judgeCopy = judge
 
 // differsError is a checkout that does not judge as the saved copy did.
 type differsError struct{ what string }
@@ -256,7 +277,7 @@ func (e *differsError) Error() string { return "the copy " + e.what }
 // anchor, the same head at the same revision, trusted, the same versions in
 // its store, and the head's files.
 func sameTrust(dst configstore.Local, id string, want savedTrust) error {
-	got, err := judge(dst, id)
+	got, err := judgeCopy(dst, id)
 	if errors.Is(err, configstore.ErrNoAnchor) {
 		return &differsError{"has no version to start trusting from"}
 	}
@@ -270,6 +291,10 @@ func sameTrust(dst configstore.Local, id string, want savedTrust) error {
 		return &differsError{fmt.Sprintf("trusts head %q at revision %d, the saved copy %s at %d", got.head, got.revision, want.head, want.revision)}
 	case !slices.Equal(got.versions, want.versions):
 		return &differsError{fmt.Sprintf("holds %d versions, the saved copy %d", len(got.versions), len(want.versions))}
+	case got.seen != want.seen:
+		return &differsError{fmt.Sprintf("has seen %s, the saved copy %s", got.seen, want.seen)}
+	case got.fork != want.fork:
+		return &differsError{"does not hold the same heads"}
 	}
 	files, err := readCheckoutFiles(dst.Dir)
 	if err != nil {
@@ -324,11 +349,24 @@ func copyCheckout(src, dst configstore.Local, id string, t savedTrust) (err erro
 	if err := config.CheckSecretsBytes(filepath.Join(src.Dir, "secrets.enc.yaml"), t.files.Secrets); err != nil {
 		return err
 	}
+	// Every directory this run creates, innermost last, so a failure
+	// removes them innermost first, and each only once empty.
+	var made []string
+	for d := dst.Dir; ; d = filepath.Dir(d) {
+		if _, err := os.Lstat(d); !errors.Is(err, fs.ErrNotExist) {
+			break
+		}
+		made = append([]string{d}, made...)
+		if filepath.Dir(d) == d {
+			break
+		}
+	}
 	if err := os.MkdirAll(dst.Dir, 0o755); err != nil {
 		return err
 	}
-	_, statErr := os.Lstat(filepath.Join(dst.Dir, ".paisans"))
-	madeState := errors.Is(statErr, fs.ErrNotExist)
+	if _, err := os.Lstat(filepath.Join(dst.Dir, ".paisans")); errors.Is(err, fs.ErrNotExist) {
+		made = append(made, filepath.Join(dst.Dir, ".paisans"))
+	}
 	var written []string
 	defer func() {
 		if err == nil {
@@ -337,8 +375,8 @@ func copyCheckout(src, dst configstore.Local, id string, t savedTrust) (err erro
 		for _, p := range slices.Backward(written) {
 			os.RemoveAll(p)
 		}
-		if madeState {
-			os.RemoveAll(filepath.Join(dst.Dir, ".paisans"))
+		for _, d := range slices.Backward(made) {
+			os.Remove(d)
 		}
 	}()
 	from, ok, err := src.HeldStore()
@@ -358,7 +396,13 @@ func copyCheckout(src, dst configstore.Local, id string, t savedTrust) (err erro
 	if _, err := os.Lstat(filepath.Join(dst.Dir, ".paisans", ".gitignore")); errors.Is(err, fs.ErrNotExist) {
 		written = append(written, filepath.Join(dst.Dir, ".paisans", ".gitignore"))
 	}
-	written = append(written, filepath.Join(dst.Dir, ".paisans", "store.git"))
+	// The store is checked absent again just before it is made, so a store
+	// another run put there since is refused, never removed as this run's.
+	store := filepath.Join(dst.Dir, ".paisans", "store.git")
+	if _, err := os.Lstat(store); !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("%s exists", store)
+	}
+	written = append(written, store)
 	to, err := dst.Cache()
 	if err != nil {
 		return err
@@ -424,4 +468,13 @@ func copyNew(src, dst string) (string, error) {
 // the same pinned root.
 func sameAnchor(a, b configstore.Anchor) bool {
 	return a.Root == b.Root && a.Named == b.Named && slices.Equal(a.Signers, b.Signers)
+}
+
+// shortSHA is the first 12 characters of a commit id, as deployment list
+// prints it, or all of a shorter one.
+func shortSHA(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
 }

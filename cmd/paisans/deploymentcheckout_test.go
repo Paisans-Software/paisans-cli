@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -268,6 +270,7 @@ func TestCheckoutRefusals(t *testing.T) {
 	}
 	for _, tc := range []struct{ what, want string }{
 		{"0000", "deployment list"},
+		{"", "empty name"},
 		{"f2a9", "more than one"},
 		{"example.org", "more than one"},
 	} {
@@ -281,7 +284,7 @@ func TestCheckoutRefusals(t *testing.T) {
 		}
 	}
 
-	for _, existing := range []string{config.FileName, ".paisans/signing-key", ".paisans/store.git"} {
+	for _, existing := range []string{config.FileName, ".paisans/signing-key", ".paisans/store.git", ".paisans/incoming"} {
 		dir := t.TempDir()
 		path := filepath.Join(dir, existing)
 		os.MkdirAll(filepath.Dir(path), 0o755)
@@ -343,6 +346,106 @@ func TestCheckoutRefusesEditedSavedFiles(t *testing.T) {
 	dir := t.TempDir()
 	err := checkout(dir, fixtureID(t), "--execute")
 	if text := problemText(err); err == nil || !strings.Contains(text, "deployment fetch") {
+		t.Fatalf("got %v\n%s", err, text)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Errorf("wrote %v", entries)
+	}
+}
+
+// A checkout that fails part way removes everything it wrote, the
+// directories it made included, and leaves a directory that was there, empty,
+// as it was. A saved file that is not a regular file is one such failure.
+func TestCheckoutRemovesWhatItWroteOnAFailure(t *testing.T) {
+	c := newSavedCopy(t)
+	sops := filepath.Join(c.l.Dir, ".sops.yaml")
+	real := filepath.Join(t.TempDir(), "sops")
+	b, _ := os.ReadFile(sops)
+	os.WriteFile(real, b, 0o644)
+	os.Remove(sops)
+	if err := os.Symlink(real, sops); err != nil {
+		t.Fatal(err)
+	}
+	base := t.TempDir()
+	for _, dir := range []string{filepath.Join(base, "new", "work"), base} {
+		err := checkout(dir, fixtureID(t), "--execute")
+		if text := problemText(err); err == nil || !strings.Contains(text, "could not be written") || !strings.Contains(text, "deployment checkout") {
+			t.Fatalf("%s: %v\n%s", dir, err, text)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(base, "new")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the directories made were left: %v", err)
+	}
+	if entries, _ := os.ReadDir(base); len(entries) != 0 {
+		t.Errorf("left %v", entries)
+	}
+}
+
+// A copy that does not judge as the saved copy did is refused, and what was
+// written is removed.
+func TestCheckoutRemovesACopyThatJudgesOtherwise(t *testing.T) {
+	newSavedCopy(t)
+	saved := judgeCopy
+	t.Cleanup(func() { judgeCopy = saved })
+	judgeCopy = func(l configstore.Local, id string) (savedTrust, error) {
+		got, err := judge(l, id)
+		got.revision++
+		return got, err
+	}
+	dir := t.TempDir()
+	err := checkout(dir, fixtureID(t), "--execute")
+	if text := problemText(err); err == nil || !strings.Contains(text, "does not judge as the saved copy") {
+		t.Fatalf("got %v\n%s", err, text)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Errorf("left %v", entries)
+	}
+}
+
+// The copy's seen record and heads are part of what must judge alike.
+func TestSameTrustComparesSeenAndHeads(t *testing.T) {
+	c := newSavedCopy(t)
+	dir := t.TempDir()
+	if err := checkout(dir, fixtureID(t), "--execute"); err != nil {
+		t.Fatal(problemText(err))
+	}
+	dst := configstore.Local{Dir: dir}
+	want, err := judge(c.l, fixtureID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sameTrust(dst, fixtureID(t), want); err != nil {
+		t.Fatalf("an unchanged copy: %v", err)
+	}
+	for name, change := range map[string]func(*savedTrust){
+		"seen": func(w *savedTrust) { w.seen = "2 " + c.shas[1] },
+		"fork": func(w *savedTrust) { w.fork = true },
+	} {
+		w := want
+		change(&w)
+		var d *differsError
+		if err := sameTrust(dst, fixtureID(t), w); !errors.As(err, &d) {
+			t.Errorf("%s differs: %v", name, err)
+		}
+	}
+}
+
+// A saved copy recorded as verified whose store holds a fork is refused,
+// whatever its record says.
+func TestCheckoutRefusesAStoreHoldingAFork(t *testing.T) {
+	c := newSavedCopy(t)
+	cache, err := c.l.Cache()
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := c.files[1]
+	other.Paisans = append(append([]byte{}, other.Paisans...), "# other\n"...)
+	if _, err := cache.Commit(other, []string{c.shas[0]}, 2, c.key, time.Unix(1_800_000_000, 0)); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	err = checkout(dir, fixtureID(t), "--execute")
+	if text := problemText(err); err == nil || !strings.Contains(text, "fork") || !strings.Contains(text, "--root") {
 		t.Fatalf("got %v\n%s", err, text)
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {

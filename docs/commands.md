@@ -693,12 +693,14 @@ paisans deployment checkout example.org --config ~/work/example/paisans-stack.ya
   written, as `deployment log` judges, and refused when its head is not a
   trusted version at the revision it records or its files are not that
   version's. The new directory is judged again once written and must judge the
-  same; otherwise what was written is removed.
-* **Refuses:** a directory holding any of the three files or any of that
-  `.paisans/` state, with the same rule as `deployment recover`, so it never
-  overwrites a file; a name that matches no saved deployment, or more than
-  one; and an `unverified` or `fork` saved copy, which has no trusted version
-  to check out and is pinned with `deployment recover --root <sha>` instead.
+  same, seen record included. On any failure, that one included, what was
+  written is removed, with the directories the run made.
+* **Refuses:** a directory holding any of the three files, any of that
+  `.paisans/` state or a `.paisans/incoming/`, with the same rule as
+  `deployment recover`, so it never overwrites a file; a name that matches no
+  saved deployment, or more than one; and an `unverified` or `fork` saved
+  copy, or one whose store holds a fork, which has no one trusted version to
+  check out and is pinned with `deployment recover --root <sha>` instead.
 * **Without `--execute`:** prints every path it would write, in full, and the
   version and revision. Writes nothing.
 * **After:** the saved copy may be behind the sites; `deployment pull` in the
