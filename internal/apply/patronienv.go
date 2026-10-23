@@ -27,8 +27,9 @@ import (
 //
 // So a replica's file is applied at once: recreating a replica's Patroni is
 // a replica restart, which HAProxy, routing only to the primary, does not
-// notice. The leader's is left for its next restart, since recreating the
-// leader's Patroni is a failover.
+// notice. The leader's is left to `deployment apply`, which writes a file
+// whose only change is ETCD3_HOSTS without recreating Patroni (see
+// etcdHostsOnly), since recreating the leader's Patroni is a failover.
 
 // PatroniEnv is a data site's patroni.env, in rendered form.
 func PatroniEnv(d deployment.Deployment) string { return d.RelPath(infraStack, "patroni.env") }
@@ -36,7 +37,7 @@ func PatroniEnv(d deployment.Deployment) string { return d.RelPath(infraStack, "
 // LeaderPatroniEnvNote is what a command that leaves the leader's
 // patroni.env out of date says about it.
 func LeaderPatroniEnvNote(site string) string {
-	return fmt.Sprintf("%s leads: `paisans deployment apply --site %s` if failover is OK. Its patroni.env is left with the etcd hosts it started with, since recreating its Patroni now would be a failover. It is picked up at the leader's next restart, which that apply makes, Eg: after switching the leader to another site. Until then nothing depends on it: Patroni reads that list only to reach etcd at start, and from then on asks etcd for its members (Patroni v4.1.0, patroni/dcs/etcd.py, _refresh_machines_cache)", site, site)
+	return fmt.Sprintf("%s leads: run `paisans deployment apply --site %s`. This command leaves its patroni.env with the etcd hosts it started with, since recreating the leader's Patroni would hand the leader key to a standby, and nothing depends on it while Patroni runs: Patroni reads that list only to reach etcd at start, and from then on asks etcd for its members (Patroni v4.1.0, patroni/dcs/etcd.py, _refresh_machines_cache). That apply writes the file without recreating Patroni when ETCD3_HOSTS is its only change, so the leader takes it at its next restart, and its plan says when it would recreate Patroni", site, site)
 }
 
 // ReplicaEnv is one replica site's patroni.env brought up to date: the file
@@ -291,4 +292,36 @@ func lastLines(s string, n int) string {
 		lines = lines[len(lines)-n:]
 	}
 	return strings.Join(lines, " / ")
+}
+
+// etcdHostsOnly reports whether two patroni.env files differ in ETCD3_HOSTS
+// and nothing else, with that variable's value in each.
+//
+// Such a change needs no new Patroni. Spilo turns ETCD3_HOSTS into the etcd3
+// section's hosts as the container starts (configure_spilo.py,
+// get_dcs_config), and sets no use_proxies, which only a proxy setting turns
+// on (Patroni v4.1.0, patroni/dcs/etcd.py, get_etcd_client). With use_proxies
+// off, Patroni uses the hosts only to fill its list of etcd members when it
+// starts or when every member it knows has failed (_load_machines_cache),
+// and otherwise refreshes that list from etcd's own member list every few
+// minutes and whenever a request fails (_refresh_machines_cache, and
+// Etcd3Client._get_members, /cluster/member/list in etcd3.py). A running
+// Patroni therefore finds a member a join added without the file, and the
+// file, written now, is what its next start reads.
+func etcdHostsOnly(before, after string) (was, now string, ok bool) {
+	strip := func(content string) (string, string) {
+		var kept []string
+		hosts := ""
+		for _, line := range strings.Split(content, "\n") {
+			if v, found := strings.CutPrefix(line, "ETCD3_HOSTS="); found {
+				hosts = v
+				continue
+			}
+			kept = append(kept, line)
+		}
+		return strings.Join(kept, "\n"), hosts
+	}
+	restBefore, was := strip(before)
+	restAfter, now := strip(after)
+	return was, now, restBefore == restAfter && was != now && now != ""
 }

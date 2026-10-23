@@ -687,6 +687,9 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 	// whether its change can be applied in place.
 	var wireguard *Change
 	var wireguardBefore string
+	// Whether patroni.env changed in a way only a new Patroni container
+	// reads, which recreates Patroni on a site already running it.
+	var patroniRecreated bool
 	reading := len(out.rendered)
 	if out.scoped {
 		reading = len(inScope)
@@ -834,6 +837,17 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			continue
 		}
 		out.Changes = append(out.Changes, change)
+		// patroni.env with only its etcd hosts changed is written and
+		// recorded, and moves no stack: Patroni needs that list only to reach
+		// etcd as it starts (see etcdHostsOnly), and recreating it on the
+		// leader hands the leader key to a standby.
+		if rel == PatroniEnv(d) && change.Kind == Update {
+			if before, after, ok := etcdHostsOnly(current, content); ok {
+				out.Notes = append(out.Notes, Note{Text: fmt.Sprintf("patroni.env changes only ETCD3_HOSTS (%s, was %s), so it is written and Patroni is not recreated. Patroni reads that list only to reach etcd as it starts and asks etcd for its members from then on, so the running Patroni needs none of it until its next start, which reads the new file", after, before)})
+				continue
+			}
+			patroniRecreated = true
+		}
 		// The gateway's routing files are the reload's alone. Making them an
 		// infrastructure action as well restarted Caddy after reloading it:
 		// two actions for one change, and the restart is the one that drops
@@ -1012,6 +1026,14 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			}
 		}
 		out.Actions = append(out.Actions, action)
+	}
+	for _, a := range out.Actions {
+		if a.Stack == infraStack && a.Recreate && (patroniRecreated || (a.Force && rendered[infraStack] && out.rendered[PatroniEnv(d)])) {
+			out.Notes = append(out.Notes, Note{
+				Hint: "this apply recreates Patroni on " + site + ", so if it leads, a standby takes the leader key",
+				Text: fmt.Sprintf("the infrastructure stack's action (%s) replaces Patroni's container on %s. When it leads, a standby takes the leader key while it restarts, every app's database connections end, and the leader stays on the other site; the apply says so if it does", ActionTitle(a), site),
+			})
+		}
 	}
 	var dbApps []string
 	for _, app := range o.dbApps {
