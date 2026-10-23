@@ -232,9 +232,11 @@ func withInfra(t *testing.T, env, compose func(string) string) *render.Plan {
 	return changed
 }
 
-func graceFor(service string) func(string) string {
+// changeService changes service's definition in a compose file, with a
+// field no rendered service sets.
+func changeService(service string) func(string) string {
 	return func(c string) string {
-		return strings.Replace(c, "\n  "+service+":\n", "\n  "+service+":\n    stop_grace_period: 5s\n", 1)
+		return strings.Replace(c, "\n  "+service+":\n", "\n  "+service+":\n    stop_signal: SIGINT\n", 1)
 	}
 }
 
@@ -251,7 +253,7 @@ func TestAnInfraUpLeavesARunningPatroniOut(t *testing.T) {
 		stopped  string
 		rendered func(t *testing.T) *render.Plan
 	}{
-		{"compose change beside new etcd hosts", "", func(t *testing.T) *render.Plan { return withInfra(t, moreEtcdHosts, graceFor("haproxy")) }},
+		{"compose change beside new etcd hosts", "", func(t *testing.T) *render.Plan { return withInfra(t, moreEtcdHosts, changeService("haproxy")) }},
 		{"stopped garage after new etcd hosts", "garage", func(t *testing.T) *render.Plan { return withPatroniEnv(t, same) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -304,7 +306,7 @@ func TestAnInfraUpLeavesARunningPatroniOut(t *testing.T) {
 func TestAPatroniServiceChangeRecreatesAndWarns(t *testing.T) {
 	host := applied(t, "home-a")
 	host.etcdHosts = oldHosts
-	p, err := apply.Build("home-a", withInfra(t, moreEtcdHosts, graceFor("patroni")), acmeModule(t), host)
+	p, err := apply.Build("home-a", withInfra(t, moreEtcdHosts, changeService("patroni")), acmeModule(t), host)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -370,7 +372,7 @@ func TestPatroniWhoseEtcdHostsCannotBeRead(t *testing.T) {
 	t.Run("running", func(t *testing.T) {
 		host := applied(t, "home-a")
 		host.etcdHosts = ""
-		p, err := apply.Build("home-a", withInfra(t, moreEtcdHosts, graceFor("haproxy")), acmeModule(t), host)
+		p, err := apply.Build("home-a", withInfra(t, moreEtcdHosts, changeService("haproxy")), acmeModule(t), host)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -472,7 +474,7 @@ func TestAnOwedNarrowedUpStaysNarrowed(t *testing.T) {
 func TestANarrowedUpIsOwedNarrowed(t *testing.T) {
 	host := applied(t, "home-a")
 	host.fail = "/infra/compose.yaml up -d"
-	p, err := apply.Build("home-a", withInfra(t, moreEtcdHosts, graceFor("haproxy")), acmeModule(t), host)
+	p, err := apply.Build("home-a", withInfra(t, moreEtcdHosts, changeService("haproxy")), acmeModule(t), host)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -24,6 +24,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Fixed
 
+- Patroni has 60 s to stop, so one that leads disarms the watchdog when `deployment apply` recreates it on a slow host, rather than being killed at Docker's 10 s and rebooting the host.
 - `site evict` disarms a data site's watchdog as soon as Patroni lets go of it while the deployment stops, so a Patroni killed while it led does not reboot the host mid-evict.
 - `deployment apply` and `oidc client create` delete the secret Pocket ID gives a new client, so a client holds only the one the toolkit set, and updates keep a client's back-channel logout URL.
 - `site remove` and `app remove` without `--delete-data` remove only the directories their own files were in, once empty, so kept data keeps its empty directories and PostgreSQL starts when the site returns.
