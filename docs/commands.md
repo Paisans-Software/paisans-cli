@@ -574,9 +574,11 @@ paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # o
   `.paisans/config-root` or a root's line of their `log`, before applying. A
   pinned root anchors alone; `--key` is then ignored, and the run notes it.
   With a root pinned, a gather whose sites serve none of its history is
-  refused, naming no root they served, and says to get the current root from
-  another operator and recover from it into an empty directory with
-  `deployment recover --root <sha>`. With no
+  refused, naming no root they served: either the pin is out of date, and the
+  way out is to get the current root from another operator and recover from
+  it into an empty directory with `deployment recover --root <sha>`, or a site
+  that answered holds a history it should not, such as a host never evicted.
+  With no
   anchor, `pull`, `log` and `recover` say to name your own operator key with
   `--key` (loaded with `ssh-add`, so it is recorded) or pin `--root <sha>`,
   and `publish`, which judges only from the recorded key, says the same of

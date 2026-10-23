@@ -113,14 +113,15 @@ their `paisans deployment log`, before applying.
 A workstation with a root pinned checks one thing more: when the sites serve
 anything in a gather and none of it is the pinned root's history, the gather
 is refused rather than judged from what only the workstation's cache holds,
-which keeps every version any gather saw. The sites then hold another
-incarnation, after a redeploy under the same id or from before one, or a site
-serves one it should not. The refusal names no root the sites served, since
-a hash from them is not one to pin, and says to get the current root from
-another operator and recover from it into an empty directory with
-`paisans deployment recover --root <sha>`. A `--root` that differs from the
-recorded pin is refused, and no gather lowers the seen record without
-`rollback`.
+which keeps every version any gather saw. A pin that is not held is refused
+by its own check, which names it, before this one. The refusal names no root
+the sites served, since a hash from them is not one to pin, and gives both
+causes: the pin is out of date, the deployment having been redeployed under
+the same id since, and the way out is to get the current root from another
+operator and recover from it into an empty directory with
+`paisans deployment recover --root <sha>`; or a site that answered holds a
+history it should not, such as a host never evicted, which the sites that
+answered show.
 
 A pull or recovery with `--execute` records the named key as the signing key
 when the ssh-agent holds it and an operator of the head lists it; a log

@@ -294,7 +294,8 @@ incarnation of the deployment from before a redeploy under the same id, when
 every site that answers serves that incarnation, and the root it pins is that
 incarnation's: confirm the full root hash the recovery prints with another
 operator before applying. A later pull from sites that serve none of the
-pinned root's history refuses, and says to recover from the current root.
+pinned root's history refuses: either the pin is out of date, and you recover
+from the current root, or a site that answered holds a history it should not.
 Nothing checks that a
 removed operator's age key was taken out of the secrets file: that is the
 operator's step (see *A former recipient still has the secrets file*).
