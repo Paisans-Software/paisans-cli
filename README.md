@@ -8992,7 +8992,6 @@ and deletes it only when it is one of:
 | What the path holds | Why deleting it loses nothing |
 |---------------------|-------------------------------|
 | nothing, or an empty directory | there is nothing |
-| `member/snap/db` alone, no larger than a fresh one, both its bbolt meta pages valid (magic, version, page size 4096, checksum) and recording no transaction after the two a fresh bootstrap commits | what etcd leaves when it exits before reaching a peer: it opens its backend first and writes its log only once it has the cluster's membership, so nothing was committed to it after its buckets were created. Measured on a fresh v3.5.16 database: 16801792 bytes, transaction 2. The size alone is not the evidence: bbolt grows the file in 16 MiB steps, and a member that held a key measured the same size at transaction 9 |
 | etcd's member layout, every write-ahead log in it decoding (framing, record, CRC-32C chain) to the same member and cluster, the cluster being this one and the member one this cluster removed for this site | a removed member's data, whose ID the cluster never accepts again |
 
 The cluster ID alone is not that evidence. etcd derives a founding member's
@@ -9019,7 +9018,13 @@ refused before anything is deleted, naming the site and what was found:
 another cluster's ID, a member this cluster has no record of removing for the
 site or has now, logs that disagree or do not decode, any name outside etcd's
 layout (Eg: a `member.bak` moved aside by hand), a symbolic link anywhere,
-a path that is not a directory or cannot be read. When the join is planned
+a path that is not a directory or cannot be read. A member directory with no
+write-ahead log is refused too, with the command that deletes it by hand,
+`rootlesskit rm -rf -- /srv/paisans/<token>/infra/etcd/member`, for the
+operator to run once it is certain to be theirs to lose. etcd leaves a
+database alone when it exits before it reaches a peer, Eg a learner that
+never started, but nothing in a database says whose it is or whether it holds
+keys: one rewritten by a defrag looks like a fresh one. When the join is planned
 nothing is stopped, so an etcd running there is also asked, and one that
 answers for another cluster is refused then; its answer never permits the
 delete. A refusal deletes nothing: data of another cluster is its owner's to

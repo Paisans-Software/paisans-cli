@@ -1,8 +1,6 @@
 package siteadd_test
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -428,11 +426,11 @@ func TestDataNotShownToBeARemovedMemberIsRefused(t *testing.T) {
 		setup func(*world)
 		want  string
 	}{
-		"a member directory with more than a failed start and no log": {func(w *world) {
+		"a member directory with a snapshot and no log": {func(w *world) {
 			delete(w.hosts["vm"].files, etcdWAL)
 			delete(w.hosts["vm"].files, etcdData+"/member/wal/0.tmp")
 			w.hosts["vm"].files[etcdData+"/member/snap/0000000000000002-0000000000000005.snap"] = "snap"
-		}, "no write-ahead log and more than a failed start leaves"},
+		}, "holds an etcd database, member/snap/db, and no write-ahead log"},
 		"a log that does not decode": {func(w *world) { w.hosts["vm"].files[etcdWAL] = "not a WAL" }, "does not decode"},
 		"an unreadable directory":    {func(w *world) { w.dataUnreadable = map[string]bool{"vm": true} }, "could not be read"},
 		"a symbolic link":            {func(w *world) { w.dataLink = map[string]bool{"vm": true} }, "is a symbolic link"},
@@ -467,7 +465,7 @@ func TestDataNotShownToBeARemovedMemberIsRefused(t *testing.T) {
 			w := removedWitnessWorld(t)
 			c.setup(w)
 			_, err := siteadd.Build(w.cfg, w.secrets, "home-b", w.transports())
-			refusedUntouched(t, w, err, c.want, "it is not deleted", "Nothing was changed")
+			refusedUntouched(t, w, err, c.want, "not delete", "Nothing was changed")
 		})
 	}
 }
@@ -487,47 +485,84 @@ func TestAnUnstartedLearnerBesideForeignDataIsNotRemoved(t *testing.T) {
 	}
 }
 
-// What a failed start leaves, member/snap/db alone and no larger than a
-// fresh one, holds no member, and is cleared.
-func TestAFailedStartsDataIsCleared(t *testing.T) {
-	defer siteadd.SetFast()()
-	w := removedWitnessWorld(t)
-	w.hosts["home-a"].files[etcdRemovedFile] = ""
+// dbAlone leaves vm's host only an etcd database, with no write-ahead log:
+// what etcd leaves when it exits before it reaches a peer.
+func dbAlone(w *world) {
 	vm := w.hosts["vm"]
 	delete(vm.files, etcdWAL)
 	delete(vm.files, etcdData+"/member/wal/0.tmp")
-	vm.files[etcdDB] = string(dbFixture(t, "fresh"))
+	vm.files[etcdDB] = "a database"
+}
+
+// An etcd database with no write-ahead log says neither whose it is nor
+// whether it holds keys, so it is refused, with the command to delete it by
+// hand; once its owner has, the join goes ahead.
+func TestADatabaseAloneIsRefusedWithTheCommandToDeleteIt(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := removedWitnessWorld(t)
+	dbAlone(w)
+	_, err := siteadd.Build(w.cfg, w.secrets, "home-b", w.transports())
+	refusedUntouched(t, w, err,
+		"holds an etcd database, member/snap/db, and no write-ahead log",
+		"a learner that never started",
+		"site add does not delete it",
+		"rootlesskit rm -rf -- /srv/paisans/f2a9/infra/etcd/member",
+		"Nothing was changed")
+
+	delete(w.hosts["vm"].files, etcdDB)
 	if err := siteadd.Execute(build(t, w)); err != nil {
 		t.Fatal(err)
 	}
-	if vm.ran("rootlesskit rm -rf") != 1 {
-		t.Error("the failed start's data was not cleared")
+	if got := strings.Join(w.voters(), ","); got != "home-a,home-b,vm" {
+		t.Errorf("voters %s", got)
 	}
 }
 
-// A database alone that has committed more than a fresh bootstrap does is
-// not a failed start, whatever its size: a member that held keys and whose
-// write-ahead log was moved aside has a file of the same size.
-func TestAUsedDatabaseAloneIsRefused(t *testing.T) {
+// An unstarted learner whose host holds only a database is refused when the
+// join is planned, before it is removed from etcd, with the same command;
+// once the database is deleted, the learner is removed and added again.
+func TestAnUnstartedLearnerWithADatabaseAloneIsRefusedThenRecovered(t *testing.T) {
 	defer siteadd.SetFast()()
 	w := removedWitnessWorld(t)
-	vm := w.hosts["vm"]
-	delete(vm.files, etcdWAL)
-	delete(vm.files, etcdData+"/member/wal/0.tmp")
-	vm.files[etcdDB] = string(dbFixture(t, "used"))
+	dbAlone(w)
+	w.nextID++
+	w.etcd = append(w.etcd, apply.EtcdMember{ID: w.nextID, PeerURLs: []string{"http://10.44.0.3:2380"}, IsLearner: true})
 	_, err := siteadd.Build(w.cfg, w.secrets, "home-b", w.transports())
-	refusedUntouched(t, w, err, "has committed transaction 9", "Nothing was changed")
-}
+	refusedUntouched(t, w, err, "a learner that never started", "rootlesskit rm -rf -- /srv/paisans/f2a9/infra/etcd/member")
+	if len(w.etcd) != 2 {
+		t.Errorf("etcd after the refusal: %v", w.etcd)
+	}
 
-// dbFixture is the head of a real etcd v3.5.16 database: see
-// internal/apply's tests.
-func dbFixture(t *testing.T, name string) []byte {
-	t.Helper()
-	b, err := os.ReadFile(filepath.Join("..", "apply", "testdata", "etcd-v3.5.16-"+name+"-db-head.bin"))
-	if err != nil {
+	delete(w.hosts["vm"].files, etcdDB)
+	if err := siteadd.Execute(build(t, w)); err != nil {
 		t.Fatal(err)
 	}
-	return b
+	if w.hosts["home-a"].ran("member remove 2") != 1 {
+		t.Error("the unstarted learner was not removed and added again")
+	}
+	if got := strings.Join(w.voters(), ","); got != "home-a,home-b,vm" {
+		t.Errorf("voters %s", got)
+	}
+}
+
+// A database alone found only at run time stops stage 3 with the same
+// command and nothing deleted; the next run goes ahead once it is gone.
+func TestADatabaseAloneFoundAtRunTimeStopsTheClear(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := removedWitnessWorld(t)
+	p := build(t, w)
+	dbAlone(w)
+	err := siteadd.Execute(p)
+	if err == nil || !strings.Contains(err.Error(), "stage 3") || !strings.Contains(err.Error(), "rootlesskit rm -rf -- /srv/paisans/f2a9/infra/etcd/member") || !strings.Contains(err.Error(), "its etcd data was not touched") {
+		t.Fatalf("want a stage 3 refusal, got %v", err)
+	}
+	if w.hosts["vm"].ran("rootlesskit rm -rf") != 0 {
+		t.Error("vm's database was deleted")
+	}
+	delete(w.hosts["vm"].files, etcdDB)
+	if err := siteadd.Execute(build(t, w)); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // A data directory that exists and is empty is nothing to lose.

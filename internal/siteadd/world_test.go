@@ -539,20 +539,6 @@ func (h *host) etcdDataAnswer() string {
 		}
 		b.WriteString("paisans-wal-end\n")
 	}
-	if e, ok := entries["member/snap/db"]; ok && strings.HasPrefix(e, "f ") && !strings.HasPrefix(entries["member"], "l ") && !strings.HasPrefix(entries["member/snap"], "l ") {
-		head := []byte(h.files[etcdDB])
-		if len(head) > 8192 {
-			head = head[:8192]
-		}
-		b.WriteString("paisans-db-begin\n")
-		for i := 0; i < len(head); i += 16 {
-			for _, c := range head[i:min(i+16, len(head))] {
-				fmt.Fprintf(&b, " %02x", c)
-			}
-			b.WriteString("\n")
-		}
-		b.WriteString("paisans-db-end\n")
-	}
 	return b.String()
 }
 

@@ -122,7 +122,7 @@ func (p *Plan) buildEtcd(live []apply.EtcdMember) *Stage {
 			st.Steps = append(st.Steps, Step{Site: p.control, Verb: "remove", Title: "remove unstarted learner " + j, Text: fmt.Sprintf("%s's learner %s, which an earlier run added and which never started, read again first: one that received data before it stopped cannot start again under its ID, so it is added again under a new one. The removal is recorded first on the other members' hosts, in %s: %s", j, ids[j], apply.EtcdRemovedPath(p.dep()), apply.Etcdctl(p.dep(), p.cfg.Sites[p.control].Address, "member remove "+ids[j]))})
 		}
 		if !started[j] {
-			st.Steps = append(st.Steps, Step{Site: j, Verb: "clear", Title: "clear old etcd data on " + j, Text: fmt.Sprintf("%s's old etcd data, %s, if it holds any: a removed member's, which etcd refuses to rejoin with. It is read on disk and deleted only when it is empty, what a failed start leaves, or a member whose write-ahead logs name this cluster, %x, and a member this cluster removed for %s; anything else refuses: %s", j, apply.EtcdDataDir(p.dep()), p.clusterID, j, p.clearEtcdData())})
+			st.Steps = append(st.Steps, Step{Site: j, Verb: "clear", Title: "clear old etcd data on " + j, Text: fmt.Sprintf("%s's old etcd data, %s, if it holds any: a removed member's, which etcd refuses to rejoin with. It is read on disk and deleted only when it is empty or a member whose write-ahead logs name this cluster, %x, and a member this cluster removed for %s; anything else refuses: %s", j, apply.EtcdDataDir(p.dep()), p.clusterID, j, p.clearEtcdData())})
 		}
 		if !started[j] {
 			st.Steps = append(st.Steps, Step{Site: j, Verb: "add", Title: "add etcd learner " + j, Text: fmt.Sprintf("an etcd learner %s with peer URL %s, through %s", j, url, p.control)})
@@ -217,10 +217,6 @@ func (p *Plan) knowCluster(j string) error {
 // data is a member this cluster removed for this site:
 //
 //   - nothing: no directory, or an empty one;
-//   - a failed start: member/snap/db alone, no larger than a fresh one, its
-//     bbolt meta pages valid and recording no transaction after the ones a
-//     fresh bootstrap commits (apply.FreshEtcdDBTxid): nothing was committed
-//     to it after its buckets were created;
 //   - a member: etcd's member layout whose write-ahead logs all name this
 //     cluster's ID and one member ID, which is the learner being replaced or
 //     a member this cluster removed for this site and recorded
@@ -242,7 +238,12 @@ func (p *Plan) knowCluster(j string) error {
 // Anything else refuses, naming what was found: another cluster's ID, an ID
 // this cluster has no record of removing for this site, a member it has
 // now, a layout that is not etcd's, logs that disagree or do not decode, a
-// symbolic link, a path that is not a directory or cannot be read.
+// symbolic link, a path that is not a directory or cannot be read. A member
+// directory with no write-ahead log refuses too, with the command that
+// deletes it by hand: etcd leaves a database alone when it exits before it
+// reaches a peer, Eg a learner that never started, but nothing in the
+// database says whose it is or whether it holds keys (a defragmented one
+// looks like a fresh one), so only its owner can judge it.
 func (p *Plan) checkEtcdData(j string, members []apply.EtcdMember, learner uint64, changed string) error {
 	data, err := apply.ReadEtcdData(p.transports[j], p.dep())
 	if err != nil {
@@ -250,10 +251,13 @@ func (p *Plan) checkEtcdData(j string, members []apply.EtcdMember, learner uint6
 	}
 	v := data.Assess()
 	switch v.Kind {
-	case apply.EtcdDataNothing, apply.EtcdDataFailedBootstrap:
+	case apply.EtcdDataNothing:
 		return nil
 	case apply.EtcdDataMember:
 	default:
+		if v.NoWAL {
+			return p.noWALEtcdData(j, v.Why, changed)
+		}
 		return p.unknownEtcdData(j, v.Why, changed)
 	}
 	if v.ClusterID != p.clusterID {
@@ -283,6 +287,11 @@ func (p *Plan) checkEtcdData(j string, members []apply.EtcdMember, learner uint6
 
 func (p *Plan) unknownEtcdData(j, what, changed string) error {
 	return fmt.Errorf("site add %s: %s's etcd data, %s, %s, so it is not shown to be a member this cluster removed for %s, and it is not deleted. Read it on %s: data of another cluster is its owner's to move off the host, or the site is taken out of this deployment; data of this deployment's own is deleted by hand once that is certain. %s", p.Site, j, apply.EtcdDataDir(p.dep()), what, j, j, changed)
+}
+
+func (p *Plan) noWALEtcdData(j, what, changed string) error {
+	dir := apply.EtcdDataDir(p.dep())
+	return fmt.Errorf("site add %s: %s's etcd data, %s, %s. site add does not delete it. Read it on %s, as the deployment's user (`rootlesskit ls -lR %s`); once it is certain to be this deployment's and nothing to lose, delete it there with `rootlesskit rm -rf -- %s/member` and run site add again. Data of another cluster is its owner's to move off the host. %s", p.Site, j, dir, what, j, dir, dir, changed)
 }
 
 func (p *Plan) otherCluster(j string, id uint64, how, changed string) error {
