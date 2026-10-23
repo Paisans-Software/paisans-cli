@@ -123,8 +123,8 @@ const mib = 1 << 20
 // MemTotal, which the kernel reports a little below the machine's RAM.
 // Each is what the part holds at rest with room to work, not what it can
 // grow to under load: a host at its floor runs, and one below it is where
-// the kernel starts killing processes. They are provisional, set from what
-// each role runs (the rendered compose files) and not measured on hosts.
+// the kernel starts killing processes. They are set from what each role
+// runs (the rendered compose files), not measured on hosts.
 const (
 	// FloorBase is every host: Ubuntu Server's own services, an apt or
 	// unattended-upgrades run among them, the deployment user's rootless

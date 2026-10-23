@@ -4275,9 +4275,8 @@ The floor is the sum of what the host runs, each part once, compared with
 `MemTotal` in `/proc/meminfo`, which the kernel reports a little below the
 machine's RAM. A part two roles run is counted once: a monitor beside the
 gateway is served by the gateway's Caddy, and a data site that is also a
-Garage site runs one Garage. The numbers are provisional, set from what
-each role runs and not yet measured on hosts; they live as named constants
-in `internal/hostmem`.
+Garage site runs one Garage. The numbers are set from what each role runs,
+not measured on hosts, and live as named constants in `internal/hostmem`.
 
 | Part | Floor | Run by | Basis |
 |------|-------|--------|-------|
