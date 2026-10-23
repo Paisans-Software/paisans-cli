@@ -83,8 +83,15 @@ func runningEtcdHosts(d deployment.Deployment) string {
 // the container start again with the file now on the host, which a run that
 // wrote the file and stopped before recreating needs too.
 func RecreatePatroni(d deployment.Deployment) string {
-	return d.ComposeCmd(infraStack) + " up -d --no-deps --force-recreate patroni"
+	return d.ComposeCmd(infraStack) + " up -d --no-deps --force-recreate" + infraStopTimeout + " patroni"
 }
+
+// infraStopTimeout is the stop timeout the infrastructure stack's up and
+// restart pass, Patroni's stop_grace_period (see infra-compose.yaml.tmpl).
+// A container being replaced stops with its own timeout unless one is given,
+// and a Patroni created before it had one would be killed at Docker's 10 s
+// by the very apply that gives it 60 s.
+const infraStopTimeout = " --timeout 60"
 
 func patronictlList(d deployment.Deployment) string {
 	return d.ComposeCmd(infraStack) + " exec -T patroni patronictl -c /home/postgres/postgres.yml list -f json"

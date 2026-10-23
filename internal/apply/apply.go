@@ -133,22 +133,27 @@ func quoteAll(names []string) string {
 
 // Command is what the action runs on the host, for deployment d.
 func (a Action) Command(d deployment.Deployment) string {
-	compose := d.ComposeCmd(a.Stack)
+	compose, timeout := d.ComposeCmd(a.Stack), ""
+	if a.Stack == infraStack {
+		timeout = infraStopTimeout
+	}
 	switch {
 	case a.Stack == infraStack && a.Force && len(a.Up) == 1 && a.Up[0] == "patroni":
 		return RecreatePatroni(d)
 	case a.Force && len(a.Up) > 0:
-		return compose + " up -d --no-deps --force-recreate " + quoteAll(a.Up)
+		return compose + " up -d --no-deps --force-recreate" + timeout + " " + quoteAll(a.Up)
 	case a.Force:
-		return compose + " up -d --force-recreate"
+		return compose + " up -d --force-recreate" + timeout
 	case a.Recreate && len(a.Up) > 0:
-		return compose + " up -d --no-deps " + quoteAll(a.Up)
+		return compose + " up -d --no-deps" + timeout + " " + quoteAll(a.Up)
 	case a.Recreate:
-		return compose + " up -d"
-	case len(a.Services) > 0:
+		return compose + " up -d" + timeout
+	case len(a.Services) > 0 && !slices.Contains(a.Services, "patroni"):
 		return compose + " restart " + strings.Join(a.Services, " ")
+	case len(a.Services) > 0:
+		return compose + " restart" + timeout + " " + strings.Join(a.Services, " ")
 	default:
-		return compose + " restart"
+		return compose + " restart" + timeout
 	}
 }
 

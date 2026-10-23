@@ -540,7 +540,7 @@ func (h *host) Run(command string) (string, error) {
 			return "service \"patroni\" is not running", errors.New("exit status 1")
 		}
 		return h.etcdHosts + "\n", nil
-	case strings.HasSuffix(command, "up -d --no-deps --force-recreate patroni"):
+	case strings.HasSuffix(command, "up -d --no-deps --force-recreate --timeout 60 patroni"):
 		w.recreated = append(w.recreated, h.name)
 		h.patroniUp = true
 		h.etcdHosts = envLine(h.files[root+"/infra/patroni.env"], "ETCD3_HOSTS")
