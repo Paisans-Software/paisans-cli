@@ -62,7 +62,7 @@ func runSiteAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs.BoolVar(&flags.MeshLAN, "mesh-lan", false, "let the mesh dial this host's own LAN")
 	fs.BoolVar(&flags.EnableUFW, "enable-ufw", false, "enable ufw when it is installed and not active: allow every port sshd listens on, arm a timer that turns ufw off again in 10 minutes, enable it, and stop the timer once a new SSH login gets through")
 	fs.BoolVar(&flags.EnableUFWBlockListed, "enable-ufw-block-listed", false, "with --enable-ufw: enable ufw although it blocks the ports admit lists, which answer from off the host now and no ufw rule allows, once you have checked each may be blocked")
-	fs.BoolVar(&flags.Swapfile, "swapfile", false, "make a swapfile at /swapfile, twice the host's RAM up to 16 GiB, when the host has no swap in any form; asked at a terminal with --execute")
+	fs.BoolVar(&flags.Swapfile, "swapfile", false, "make a swapfile at /swapfile, twice the host's RAM up to 16 GiB, when the host has no swap in any form but zram; asked at a terminal with --execute")
 	fs.BoolVar(&execute, "execute", false, "make the changes the plan shows")
 	fs.StringVar(&digestFlag, "digest", "", "with --request: the request's digest the operator gave you, compared as the one typed at a terminal is")
 	answers := yesFlag(fs)
@@ -454,7 +454,7 @@ func askEnableUFW(a answerer, stdin io.Reader, stdout io.Writer, ports []int, bl
 // swapfile of size bytes on a host with no swap. Only y or yes says so, or
 // --yes, through a. A no admits the host without one.
 func askSwapfile(a answerer, stdin io.Reader, stdout io.Writer, size int64) (bool, error) {
-	explain := fmt.Sprintf("\nThis host has no swap. %s\n"+
+	explain := fmt.Sprintf("\nThis host has no swap, or only zram, which adds nothing to its memory. %s\n"+
 		"Admit can make a swapfile of %s at /swapfile, twice the host's RAM up to %s, and turn it on at boot through /etc/fstab.\n", hostadmit.SwapNeeded, hostadmit.GiB(size), hostadmit.GiB(hostadmit.SwapMax))
 	yes, err := a.yesNo(stdin, stdout, explain, "Make the swapfile (--swapfile)?", "make a swapfile (--swapfile)")
 	if err != nil {

@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Added
+
+- `doctor` checks each host's swap, and `doctor` and `site admit` warn when a host's RAM, with swap counting up to a quarter, is under the floor its roles need.
+
 ### Changed
 
 - `init` moves a never-applied site's WireGuard listen port, when another deployment on the host holds it and the endpoint is unset or a port alone, to a free one and says which port to open.

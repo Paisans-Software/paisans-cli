@@ -26,7 +26,15 @@ var swapCases = addCases(
 		return noSwap(vmAdmitted()).with("swap-partition", "yes").with("swap-fstab", "yes")
 	}},
 	goldenCase{name: "swap-configured-not-on-refused", site: "vm", flags: hostadmit.Flags{Swapfile: true}, host: func() *fakeHost {
-		return noSwap(vmAdmitted()).with("swap-zram", "yes")
+		return noSwap(vmAdmitted()).with("swap-partition", "yes")
+	}},
+	// zram keeps what it holds in RAM: a host with zram alone, on or
+	// configured, is offered a swapfile, and --swapfile makes one beside it.
+	goldenCase{name: "swap-zram-only-offered", site: "vm", host: func() *fakeHost {
+		return noSwap(vmAdmitted()).with("swap-active", "yes").with("swap-zram", "yes").with("swap-total", "2147479552").with("zram-on", "2147479552")
+	}},
+	goldenCase{name: "swap-zram-only-swapfile", focus: []string{"swapfile"}, site: "vm", flags: hostadmit.Flags{Swapfile: true}, host: func() *fakeHost {
+		return noSwap(home()).with("swap-zram", "yes")
 	}},
 	goldenCase{name: "swap-ram-unread-refused", site: "vm", flags: hostadmit.Flags{Swapfile: true}, host: func() *fakeHost {
 		return noSwap(vmAdmitted()).with("mem-total", "")
@@ -54,7 +62,11 @@ func TestSwapOffer(t *testing.T) {
 		{"none", noSwap(home()), hostadmit.Flags{}, 8 << 30, true},
 		{"on", home(), hostadmit.Flags{}, 0, false},
 		{"asked already", noSwap(home()), hostadmit.Flags{Swapfile: true}, 0, false},
-		{"zram configured", noSwap(home()).with("swap-zram", "yes"), hostadmit.Flags{}, 0, true},
+		{"zram configured", noSwap(home()).with("swap-zram", "yes"), hostadmit.Flags{}, 8 << 30, true},
+		{"zram on", noSwap(home()).with("swap-active", "yes").with("swap-total", "4113297408").with("zram-on", "4113297408"), hostadmit.Flags{}, 8 << 30, true},
+		{"zram on beside a swapfile not on", noSwap(home()).with("swap-active", "yes").with("swap-total", "4113297408").with("zram-on", "4113297408").with("swapfile", "present"), hostadmit.Flags{}, 0, true},
+		{"a swapfile on beside zram", home().with("swap-total", "8227631104").with("zram-on", "4113297408"), hostadmit.Flags{}, 0, false},
+		{"partition configured", noSwap(home()).with("swap-partition", "yes"), hostadmit.Flags{}, 0, true},
 		{"xfs", noSwap(home()).with("root-fs", "xfs"), hostadmit.Flags{}, 8 << 30, true},
 		{"zfs", noSwap(home()).with("root-fs", "zfs"), hostadmit.Flags{}, 0, true},
 		{"RAM unread", noSwap(home()).with("mem-total", ""), hostadmit.Flags{}, 0, true},

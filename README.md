@@ -4262,6 +4262,68 @@ leaving Patroni to fail to open the device at its first start. This is the
 host side of the one Patroni per data bearing host rule in *There is one HA
 cluster, and that is deliberate*.
 
+### A host's memory is measured against its roles
+
+A host short of memory keeps running until the kernel's OOM killer picks a
+process to kill, and it runs slowly before that. An etcd member that
+stalls answers Patroni's reads late, and a witness that stalls costs the
+cluster its tiebreaker. So `site admit` warns in its plan, and `doctor` on
+every run, when a host has less memory than what it runs needs. It is a
+warning and never a refusal: a host under its floor runs, and may be all
+its owner has.
+
+The floor is the sum of what the host runs, each part once, compared with
+`MemTotal` in `/proc/meminfo`, which the kernel reports a little below the
+machine's RAM. A part two roles run is counted once: a monitor beside the
+gateway is served by the gateway's Caddy, and a data site that is also a
+Garage site runs one Garage. The numbers are set from what each role runs,
+not measured on hosts, and live as named constants in `internal/hostmem`.
+
+| Part | Floor | Counted where | Basis |
+|------|-------|---------------|-------|
+| The host | 512 MiB | every host | Ubuntu Server's own services, an apt or unattended-upgrades run among them, the deployment user's rootless Docker (dockerd, containerd, RootlessKit), WireGuard and the heartbeat container |
+| etcd | 256 MiB | the members of `etcd.members`: `data` and `witness` sites | an etcd v3.5 member holding Patroni's few keys, with room for its snapshots and compactions |
+| PostgreSQL, Patroni and HAProxy | 1 GiB | `cluster.sites`: the `data` sites | Spilo's PostgreSQL with its shared buffers and a few connections per app, Patroni's Python process, and HAProxy in front |
+| Garage | 256 MiB | the sites `storage.garage.sites` names, whatever their roles | its metadata database and the buffers of the uploads it is handling |
+| Caddy | 128 MiB | the gateway, and a monitor with `web_server.managed_by: paisans` | the toolkit's Caddy, its certificates and connections |
+| oauth2-proxy | 64 MiB | the gateway the gate app is pinned to, when an app is gated | the visibility gate |
+| The uptime monitor | 256 MiB | `monitor` sites | a Node.js process |
+| Pocket ID and an app | 1 GiB | `apps` sites | Pocket ID and one app beside it. Mbin, with its PHP workers and Valkey, or Wiki.js needs more of its own, so an apps site running several needs more than its floor |
+
+**`doctor` counts what the configuration places; `site admit` estimates by
+role.** Doctor reads `paisans-stack.yaml`, so it knows each column above.
+Admit has only the request, which names the site's roles and whether it
+binds ports 80 and 443, which is whether it runs Caddy. So admit counts
+Garage on every `data` and `storage` site, as `storage.garage.sites`
+usually places it, and oauth2-proxy on every gateway, and the two can
+differ by Garage's 256 MiB or oauth2-proxy's 64 MiB.
+
+By role, a witness needs 768 MiB, a monitor running Caddy 896 MiB, a
+gateway and witness 960 MiB, a gateway, witness and monitor 1216 MiB, and
+a data and apps site 3072 MiB.
+
+**Swap counts toward the floor, up to a quarter of it.** Swap holds what a
+host keeps and rarely touches, which is what lets it ride out an apt run,
+but a process whose working memory is swapped out slows to the speed of
+the disk, etcd and PostgreSQL above all, so at least three quarters of the
+floor must be RAM. Only swap that is on counts, and in admit's plan so
+does the swapfile `--swapfile` makes. Swap on a zram device does not
+count: it compresses what it holds into RAM, so it stretches RAM rather
+than adding to it, and `site admit` offers a swapfile beside zram as it
+does where there is no swap. A 1 GiB VPS as gateway and witness is under its
+960 MiB with no swap, and over it with a swapfile; a 458 MiB one is under
+it either way.
+
+**Each deployment is checked on its own.** A host admitted to two
+deployments is held to each one's floor apart, never their sum: neither
+deployment reads what the other runs there. The host's owner adds them up.
+
+**Inside a container, `MemTotal` is the machine's.** A host that is itself
+a container, such as an LXC guest, reads the RAM of the machine it runs on
+unless lxcfs or the like presents the container's limit as
+`/proc/meminfo`, so the check can pass on a container whose limit is far
+below its floor.
+
 ### Decryption happens on a workstation, not on a host
 
 Rendering locally and pushing means no age key ever reaches a host. That
@@ -9927,6 +9989,8 @@ closing list is usually the cause of those after it:
 | Docker source mark | the highest `src_valid_mark` under `/proc/sys/net/ipv4/conf` in RootlessKit's network namespace, read with the Docker check by entering the namespace as the user | it is 1, so every new connection to an app waits a second and the app sees the bridge's address: the recovery is `paisans deployment apply --execute`. See *`deployment apply` keeps the rootless namespace's `src_valid_mark` at 0*. A value doctor cannot read is a `WARN` |
 | Linger | `loginctl show-user <user> --property=Linger --value`, and whether the drop-in `/etc/systemd/system/user@<uid>.service.d/paisans-mesh.conf` exists | linger is off: the user's Docker stops when the last login ends and does not start at boot. Or the drop-in is missing, so the user's manager is not ordered after the mesh. An answer doctor cannot read, the mesh-order line included, is a `WARN` |
 | Sudo rights | `LC_ALL=C sudo -n -l`, or `/usr/bin/sudo.ws -n -l` where sudo is sudo-rs | sudo lets the user run anything but the WireGuard helper as root, carries a Defaults entry or runas line beyond admit's one rule, or does not let it run the helper. An answer doctor cannot read, such as a translated one, is a `WARN` |
+| Swap | `/proc/meminfo`, `/proc/swaps` (zram devices among them), `lsblk`, `/etc/fstab`, the zram-generator configuration and `/swapfile`, as `site admit` reads them, read as the deployment's user | never; no swap on beyond zram is a `WARN`, saying whether the host has swap that is not on, which its owner turns on, or none, for which `site admit` offers a swapfile. A read doctor cannot make, or an answer missing its RAM or swap line, is a `WARN` and skips the memory check |
+| Memory | the same read, against the floor of what `paisans-stack.yaml` places on the site (*A host's memory is measured against its roles*) | never; RAM, with swap that is on and not zram counting up to a quarter of the floor, under the floor is a `WARN`, naming each part of it. Each deployment on a host is checked against its own floor |
 | Mesh | `ip -j link show dev psns-<token>`, then the overlap test of *Two deployments on one host never share a mesh*: `ip -j route show table all`, `ip -j addr`, `docker network inspect` and the user's `~/.config/docker/daemon.json`, on every site that answered | the interface is missing or down, or anything outside it overlaps `mesh.subnet`, named with the subnet. The advice is that the subnet is fixed once deployed and the other network moves |
 | etcd quorum | `etcdctl endpoint health -w json` in the etcd container of the first member that answers, naming every member of `etcd.members` by its mesh address | fewer than half the members plus one are healthy. One member down with quorum intact is a `WARN` |
 | etcd version | `curl` on the host to the member's `http://<mesh address>:2379/version`; skipped, and said so, where the host has no `curl` | the cluster version is `3.0.0` under a 3.5 server |

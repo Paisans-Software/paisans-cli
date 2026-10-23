@@ -51,6 +51,19 @@ reach only over SSH is the one step here that can lock you out.
   loaded, admit refuses, saying how to load the profile, or, where your
   release has none, what lifting the restriction for the whole machine
   costs, and leaves that choice to you.
+* **Enough memory for the site's roles.** Admit warns, and does not refuse,
+  when your machine's RAM is under what the roles in the request need: 768
+  MiB for a witness, 896 MiB for a monitor running the toolkit's Caddy (768
+  MiB behind your own web server), 960 MiB for a gateway and witness, 1216
+  MiB for a gateway, witness and monitor, 3072 MiB for a data and apps
+  site, and more for an apps site running several apps. Swap that is on
+  counts for up to a quarter of that, zram excepted, so a swapfile
+  (`--swapfile`, step 3) can bring a small VPS over it. Each deployment you
+  admit is checked against its own floor, so add them up yourself when you
+  admit more than one. In a container, admit reads the RAM of the machine
+  it runs on unless lxcfs or the like shows the container's limit. *A
+  host's memory is measured against its roles* in the
+  [README](../../README.md) lists what each role runs and why.
 * **No Kubernetes.** The deployment marks its mesh traffic for the firewall
   with bits Kubernetes networking also uses. Admit does not check for it: a
   machine running Kubernetes is outside what it supports.
@@ -134,7 +147,7 @@ three are yours to decide by your machine, not by the site.
 | `--data-dir <path>` | The deployment's Docker data (images, containers, volumes: the database on a data site, the stored objects on a storage site) goes under `<path>/paisans-<token>` instead of the user's home. | Nothing, if the disk has room. `<path>` must exist, be a directory and not a link, and be root's with no group or other write bit. With or without the flag, admit refuses to put the data on a filesystem Docker's storage cannot use (NFS, CIFS and SMB, FUSE, overlay, FAT, exFAT and NTFS), and the plan states the free space where it goes, warning below 20 GB for a data or storage site and 5 GB otherwise. |
 | `--bridge-netfilter` | Admit loads `br_netfilter`, which the deployment's Docker needs, on a machine with bridges of its own (libvirt's, LXD's, yours). | **Traffic across your own bridges then passes the firewall's FORWARD chain**, which it skipped before, and whose policy is often to drop. The refusal names each bridge and quotes the policy. Without the flag admit stops on such a machine; where the module is loaded already, or the only bridges are Docker's, it needs no flag. |
 | `--mesh-lan` | The deployment's sites may reach each other on your LAN, at the private prefix of your machine's default interface. | The deployment can send its mesh traffic to that LAN, and the plan says so. Admit refuses it where that interface is not on a private network of a /16 or narrower. Without it, sites on one LAN reach each other through their public addresses, which needs a router that loops them back. |
-| `--swapfile` | A swapfile at `/swapfile` of twice your machine's RAM, up to 16 GiB, turned on and added to `/etc/fstab`. Admit asks at a terminal with `--execute` when your machine has no swap, and `--yes` says yes. | Disk space the size of the swapfile. Admit offers it only where your machine has no swap in any form, `/` is ext4 or xfs, and 5 GB stays free beside it; swap you have that is not on is yours to turn on: admit warns about it and refuses `--swapfile`. |
+| `--swapfile` | A swapfile at `/swapfile` of twice your machine's RAM, up to 16 GiB, turned on and added to `/etc/fstab`. Admit asks at a terminal with `--execute` when your machine has no swap, and `--yes` says yes. | Disk space the size of the swapfile. Admit offers it only where your machine has no swap in any form but zram, which keeps what it holds in RAM, `/` is ext4 or xfs, and 5 GB stays free beside it; swap you have that is not on is yours to turn on: admit warns about it and refuses `--swapfile`. |
 
 **Forwarding has no flag.** A site with an endpoint relays mesh traffic
 between sites that cannot dial each other, so admit turns on
