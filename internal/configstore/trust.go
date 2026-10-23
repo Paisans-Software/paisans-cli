@@ -104,8 +104,8 @@ func (e *UnreadableOperatorsError) Unwrap() error { return e.Err }
 //     of the history of, when they serve anything, is a *PinNotServedError.
 //     The anchor and every ancestor of it are trusted whatever their shape,
 //     because the operator signed after them.
-//   - With a named key and a pinned root, the pinned root is the anchor and
-//     the key is not consulted. With a named key alone, the key must have
+//   - A named key anchors only with no root pinned, and Judge refuses the
+//     two together. The key must have
 //     signed versions under exactly one good root, which is judged by these
 //     rules as if pinned. The versions the key signed that this trusts are
 //     the candidates, and the newest of those not in another's history is
@@ -137,7 +137,12 @@ func Judge(g Graph, a Anchor) (Verdict, error) {
 	j := &judgement{g: g, operators: map[string]operatorsResult{}, anc: map[string]map[string]bool{}}
 	order, cyclic := j.topo()
 
-	if a.Root != "" {
+	if a.Named && a.Root != "" {
+		return Verdict{}, errors.New("a key named with --key anchors only a workstation with no root pinned; with a root, the root anchors alone")
+	}
+	// A root that is not held is answered by the pin's own checks, which
+	// name it, rather than by what the sites serve.
+	if _, held := j.g.Versions[a.Root]; a.Root != "" && held {
 		if err := j.pinServed(a, order); err != nil {
 			return Verdict{}, err
 		}
@@ -421,16 +426,10 @@ func (j *judgement) pinServed(a Anchor, order []string) error {
 	return &PinNotServedError{Root: a.Root}
 }
 
-// named judges from the key --key names, by the rule in Judge's comment: a
-// pinned root wins, and otherwise the key anchors only on versions it signed
-// itself, under one root, that the trust rules trust already.
+// named judges from the key --key names, with no root pinned, by the rule in
+// Judge's comment: the key anchors only on versions it signed itself, under
+// one root, that the trust rules trust already.
 func (j *judgement) named(a Anchor, order, cyclic []string) (Verdict, error) {
-	if a.Root != "" {
-		if reason := j.goodRoot(a.Root); reason != "" {
-			return Verdict{}, &anchorError{fmt.Sprintf("the pinned root %s %s", a.Root, reason)}
-		}
-		return j.from(a.Root, order, cyclic)
-	}
 	key := strings.Join(a.Signers, ", ")
 	signed := func(sha string) bool {
 		return slices.Contains(a.Signers, j.g.Versions[sha].SignerFP) && j.shape(sha) == ""

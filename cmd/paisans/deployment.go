@@ -278,7 +278,7 @@ func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transpo
 		s.Fail(err)
 		var ns *configstore.PinNotServedError
 		if errors.As(err, &ns) {
-			return g, &ui.Problem{Hint: "the sites serve none of the pinned root's history", Explain: ns.Error() + ". They hold another incarnation of the deployment, after a redeploy under the same id or from before one, or a site serves one it should not, and this workstation does not judge from what only its cache holds. Get the current root from another operator, the full hash in their .paisans/config-root or on a root's line of their paisans deployment log. Then recover from it into an empty directory, paisans deployment recover --from <user@host> --root <sha> --config <empty directory>/paisans-stack.yaml, or here once .paisans/ and the three files are moved aside.", Cause: err}
+			return g, &ui.Problem{Hint: "the sites serve none of the pinned root's history", Explain: ns.Error() + ". Either this workstation's pin is out of date, the deployment having been redeployed under the same id since it was pinned, or a site that answered holds a history it should not, such as a host that was never evicted. Check which sites answered, above. If the pin is out of date, get the current root from another operator, the full hash in their .paisans/config-root or on a root's line of their paisans deployment log, and recover from it into an empty directory: paisans deployment recover --from <user@host> --root <sha> --config <empty directory>/paisans-stack.yaml.", Cause: err}
 		}
 		if errors.Is(err, configstore.ErrNoAnchor) {
 			todo := m.noAnchor

@@ -601,8 +601,6 @@ func TestJudgeNamedKeyRefusesAnotherOperatorsHead(t *testing.T) {
 	if !errors.Is(err, ErrNoAnchor) || !strings.Contains(err.Error(), "o3") || !strings.Contains(err.Error(), "--root") {
 		t.Fatalf("err = %v, want ErrNoAnchor naming o3 and --root", err)
 	}
-	// Pinned, the same line is judged as any pinned history is.
-	wantHeads(t, judgeOK(t, f, named("o1", "fp-alice")), "o3")
 }
 
 // A named key a version removed is refused, whether its last version is on
@@ -632,19 +630,23 @@ func TestJudgeNamedKeyNeverAnOperatorIsRefused(t *testing.T) {
 	}
 }
 
-// A pinned root anchors alone: the named key neither blocks nor overrides
-// it, wherever the key signed.
-func TestJudgeNamedKeyPinnedRootWins(t *testing.T) {
-	f := chain()
-	f.add("o1", 1, "fp-bob", nil, "bob")
-	f.add("o2", 2, "fp-bob", on("o1"), "bob")
-	for _, fp := range []string{"fp-bob", "fp-alice", "fp-zed"} {
-		v := judgeOK(t, f, named("v1", fp))
-		if v.AnchorAt != "v1" {
-			t.Fatalf("%s: AnchorAt = %s, want v1", fp, v.AnchorAt)
-		}
-		wantHeads(t, v, "v3")
-		wantUntrusted(t, v, "o2", "not trusted")
+// A named key with a root pinned is a caller's mistake: with a root, the
+// root anchors alone, and the CLI never names a key beside one.
+func TestJudgeNamedKeyWithARootIsRefused(t *testing.T) {
+	if _, err := Judge(chain().graph(), named("v1", "fp-alice")); err == nil {
+		t.Fatal("Judge took a named key beside a pinned root")
+	}
+}
+
+// A pin that is not held is answered by the pin's own refusal, whatever the
+// sites serve, so a mistyped or old --root is named as such.
+func TestJudgeUnheldPinIsNamedNotJudgedByWhatIsServed(t *testing.T) {
+	f := oldAndNew(2)
+	g := serving(f, "n")
+	_, err := Judge(g, Anchor{Root: "elsewhere"})
+	var ns *PinNotServedError
+	if errors.As(err, &ns) || !errors.Is(err, ErrNoAnchor) || !strings.Contains(err.Error(), "is not held") {
+		t.Fatalf("err = %v, want the pin's own refusal", err)
 	}
 }
 
@@ -685,7 +687,6 @@ func TestJudgeNamedKeyUnderTwoRootsIsRefused(t *testing.T) {
 	if !errors.Is(err, ErrNoAnchor) || !strings.Contains(err.Error(), "more than one root") {
 		t.Fatalf("err = %v, want ErrNoAnchor for two roots", err)
 	}
-	wantHeads(t, judgeOK(t, f, named("v1", "fp-alice")), "v3")
 }
 
 // oldAndNew is an older incarnation, o1 to o4, and a newer one after a

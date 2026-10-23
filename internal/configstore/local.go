@@ -588,7 +588,7 @@ func gather(l Local, sites map[string]apply.Transport, configured int, id string
 	// A key named with --key carries no pin of its own, so every version it
 	// leads to trusting must declare the deployment being gathered: a history
 	// the key signed for another deployment is never this one's.
-	if a.Named && a.Root == "" {
+	if a.Named {
 		for _, sha := range slices.Sorted(maps.Keys(g.Verdict.Trusted)) {
 			if !g.Verdict.Trusted[sha] {
 				continue

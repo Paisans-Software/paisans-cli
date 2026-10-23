@@ -553,8 +553,11 @@ func TestConfigPullRefusalNamesNoServedRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := filepath.Join(l.Dir, "paisans-stack.yaml")
-	sitesServe(evil.answer(t), evil.answer(t))
 	var out bytes.Buffer
+	if err := runDeployment([]string{"pull", "--config", cfg, "--execute"}, noTerminalStdin(), &out); err != nil {
+		t.Fatal(problemText(err), err)
+	}
+	sitesServe(evil.answer(t), evil.answer(t))
 	err := runDeployment([]string{"pull", "--config", cfg, "--execute"}, noTerminalStdin(), &out)
 	if !strings.Contains(problemText(err), "serve no version of the pinned root") || strings.Contains(problemText(err), m1) {
 		t.Fatalf("got %q", problemText(err))
@@ -603,5 +606,18 @@ func TestConfigPullNeverLowersSeenSilently(t *testing.T) {
 		if r, _ := l.Root(); r != n1 {
 			t.Fatalf("%v: root %s, want %s", args, r, n1)
 		}
+	}
+}
+
+// A --root that is not held, mistyped or an old one, is named as such, not
+// answered with what the sites serve.
+func TestConfigRecoverUnheldRootIsNamed(t *testing.T) {
+	_, answer, _ := storedVersion(t)
+	recoverHosts(t, answer)
+	var out bytes.Buffer
+	root := strings.Repeat("ab", 20)
+	err := runDeployment(recoverArgs(t.TempDir(), "--root", root, "--execute"), noTerminalStdin(), &out)
+	if !strings.Contains(problemText(err), "the pinned root "+root+" is not held") || strings.Contains(problemText(err), "serve none") {
+		t.Fatalf("got %q", problemText(err))
 	}
 }
