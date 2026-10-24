@@ -576,10 +576,11 @@ each other's SSH public key:
 4. The inviter runs `paisans deployment apply --execute`, which gives the new
    operator their sites and their Pocket ID account.
 5. The new operator runs `paisans operator register --execute` in an empty
-   directory, which takes the pending invite, or the one `--id
-   <deployment-id>` names when several are pending. It recovers the deployment from the invite's root and
-   sites, trusting no other root, signs their attestation, and says whether the
-   secrets open with their age key, and if not, whose step is missing.
+   directory, which takes the pending invite, or the one `--id <deployment-id>`
+   names when several are pending. It recovers the deployment from the invite's
+   root and sites, trusting no other root, signs their attestation, and says
+   whether the secrets open with their age key, and if not, whose step is
+   missing.
 
 Neither party edits `.sops.yaml` or runs `sops`, and both files travel over
 any channel since each is signed. `paisans operator age-key` shows an

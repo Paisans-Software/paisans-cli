@@ -894,13 +894,14 @@ paisans operator register --invite carol.invite --inviter-key wash.pub > carol.r
   which: a `SOPS_AGE_*` variable, which must hold one key and keeps nothing; the
   keystore item `paisans-age` for the invite's deployment id, used as it is;
   `--age-private-key-file`, read when it exists and made when it does not; and
-  otherwise a new keystore item. The first answer for a deployment binds the
-  key it names to the deployment; every later answer, from any directory,
-  searches all of those sources for the bound key and uses the one that holds
-  it, even where an earlier one holds another key, and with none holding it is
-  refused with no key made, naming the key and the binding file (remove that
-  file to start over with another key). A key is never printed, never replaced, and never written beside
-  `paisans-stack.yaml`.
+  otherwise a new keystore item. The first answer for a deployment binds the key
+  it names to the deployment; every later answer, from any directory, searches
+  all of those sources for the bound key and uses the one that holds it, even
+  where an earlier one holds another key (a variable holding it among others is
+  used, since sops decrypts with any), and with none holding it is refused with
+  no key made, naming the key and the binding file (remove that file to start
+  over with another key). A key is never printed, never replaced, and never
+  written beside `paisans-stack.yaml`.
 * **Refuses:** an invite to a deployment whose pending invite is a different
   one, naming the pending invite file, so a request that may still be on its
   way is not orphaned (remove that file to abandon it; the identical invite is
@@ -912,8 +913,9 @@ paisans operator register --invite carol.invite --inviter-key wash.pub > carol.r
   directory, where `deployment list`'s saved deployments live, keyed by the
   deployment id: the pending invite and the inviter's key in
   `invites/<deployment-id>/`, and the bound age public key, with where it was
-  found, in `age/<deployment-id>.recipient`. A key kept in a file is reached through `SOPS_AGE_KEY_FILE`, so the
-  answer prints the `export` line for it, whether it made the file or read it.
+  found, in `age/<deployment-id>.recipient`. A key kept in a file is reached
+  through `SOPS_AGE_KEY_FILE`, so the answer prints the `export` line for it,
+  whether it made the file or read it.
 * **Hosts:** none.
 
 #### `paisans operator register`, joining
@@ -925,7 +927,7 @@ invite pending, `register` joins. Writing the files and signing take
 ```sh
 paisans operator register                # reads, and says what it would write
 paisans operator register --execute      # recovers, signs the attestation
-paisans operator register --id <deployment id> --execute   # one of several pending
+paisans operator register --id <id> --execute   # one of several pending
 ```
 
 * **Alone:** after the inviter has run `operator add --request` and
@@ -934,21 +936,23 @@ paisans operator register --id <deployment id> --execute   # one of several pend
   and, when a site refused the login, to check with them that the invite's
   hosts are the deployment's sites.
 * **Which invite:** the one pending, or the one `--id <deployment id>` names.
-  Several pending without `--id` are refused, listing their ids; with none
-  pending, `register` registers. `--id` is refused where the files are.
+  Several pending without `--id`, or an `--id` with none pending, are refused,
+  listing each pending invite with its directory; removing one's directory
+  abandons that invite. With none pending, or with `--key` or `--root` and no
+  `--id`, `register` registers. `--id` is refused where the files are.
 * **Flags:** `--config`, `--id`, `--execute`, `--yes`. `--key` and `--root`
   are refused: the invite names the key and the root.
 * **What it does:** recovers the deployment as `deployment recover --root <the
   invite's root> --from <each invite site>` would, trusting that root alone;
-  refuses, before any configuration file is written, sites that hold a fork,
-  and a newest version that does not list the invite's key under the invite's
+  refuses, before any configuration file is written, sites that hold a fork, and
+  a newest version that does not list the invite's key under the invite's
   username; writes the files and records the root and the signing key, after
   which the invite is no longer pending and its directory is removed, the age
   binding kept; and signs the attestation `register` signs. A fork's refusal
-  says that an operator who holds the files resolves it with `deployment
-  publish --merge`, and to run the join again once they have. A refusal after the gather says no
-  configuration file was written: the gather has filled the workstation's
-  store.
+  says that an operator who holds the files resolves it with `deployment publish
+  --merge`, and to run the join again once they have. A refusal after the gather
+  says no configuration file was written: the gather has filled the
+  workstation's store.
 * **Secrets:** says whether the recovered `secrets.enc.yaml` opens with their
   age key, as a failed check and not a refusal. Secrets encrypted to the bound
   age key were accepted, and what stops them opening is on this workstation:

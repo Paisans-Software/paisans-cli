@@ -60,8 +60,8 @@ the other's SSH public key.
    secrets readable to their age key.
 4. **Inviter:** `paisans deployment apply --execute`, as now.
 5. **New operator:** `paisans operator register --execute`, in an empty
-   directory, any one. It recovers the deployment from the invite's root and sites, then signs
-   the attestation `register` signs today.
+   directory, any one. It recovers the deployment from the invite's root and
+   sites, then signs the attestation `register` signs today.
 
 ## The invite
 
@@ -128,9 +128,11 @@ nothing there. It reaches no host.
    The first answer for a deployment binds the key it names to the
    deployment. Every later answer for it, from any directory, searches every
    one of the sources above for the bound key and uses the one that holds it,
-   even where an earlier source holds another key. When none holds it, the
-   answer is refused with no key made, naming the bound key and the binding
-   file; removing that file is how an operator starts over with another key.
+   even where an earlier source holds another key. A `SOPS_AGE_*` variable
+   holding the bound key among others is used, since sops decrypts with any
+   key the variables hold. When none holds it, the answer is refused with no
+   key made, naming the bound key and the binding file; removing that file is
+   how an operator starts over with another key.
 5. **Asks for the full name and email** at a terminal, with `create`'s
    checks, or takes `--name` and `--email`.
 6. **Writes the request** to stdout and records what the join needs in the
@@ -196,9 +198,12 @@ nothing and says so. A declared username with any other key is refused as
 
 Run in a directory with no deployment files, `register` takes the pending
 invite: the only one when one is pending, the one for `--id <deployment-id>`
-when given. Several pending without `--id` are refused, listing their ids.
-With none pending, `register` registers as it does without an invite. It
-then:
+when given. Several pending without `--id` are refused, and so is an `--id`
+with none pending; each refusal lists the pending invites with their
+directories, and says that removing one's directory abandons that invite. An
+invite is taken only from its own deployment's directory. With none pending,
+or with `--key` or `--root` and no `--id`, `register` registers as it does
+without an invite. It then:
 
 1. **Recovers** as `deployment recover --root <invite root> --from <each
    invite site>` would, with the invite's deployment id. Reaching the sites
@@ -213,14 +218,14 @@ then:
    step, saying that an operator who holds the files resolves it with
    `deployment publish --merge`, and that the join runs again once they have.
 4. **Signs the attestation** as `register` does today.
-5. **Says** whether the recovered secrets open with their age key, as a
-   failed check rather than a refusal, since the files are theirs either way.
-   Secrets encrypted to the bound age key that do not open were accepted, and
-   what stops them is on this workstation: the check names the key, where the
-   answer found it, and how sops is pointed at a key. Secrets not encrypted to
-   it mean the inviter's step 3 did not re-encrypt, and the remedy is for any operator to run `operator add
-   --request` with the same request again, then `deployment apply
-   --execute`, and for the new operator to `deployment pull`.
+5. **Says** whether the recovered secrets open with their age key, as a failed
+   check rather than a refusal, since the files are theirs either way. Secrets
+   encrypted to the bound age key that do not open were accepted, and what stops
+   them is on this workstation: the check names the key, where the answer found
+   it, and how sops is pointed at a key. Secrets not encrypted to it mean the
+   inviter's step 3 did not re-encrypt, and the remedy is for any operator to
+   run `operator add --request` with the same request again, then `deployment
+   apply --execute`, and for the new operator to `deployment pull`.
 
 `--execute` governs steps 3 and 4 as it governs recovery and registration now.
 Without it, the run reads and says what it would write.
