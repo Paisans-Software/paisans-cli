@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/diagnosis"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -255,3 +256,19 @@ func AuthProblem(t SSHTransport, err error, out string) error { return t.authPro
 
 // RestartTiers exposes the order a whole stack restart takes its services in.
 func RestartTiers(compose string) ([][]string, error) { return restartTiers(compose) }
+
+// MbinAllowlist exposes what the digest's reader is granted.
+var MbinAllowlist = mbinAllowlist
+
+// GrantSQL exposes the grant script, so its shape can be asserted without a
+// database.
+func GrantSQL(r Reader) string { return grantSQL(r) }
+
+// SourceReaders plans the reader for one engagement app named app, against a
+// source whose database is source, as the bootstrap does, so a check on the
+// reader's name can be reached without the app's own role refusing first.
+func SourceReaders(cfg *config.Config, secrets *config.Secrets, app, source string) ([]Reader, error) {
+	cfg.Apps[app] = cfg.Apps["digest"]
+	secrets.Apps[app] = secrets.Apps["digest"]
+	return sourceReaders(cfg, secrets, []Database{{App: source, Role: source, Name: source}})
+}

@@ -691,6 +691,11 @@ func TestMeshSubnetComesFromTheConfiguration(t *testing.T) {
 	}
 }
 
+// hostTimeZoneMount is the engagement blueprint's read only mount of the
+// host's time zone, so the digest's 08:00 is the host's. It is the host's own
+// file and none of the stack's data, so a move has nothing of it to carry.
+const hostTimeZoneMount = "/etc/localtime:/etc/localtime:ro"
+
 // No named volumes anywhere: a stack under /srv relocates with one tar.
 func TestNoNamedVolumes(t *testing.T) {
 	for _, f := range build(t).Files {
@@ -715,7 +720,7 @@ func TestNoNamedVolumes(t *testing.T) {
 				continue
 			}
 			mount := strings.TrimPrefix(trimmed, "- ")
-			if !strings.HasPrefix(mount, "/srv/paisans/f2a9/") && !strings.HasPrefix(mount, "/dev/") {
+			if !strings.HasPrefix(mount, "/srv/paisans/f2a9/") && !strings.HasPrefix(mount, "/dev/") && mount != hostTimeZoneMount {
 				t.Errorf("%s mounts something that is not a bind mount under /srv: %s", f.Path, mount)
 			}
 		}

@@ -24,6 +24,8 @@ func localStorageFixture(t *testing.T) *config.Config {
 	t.Helper()
 	cfg := fixture(t)
 	pins := map[string]string{"talk": "home-a", "blog": "home-a"}
+	// The digest reads only a clustered Mbin, and this fixture pins it.
+	delete(cfg.Apps, "digest")
 	for _, name := range localStorageApps {
 		app := cfg.Apps[name]
 		app.Placement = config.Placement{Mode: config.PlacementPinned, Site: pins[name], Literal: "pinned"}

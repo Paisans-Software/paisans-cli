@@ -12,6 +12,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Added
 
+- A reserved `engagement` blueprint runs the weekly digest email: it reads a clustered Mbin through a read only `<app>_reader` role, and `validate` and `secrets rotate` cover it.
 - `operator add` declares an operator in `paisans-stack.yaml` and names them in the chosen sites' `ssh.keys`, asking at a terminal and taking `--name`, `--email`, `--key` and `--site` or `--all-sites` without one.
 - `--site` of `doctor` and `operator add`, `--only` and `--recreate` of `deployment apply`, `--replaced` of `secrets rotate` and `--name` of `dns prune` take several values separated by commas.
 - `deployment apply` shows, before its review, how the configuration differs from the sites' newest version: `paisans-stack.yaml` as a diff, the secrets by key name only.

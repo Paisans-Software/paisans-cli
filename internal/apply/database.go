@@ -31,6 +31,10 @@ type Bootstrap struct {
 	// Patroni is this site's Patroni REST API, host:port, on the mesh.
 	Patroni   string
 	Databases []Database
+	// Readers are the engagement apps' read only roles on their source's
+	// database. They are created with the app roles; their grants run after
+	// the app stacks. See runSourceGrants.
+	Readers []Reader
 	// ClusterSites is cluster.sites. A leader is one of these or it is not a
 	// member this deployment declared.
 	ClusterSites []string
@@ -95,22 +99,91 @@ func Databases(cfg *config.Config, secrets *config.Secrets, site string) (*Boots
 		}
 		out.Databases = append(out.Databases, Database{App: name, Role: id, Name: id, password: password})
 	}
-	if len(out.Databases) == 0 {
+	readers, err := sourceReaders(cfg, secrets, out.Databases)
+	if err != nil {
+		return nil, err
+	}
+	out.Readers = readers
+	if len(out.Databases) == 0 && len(out.Readers) == 0 {
 		return nil, nil
 	}
 	return out, nil
 }
 
-// WithDatabases attaches the bootstrap to a plan that acts on any stack. An
-// apply with nothing to act on stays one that runs nothing, which is what
-// makes re-running apply a habit rather than a risk. A rotated password
-// changes the app's rendered environment, so it always arrives with an action.
-func (p *Plan) WithDatabases(b *Bootstrap) {
-	if b == nil || len(p.Actions) == 0 {
-		return
+// sourceReaders is a read only role for each engagement app whose source,
+// the deployment's one Mbin app, is clustered: the role is created in the
+// cluster's Postgres, which holds no pinned app's database. validate refuses
+// any other source; a configuration that reached here without it plans no
+// reader rather than one for a database the cluster does not hold.
+func sourceReaders(cfg *config.Config, secrets *config.Secrets, databases []Database) ([]Reader, error) {
+	source, ok := cfg.EngagementSource()
+	if !ok {
+		return nil, nil
 	}
-	p.Bootstrap = b
+	var database string
+	for _, db := range databases {
+		if db.App == source {
+			database = db.Name
+		}
+	}
+	if database == "" {
+		return nil, nil
+	}
+	var out []Reader
+	for _, name := range cfg.EngagementApps() {
+		role := render.ReaderRole(name)
+		if !identifier.MatchString(role) || len(role) > 63 {
+			return nil, fmt.Errorf("apps.%s: its read only role on %s would be named %q, and a role is created only from lowercase letters, digits and underscores, starting with a letter, at most 63 characters. Rename the app", name, source, role)
+		}
+		if reservedRoles[role] || strings.HasPrefix(role, "pg_") {
+			return nil, fmt.Errorf("apps.%s: its read only role on %s would be %q, which is a role the cluster itself uses or reserves. Setting the reader's password on it would hand the digest that role. Rename the app", name, source, role)
+		}
+		// Every app role is named for its app, so an app named like the
+		// reader would have the reader's password and its read only default
+		// set on its own role.
+		for _, db := range databases {
+			if db.Role == role {
+				return nil, fmt.Errorf("apps.%s: its read only role on %s would be %q, which is apps.%s's own role. Rename one of the apps", name, source, role, db.App)
+			}
+		}
+		password, _ := secrets.Apps[name]["source_database_password"].(string)
+		if password == "" {
+			return nil, fmt.Errorf("secrets apps.%s.source_database_password: required to create the app's read only role on %s. Run `%s init` to generate it", name, source, progname.Cmd())
+		}
+		if strings.ContainsRune(password, 0) {
+			return nil, fmt.Errorf("secrets apps.%s.source_database_password: contains a NUL byte, which Postgres cannot store", name)
+		}
+		out = append(out, Reader{App: name, Source: source, Role: role, Database: database, password: password})
+	}
+	return out, nil
 }
+
+// WithDatabases attaches the bootstrap to a plan that acts on any stack. An
+// apply with nothing to act on stays one that creates nothing and starts
+// nothing, which is what makes re-running apply a habit rather than a risk.
+// A rotated password changes the app's rendered environment, so it always
+// arrives with an action.
+//
+// A plan with no action still takes the bootstrap, for its leader check and
+// grants alone, when the deployment has a reader or this site owes a grant.
+// Mbin's tables appear, and a Mbin upgrade changes them, without any file of
+// the leader's site changing when that site holds no apps, so a grant that
+// ran only with an action would neither run after Mbin's first start nor
+// meet a schema that no longer matches the allowlist.
+func (p *Plan) WithDatabases(b *Bootstrap) {
+	switch {
+	case b == nil:
+	case len(p.Actions) > 0:
+		p.Bootstrap = b
+	case len(b.Readers) > 0 || len(p.owedGrants) > 0:
+		p.Bootstrap = b
+		p.grantsOnly = true
+	}
+}
+
+// GrantsOnly is whether the plan's bootstrap is a quiet apply's leader check
+// and grants, with nothing to create. See WithDatabases.
+func (p *Plan) GrantsOnly() bool { return p.grantsOnly }
 
 // How long to wait for a primary, and how often to ask. The first start of a
 // fresh Spilo runs initdb before Patroni takes the leader key, which on a
@@ -151,7 +224,10 @@ func (e errReplica) Error() string { return "replica of " + e.leader }
 // docs/rest_api.rst, "GET /cluster"). curl runs inside the Spilo container,
 // which installs it (zalando/spilo, postgres-appliance/build_scripts/
 // prepare.sh), so the host needs nothing beyond Docker.
-func waitForPrimary(plan *Plan, t Transport) error {
+//
+// stopped is what the apply did not do because of a failure here, which
+// differs between the bootstrap and a quiet apply's leader check.
+func waitForPrimary(plan *Plan, t Transport, stopped string) error {
 	command := fmt.Sprintf("%s curl -s --max-time 5 http://%s/cluster", patroniCompose(plan.Deployment), plan.Bootstrap.Patroni)
 	infra := plan.Deployment.ComposeCmd(infraStack)
 	attempts := int(primaryWait / primaryPoll)
@@ -170,8 +246,8 @@ func waitForPrimary(plan *Plan, t Transport) error {
 				return errReplica{leader: leader}
 			case leader != "":
 				return fmt.Errorf(
-					"%s: Patroni's leader is %q, which is not one of cluster.sites (%s), so no app database was created and no app stack was started. Each Patroni member's name must equal its site's name; read PATRONI_NAME in %s and `%s logs patroni` on the leader's host",
-					plan.Site, leader, strings.Join(plan.Bootstrap.ClusterSites, ", "), plan.Deployment.Path(infraStack, "patroni.env"), infra)
+					"%s: Patroni's leader is %q, which is not one of cluster.sites (%s), so %s. Each Patroni member's name must equal its site's name; read PATRONI_NAME in %s and `%s logs patroni` on the leader's host, then apply again",
+					plan.Site, leader, strings.Join(plan.Bootstrap.ClusterSites, ", "), stopped, plan.Deployment.Path(infraStack, "patroni.env"), infra)
 			}
 			last = strings.TrimSpace(out)
 		} else {
@@ -182,8 +258,8 @@ func waitForPrimary(plan *Plan, t Transport) error {
 		}
 	}
 	return fmt.Errorf(
-		"%s: no Patroni primary after %s, so no app database was created and no app stack was started. Last answer from %s:\n%s\nRead `%s logs patroni` on the host; \"waiting on etcd\" on a new deployment means a member of etcd.members has not been applied yet. Then apply again: it resumes here",
-		plan.Site, primaryWait, plan.Bootstrap.Patroni, last, infra)
+		"%s: no Patroni primary after %s, so %s. Last answer from %s:\n%s\nRead `%s logs patroni` on the host; \"waiting on etcd\" on a new deployment means a member of etcd.members has not been applied yet. Then apply again: it resumes here",
+		plan.Site, primaryWait, stopped, plan.Bootstrap.Patroni, last, infra)
 }
 
 func contains(list []string, s string) bool {
@@ -243,6 +319,14 @@ const NoStatementLog = "SET log_statement = 'none';\n" +
 //   - its password is set every time, so rotating apps.<name>.database_password
 //     and applying is the whole rotation
 //   - the database is created only when missing, owned by the role
+//   - an engagement app's reader is created and its password set the same
+//     way, with no database of its own. It is granted nothing here: its
+//     source's tables do not exist before that app's first start. What
+//     keeps it from writing is that runSourceGrants grants it SELECT on
+//     columns and nothing else, and that PostgreSQL 15 and later withhold
+//     CREATE on schema public from PUBLIC (the catalog ships 16 to 18).
+//     Its default_transaction_read_only is defence in depth only: any role
+//     may SET it off or BEGIN READ WRITE.
 //
 // CREATE DATABASE cannot run inside a transaction block, and so not inside a
 // DO block either; `\gexec` runs a generated statement as its own top level
@@ -260,6 +344,13 @@ func bootstrapSQL(b *Bootstrap) string {
 		fmt.Fprintf(&sql, "ALTER ROLE %s WITH LOGIN PASSWORD %s;\n", role, QuoteLiteral(db.password))
 		fmt.Fprintf(&sql, "SELECT 'CREATE DATABASE %s OWNER %s' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = %s)\\gexec\n",
 			QuoteIdent(db.Name), role, QuoteLiteral(db.Name))
+	}
+	for _, r := range b.Readers {
+		role := QuoteIdent(r.Role)
+		fmt.Fprintf(&sql, "-- %s, reading %s\n", r.App, r.Database)
+		fmt.Fprintf(&sql, "SELECT 'CREATE ROLE %s LOGIN' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %s)\\gexec\n", role, QuoteLiteral(r.Role))
+		fmt.Fprintf(&sql, "ALTER ROLE %s WITH LOGIN PASSWORD %s;\n", role, QuoteLiteral(r.password))
+		fmt.Fprintf(&sql, "ALTER ROLE %s SET default_transaction_read_only = on;\n", role)
 	}
 	return sql.String()
 }
@@ -326,7 +417,7 @@ func runBootstrap(plan *Plan, t Transport) error {
 		}
 	}
 	done := plan.step("wait for Patroni primary")
-	err := waitForPrimary(plan, t)
+	err := waitForPrimary(plan, t, "no app database was created and no app stack was started")
 	if _, replica := err.(errReplica); replica {
 		done.Done("")
 	} else {
@@ -334,14 +425,16 @@ func runBootstrap(plan *Plan, t Transport) error {
 	}
 	if err != nil {
 		if replica, ok := err.(errReplica); ok {
+			plan.leader = replica.leader
 			plan.leaderMoved(replica.leader)
 			return replicaDatabases(plan, t, replica.leader)
 		}
 		return err
 	}
+	plan.primary = true
 	// Nothing to create means no step to report: a title naming no database
 	// would only be noise.
-	if len(plan.Bootstrap.Databases) == 0 {
+	if len(plan.Bootstrap.Databases) == 0 && len(plan.Bootstrap.Readers) == 0 {
 		return nil
 	}
 	// The title stays short however many databases there are, since the
@@ -354,6 +447,9 @@ func runBootstrap(plan *Plan, t Transport) error {
 	for _, db := range plan.Bootstrap.Databases {
 		done.Detail("role %s owns database %s, for %s", db.Role, db.Name, db.App)
 	}
+	for _, r := range plan.Bootstrap.Readers {
+		done.Detail("role %s reads database %s, for %s", r.Role, r.Database, r.App)
+	}
 	out, err := t.RunInput(Psql(plan.Deployment), bootstrapSQL(plan.Bootstrap))
 	finish(done, err)
 	if err != nil {
@@ -363,10 +459,17 @@ func runBootstrap(plan *Plan, t Transport) error {
 			out = strings.ReplaceAll(out, QuoteLiteral(db.password), "'[redacted]'")
 			out = strings.ReplaceAll(out, db.password, "[redacted]")
 		}
+		for _, r := range plan.Bootstrap.Readers {
+			out = strings.ReplaceAll(out, QuoteLiteral(r.password), "'[redacted]'")
+			out = strings.ReplaceAll(out, r.password, "[redacted]")
+		}
 		return fmt.Errorf("%s: creating app roles and databases failed, so no app stack was started:\n%s", plan.Site, out)
 	}
 	for _, db := range plan.Bootstrap.Databases {
 		plan.say("ensured role and database %s for %s", db.Name, db.App)
+	}
+	for _, r := range plan.Bootstrap.Readers {
+		plan.say("ensured read only role %s for %s", r.Role, r.App)
 	}
 	return nil
 }
@@ -380,7 +483,7 @@ func runBootstrap(plan *Plan, t Transport) error {
 // polled like the wait for a primary.
 func replicaDatabases(plan *Plan, t Transport, leader string) error {
 	plan.say("Patroni here is a replica, and %s holds the leader and creates app roles and databases", leader)
-	if len(plan.Bootstrap.Databases) == 0 {
+	if len(plan.Bootstrap.Databases) == 0 && len(plan.Bootstrap.Readers) == 0 {
 		return nil
 	}
 	done := plan.step("check replica databases")
@@ -409,21 +512,41 @@ func replicaDatabases(plan *Plan, t Transport, leader string) error {
 	for _, line := range strings.Split(out, "\n") {
 		present[strings.TrimSpace(line)] = true
 	}
-	var missing []string
+	var databases, roles []string
 	for _, db := range plan.Bootstrap.Databases {
 		if present[db.Name] {
 			done.Detail("database %s and role %s exist, for %s", db.Name, db.Role, db.App)
 		} else {
-			missing = append(missing, db.Name)
+			databases = append(databases, db.Name)
 		}
 	}
+	for _, r := range plan.Bootstrap.Readers {
+		if present[r.Role] {
+			done.Detail("role %s exists, for %s", r.Role, r.App)
+		} else {
+			roles = append(roles, r.Role)
+		}
+	}
+	missing := append(append([]string(nil), databases...), roles...)
 	if len(missing) == 0 {
 		done.Done("")
 		return nil
 	}
 	done.Done("missing " + strings.Join(missing, ", "))
+	// A reader is a role with no database of its own, so it is named as one.
+	var want []string
+	if len(databases) > 0 {
+		want = append(want, "databases "+strings.Join(databases, ", "))
+	}
+	switch len(roles) {
+	case 0:
+	case 1:
+		want = append(want, "role "+roles[0])
+	default:
+		want = append(want, "roles "+strings.Join(roles, ", "))
+	}
 	return &ui.Problem{
-		Hint: fmt.Sprintf("%s is waiting on %s to create databases %s", plan.Site, leader, strings.Join(missing, ", ")),
+		Hint: fmt.Sprintf("%s is waiting on %s to create %s", plan.Site, leader, strings.Join(want, " and ")),
 		Explain: fmt.Sprintf(
 			"The infrastructure stack is up. Patroni here is a replica, and the primary, on %s, creates the app roles and databases, so no app stack was started. Apply %s, then apply this site again: it resumes here.",
 			leader, leader),
@@ -432,14 +555,28 @@ func replicaDatabases(plan *Plan, t Transport, leader string) error {
 }
 
 // replicaSQL lists, one per line, each app database that exists and whose
-// role does too. It names databases and roles and nothing else: no password
-// is read or sent.
+// role does too, then each reader role that exists. A reader never shares a
+// name with an app role (sourceReaders refuses it), and an app's database is
+// named as its role, so the two lists cannot be mistaken for each other. It
+// names databases and roles and nothing else: no password is read or sent.
 func replicaSQL(b *Bootstrap) string {
-	var want []string
-	for _, db := range b.Databases {
-		want = append(want, fmt.Sprintf("(%s, %s)", QuoteLiteral(db.Role), QuoteLiteral(db.Name)))
+	var sql strings.Builder
+	if len(b.Databases) > 0 {
+		var want []string
+		for _, db := range b.Databases {
+			want = append(want, fmt.Sprintf("(%s, %s)", QuoteLiteral(db.Role), QuoteLiteral(db.Name)))
+		}
+		sql.WriteString("SELECT want.name FROM (VALUES " + strings.Join(want, ", ") + ") AS want(role, name)" +
+			" WHERE EXISTS (SELECT FROM pg_database WHERE datname = want.name)" +
+			" AND EXISTS (SELECT FROM pg_roles WHERE rolname = want.role);\n")
 	}
-	return "SELECT want.name FROM (VALUES " + strings.Join(want, ", ") + ") AS want(role, name)" +
-		" WHERE EXISTS (SELECT FROM pg_database WHERE datname = want.name)" +
-		" AND EXISTS (SELECT FROM pg_roles WHERE rolname = want.role);\n"
+	if len(b.Readers) > 0 {
+		var want []string
+		for _, r := range b.Readers {
+			want = append(want, fmt.Sprintf("(%s)", QuoteLiteral(r.Role)))
+		}
+		sql.WriteString("SELECT want.role FROM (VALUES " + strings.Join(want, ", ") + ") AS want(role)" +
+			" WHERE EXISTS (SELECT FROM pg_roles WHERE rolname = want.role);\n")
+	}
+	return sql.String()
 }

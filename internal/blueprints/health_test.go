@@ -36,7 +36,7 @@ func TestPocketIDAnswersNoContent(t *testing.T) {
 
 func TestOnlyTheseBlueprintsSendMail(t *testing.T) {
 	for _, blueprint := range blueprints.Builtin() {
-		if got, want := blueprints.SendsMail(blueprint), blueprint == config.BlueprintUptime || blueprint == config.BlueprintPocketID || blueprint == config.Blueprint("mbin") || blueprint == config.BlueprintAccount; got != want {
+		if got, want := blueprints.SendsMail(blueprint), blueprint == config.BlueprintUptime || blueprint == config.BlueprintPocketID || blueprint == config.Blueprint("mbin") || blueprint == config.BlueprintAccount || blueprint == config.BlueprintEngagement; got != want {
 			t.Errorf("%s: SendsMail = %v", blueprint, got)
 		}
 	}

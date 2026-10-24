@@ -616,9 +616,9 @@ func TestSMTPPasswordIsOwedOnlyWhenNothingCoversIt(t *testing.T) {
 	if _, ok := owedBy(t, withUptime(t, smtp), &config.Secrets{External: map[string]string{"smtp_password": "x"}})["external.smtp_password"]; ok {
 		t.Error("owed although external.smtp_password is set")
 	}
-	// The fixture's Pocket ID, auth, its Mbin, talk, and its account app send
-	// mail too, so all four need their own.
-	perApp := &config.Secrets{Apps: map[string]map[string]any{"health": {"smtp_password": "x"}, "auth": {"smtp_password": "x"}, "talk": {"smtp_password": "x"}, "account": {"smtp_password": "x"}}}
+	// The fixture's Pocket ID, auth, its Mbin, talk, its account app and its
+	// digest send mail too, so all five need their own.
+	perApp := &config.Secrets{Apps: map[string]map[string]any{"health": {"smtp_password": "x"}, "auth": {"smtp_password": "x"}, "talk": {"smtp_password": "x"}, "account": {"smtp_password": "x"}, "digest": {"smtp_password": "x"}}}
 	if _, ok := owedBy(t, withUptime(t, smtp), perApp)["external.smtp_password"]; ok {
 		t.Error("owed although every app that sends mail has its own smtp_password")
 	}
