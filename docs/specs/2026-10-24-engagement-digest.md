@@ -55,8 +55,8 @@ Three pieces, each in its own repository:
 * **No reading history.** The service never records which threads a member
   viewed. It does not read access logs and it does not ask Mbin to track
   views. "Already seen" is inferred from what the member did, below.
-* **No content from other servers** (*provisional*). The digest covers the
-  deployment's own magazines. Threads that federated in are left out.
+* **No content from other servers.** The digest covers the deployment's
+  own magazines. Threads that federated in are left out.
 
 ## Anti goals
 
@@ -191,7 +191,7 @@ Whatever the score, a member never sees:
 * anything from a magazine or a user they blocked;
 * anything from a magazine they are banned from;
 * anything deleted, removed by a moderator, or marked NSFW;
-* anything from another server (*provisional*, see *Non goals*).
+* anything from another server (see *Non goals*).
 
 ### Who receives one
 
@@ -295,7 +295,6 @@ link, so a second source adds one module and one read only grant.
 ## Open
 
 * The day of the week (Monday is provisional).
-* Whether threads that federated in from other servers belong in the digest.
 * Whether the redirect link's purpose is as described above.
 * Reading a pinned source app, which needs a network path to its compose
   project and a role created inside its own Postgres.
