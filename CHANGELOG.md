@@ -17,6 +17,11 @@ changes share a bullet. Detailed notes are on the corresponding
 - `operator register` in a directory without files joins the invite an answer left pending in the workstation's data directory, or the one `--id` names, recovering the deployment from the invite's root and signing the operator's attestation; every answer for a deployment names the age key its first answer bound.
 - `operator age-key` makes or shows the operator's age key for a deployment.
 - `--site` of `doctor` and `operator add`, `--only` and `--recreate` of `deployment apply`, `--replaced` of `secrets rotate` and `--name` of `dns prune` take several values separated by commas.
+- `deployment apply` shows, before its review, how the configuration differs from the sites' newest version: `paisans-stack.yaml` as a diff, the secrets by key name only.
+
+### Fixed
+
+- The visibility gate keeps sessions in a Valkey beside it, so a refreshed session survives the gateway's `forward_auth` instead of signing members out an hour after sign in, mid-form.
 
 ### Removed
 
