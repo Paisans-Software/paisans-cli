@@ -1,16 +1,20 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/create"
+	"github.com/paisans-software/paisans-cli/internal/operatorinvite"
 	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/validate"
@@ -35,9 +39,31 @@ func runOperatorAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs.Var(&keys, "key", "a public key file (.pub), or one key line itself (repeatable)")
 	fs.Var(&sites, "site", "a site the operator may log in to (repeatable, or comma-separated)")
 	allSites := fs.Bool("all-sites", false, "let the operator log in to every site")
+	request := fs.String("request", "", "accept this signed request, which answers an invite and gives the username, name, email and keys")
 	pos, err := parseAll(fs, args)
 	if err != nil {
 		return err
+	}
+	if *request != "" {
+		var given []string
+		if len(pos) > 0 {
+			given = append(given, "the username")
+		}
+		for _, f := range []struct {
+			name string
+			set  bool
+		}{{"--name", *name != ""}, {"--email", *email != ""}, {"--key", len(keys) > 0}} {
+			if f.set {
+				given = append(given, f.name)
+			}
+		}
+		if len(given) > 0 {
+			return &ui.Problem{Hint: strings.Join(given, ", ") + " cannot be given beside --request", Explain: "The request gives the username, name, email and key. Nothing was written."}
+		}
+		if *allSites && len(sites) > 0 {
+			return &ui.Problem{Hint: "--all-sites and --site both name the sites", Explain: "Give one of them."}
+		}
+		return runOperatorAddRequest(reporter(), *configPath, *request, sites, *allSites, stdin, stdout)
 	}
 	if len(pos) > 1 {
 		return &ui.Problem{Hint: "operator add takes one username", Explain: "Got " + strings.Join(pos, " ") + "."}
@@ -208,3 +234,354 @@ func newFindings(before, after validate.Result) validate.Result {
 }
 
 func siteSummary(sites []string) string { return "on " + strings.Join(sites, ", ") }
+
+// What follows is `paisans operator add --request`
+// (docs/specs/2026-10-24-operator-invite.md, *operator add --request*): any
+// operator accepts a new operator's signed request, which answers an invite
+// an operator of this deployment signed. It declares them as operator add
+// does, adds their age key to .sops.yaml and re-encrypts the secrets to the
+// new set. Every check is made and all three files are computed before the
+// first is written, and a write that fails puts back the files written
+// before it.
+
+// writeDeclaration writes paisans-stack.yaml. Tests replace it.
+var writeDeclaration = config.WriteDeclaration
+
+func runOperatorAddRequest(r ui.Reporter, configPath, requestPath string, sites []string, allSites bool, stdin io.Reader, stdout io.Writer) error {
+	signed, err := readRequestFile(requestPath)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return err
+	}
+	l, err := workstationOf(configPath)
+	if err != nil {
+		return err
+	}
+	r.Section("operator add --request")
+
+	step := r.Step("check request")
+	q, _, err := operatorinvite.ParseRequest(signed)
+	if err != nil {
+		step.Fail(err)
+		return &ui.Problem{Hint: "the request cannot be accepted", Explain: "Nothing was written. Ask for the request again, as an attachment.", Cause: err}
+	}
+	// ParseRequest checked the invite for shape alone. InviteSigner checks
+	// its signature, and the key that made it must be an operator's here:
+	// an invite anyone could sign would let anyone in.
+	inv, signer, err := operatorinvite.InviteSigner([]byte(q.Invite))
+	if err != nil {
+		step.Fail(err)
+		return &ui.Problem{Hint: "the invite inside the request cannot be accepted", Explain: "Nothing was written.", Cause: err}
+	}
+	inviter, ok := operatorListing(cfg, signer)
+	if !ok {
+		err := &ui.Problem{Hint: "no operator of this deployment signed the invite", Explain: fmt.Sprintf("The invite inside the request is signed by %s, and %s lists that key under no operator. Only an invite an operator here wrote can be accepted. Nothing was written.", keyFingerprint(signer), config.FileName)}
+		step.Fail(err)
+		return err
+	}
+	if inv.Deployment != cfg.ID {
+		err := &ui.Problem{Hint: "the invite is for another deployment", Explain: fmt.Sprintf("It names the deployment %s, and %s is %s. Accept it beside that deployment's files. Nothing was written.", inv.Deployment, ui.ShortPath(configPath), cfg.ID)}
+		step.Fail(err)
+		return err
+	}
+	root, err := trustedRoot(l)
+	if err != nil {
+		step.Fail(err)
+		return err
+	}
+	if inv.Root != root {
+		err := &ui.Problem{Hint: "the invite names another root", Explain: fmt.Sprintf("It names the root %s, and the history this workstation trusts starts at %s. The new operator would recover a history this deployment does not have. Nothing was written.", inv.Root, root)}
+		step.Fail(err)
+		return err
+	}
+	step.Done("for " + inv.Username + ", invited by " + inviter)
+
+	key := keyFingerprint(inv.Key)
+	fmt.Fprintf(stdout, "\nAccepting %s as an operator of %s:\n", inv.Username, cfg.Community.Domain)
+	fmt.Fprintf(stdout, "  username    %s\n", inv.Username)
+	fmt.Fprintf(stdout, "  name        %s\n", q.Name)
+	fmt.Fprintf(stdout, "  email       %s\n", q.Email)
+	fmt.Fprintf(stdout, "  ssh key     %s\n", key)
+	fmt.Fprintf(stdout, "  age key     %s\n", q.Age)
+	fmt.Fprintf(stdout, "  invited by  %s, %s\n", inviter, keyFingerprint(signer))
+
+	declared := create.Declared{Operators: cfg.Operators, Sites: cfg.SiteNames()}
+	existing, already := cfg.Operators[inv.Username]
+	if already && !sameKeys(existing.KeyLines(), inv.Key) {
+		return &ui.Problem{Hint: inv.Username + " is declared with another key", Explain: fmt.Sprintf("%s lists %s with keys other than %s, the key the invite names. A username belongs to one operator: invite them under another, or remove the entry first. Nothing was written.", config.FileName, inv.Username, key)}
+	}
+	op := create.NewOperator{ID: inv.Username, Name: q.Name, Email: q.Email, Keys: []string{inv.Key}, Sites: sites}
+	if allSites {
+		op.Sites = slices.Clone(declared.Sites)
+	}
+	if !already {
+		// Everything but the sites comes from the request, so a refusal of
+		// it is the request's and is not asked again.
+		probe := op
+		if len(probe.Sites) == 0 {
+			probe.Sites = declared.Sites[:min(1, len(declared.Sites))]
+		}
+		if err := create.CheckNewOperator(probe, declared); err != nil {
+			return requestProblem(err)
+		}
+	}
+
+	// What .sops.yaml and the secrets need: the age key named, and the
+	// secrets encrypted to it.
+	dir := filepath.Dir(configPath)
+	sopsPath, secretsPath := filepath.Join(dir, config.SOPSConfigName), filepath.Join(dir, "secrets.enc.yaml")
+	oldSOPS, err := os.ReadFile(sopsPath)
+	if err != nil {
+		return &ui.Problem{Hint: "there is no " + config.SOPSConfigName + " to add the age key to", Explain: errLine(err) + ". Nothing was written.", Cause: err}
+	}
+	newSOPS, err := config.AddSOPSRecipient(dir, q.Age)
+	if err != nil {
+		return &ui.Problem{Hint: config.SOPSConfigName + " cannot be given the age key", Explain: err.Error() + ". Nothing was written."}
+	}
+	oldSecrets, err := os.ReadFile(secretsPath)
+	if err != nil {
+		return &ui.Problem{Hint: "the secrets file cannot be read", Explain: errLine(err) + ". Nothing was written.", Cause: err}
+	}
+	reencrypt := !slices.Contains(config.FileRecipients(oldSecrets), q.Age)
+	var secrets *config.Secrets
+	if reencrypt {
+		step := r.Step("open the secrets")
+		if secrets, err = config.LoadDeploymentSecrets(secretsPath, cfg.ID); err != nil {
+			step.Fail(err)
+			return &ui.Problem{Hint: "this workstation cannot open the secrets", Explain: "Re-encrypting " + ui.ShortPath(secretsPath) + " to " + inv.Username + "'s age key takes opening it with yours. Nothing was written.", Cause: err}
+		}
+		step.Done("with your age key")
+	}
+
+	if already && !reencrypt && bytes.Equal(newSOPS, oldSOPS) {
+		r.Result("%s is declared with this key, %s names their age key and the secrets are encrypted to it: nothing to change.", inv.Username, config.SOPSConfigName)
+		operatorAddRequestNext(stdout, inv.Username)
+		return nil
+	}
+
+	var newDecl []byte
+	if !already {
+		if stdinIsTerminal(stdin) {
+			p := create.NewPrompter(stdin, stdout)
+			if op, err = create.AskNewOperator(p, op, declared); err != nil {
+				if errors.Is(err, create.ErrAborted) {
+					return &ui.Problem{Hint: "input ended before every question was answered", Explain: "Nothing was written."}
+				}
+				return flagProblem(err)
+			}
+		} else {
+			if len(op.Sites) == 0 {
+				return &ui.Problem{Hint: "operator add --request is missing --site or --all-sites", Explain: "stdin is not a terminal, so nothing is asked. Give the sites " + inv.Username + " may log in to, Eg: " + progname.Cmd() + " operator add --request " + requestPath + " --all-sites, or run it at a terminal. Nothing was written."}
+			}
+			if err := create.CheckNewOperator(op, declared); err != nil {
+				return flagProblem(err)
+			}
+		}
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			return err
+		}
+		entry := config.Operator{Name: op.Name, Email: op.Email, Keys: strings.Join(op.Keys, "\n") + "\n"}
+		if newDecl, err = config.AddOperatorBytes(data, op.ID, entry, op.Sites); err != nil {
+			return &ui.Problem{Hint: "operator add cannot edit " + ui.ShortPath(configPath) + " in place", Explain: err.Error() + ". Add the operator by hand: see " + progname.Cmd() + " help operator add. Nothing was written."}
+		}
+		before, err := checkRendered(data)
+		if err != nil {
+			return err
+		}
+		after, err := checkRendered(newDecl)
+		if err != nil {
+			return err
+		}
+		added := newFindings(before, after)
+		if len(added.Findings) > 0 {
+			reportValidation(r, configPath, added)
+		}
+		if added.Refused() {
+			return &ui.Problem{Hint: "validate refuses the file with " + op.ID + " added", Explain: "Nothing was written."}
+		}
+	}
+
+	// The secrets, encrypted to every recipient the new .sops.yaml names,
+	// into a temporary file beside them, renamed over them once the rest is
+	// ready.
+	var staged string
+	if reencrypt {
+		if staged, err = stageSecrets(dir, newSOPS, secretsPath, secrets); err != nil {
+			return err
+		}
+		defer os.Remove(staged)
+	}
+
+	// The writes. A failure puts back what was written before it.
+	var undo []func() error
+	fail := func(s ui.Step, err error) error {
+		s.Fail(err)
+		for i := len(undo) - 1; i >= 0; i-- {
+			if uerr := undo[i](); uerr != nil {
+				return &ui.Problem{Hint: "a write failed and the files could not all be put back", Explain: fmt.Sprintf("%s, then putting back: %s. %s, %s and secrets.enc.yaml may not match: %s deployment pull puts back the deployment's newest version, then run this again.", errLine(err), errLine(uerr), config.FileName, config.SOPSConfigName, progname.Cmd()), Cause: err}
+			}
+		}
+		return &ui.Problem{Hint: "a write failed", Explain: errLine(err) + ". Every file is as it was before the command.", Cause: err}
+	}
+	if !bytes.Equal(newSOPS, oldSOPS) {
+		s := r.Step("add " + inv.Username + "'s age key to " + config.SOPSConfigName)
+		if err := replaceKeepingMode(sopsPath, newSOPS); err != nil {
+			return fail(s, err)
+		}
+		undo = append(undo, func() error { return replaceKeepingMode(sopsPath, oldSOPS) })
+		s.Done(q.Age)
+	}
+	if reencrypt {
+		s := r.Step("re-encrypt secrets.enc.yaml")
+		if err := os.Rename(staged, secretsPath); err != nil {
+			return fail(s, err)
+		}
+		undo = append(undo, func() error { return replaceKeepingMode(secretsPath, oldSecrets) })
+		s.Done("to " + inv.Username + " as well")
+	}
+	if newDecl != nil {
+		s := r.Step("declare " + op.ID + " in " + configPath)
+		if err := writeDeclaration(configPath, newDecl); err != nil {
+			return fail(s, err)
+		}
+		s.Done(siteSummary(op.Sites))
+		r.Result("%s is declared and can read the secrets. Nothing has reached a host yet.", op.ID)
+	} else {
+		r.Result("%s was declared already and can now read the secrets. Nothing has reached a host yet.", op.ID)
+	}
+	operatorAddRequestNext(stdout, inv.Username)
+	return nil
+}
+
+func operatorAddRequestNext(stdout io.Writer, id string) {
+	inv := progname.Cmd()
+	fmt.Fprintln(stdout, "\nNext:")
+	fmt.Fprintf(stdout, "  %s deployment apply --execute   # gives %s their sites, publishes the change, makes their Pocket ID account and prints their login link\n", inv, id)
+	fmt.Fprintf(stdout, "  # then %s, on their own workstation, in the directory where they answered the invite:\n", id)
+	fmt.Fprintf(stdout, "  %s operator register --execute\n", inv)
+}
+
+// readRequestFile is the request at path, read no further than the largest
+// request ParseRequest accepts, so a larger file is refused by it unread.
+func readRequestFile(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, &ui.Problem{Hint: "--request cannot be read", Explain: errLine(err) + ". Nothing was written.", Cause: err}
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, operatorinvite.MaxSize+1))
+	if err != nil {
+		return nil, &ui.Problem{Hint: "--request cannot be read", Explain: errLine(err) + ". Nothing was written.", Cause: err}
+	}
+	return data, nil
+}
+
+// operatorListing is the operator cfg lists the key line under.
+func operatorListing(cfg *config.Config, line string) (string, bool) {
+	k, _, err := config.ParseKeyLine(line)
+	if err != nil {
+		return "", false
+	}
+	for _, id := range slices.Sorted(maps.Keys(cfg.Operators)) {
+		for _, al := range cfg.Operators[id].KeyLines() {
+			if a, _, err := config.ParseKeyLine(al); err == nil && a.Fingerprint == k.Fingerprint {
+				return id, true
+			}
+		}
+	}
+	return "", false
+}
+
+// sameKeys is whether lines are the one key line, by fingerprint.
+func sameKeys(lines []string, line string) bool {
+	if len(lines) != 1 {
+		return false
+	}
+	return keyFingerprint(lines[0]) == keyFingerprint(line)
+}
+
+// keyFingerprint is a key line's SHA256 fingerprint, or the line itself
+// when it is not a key.
+func keyFingerprint(line string) string {
+	k, _, err := config.ParseKeyLine(line)
+	if err != nil {
+		return line
+	}
+	return k.Fingerprint
+}
+
+// requestProblem is a refusal of what the request gave, said as the
+// request's rather than a flag's.
+func requestProblem(err error) error {
+	var fe *create.FlagError
+	if !errors.As(err, &fe) {
+		return err
+	}
+	field := strings.TrimPrefix(strings.Fields(fe.Flag + " ")[0], "--")
+	if fe.Flag == "the username" {
+		field = "username"
+	}
+	return &ui.Problem{Hint: "the request's " + field + " is refused", Explain: fe.Err.Error() + ". Nothing was written."}
+}
+
+// stageSecrets writes s, encrypted to every recipient sops (the new
+// .sops.yaml) names, to a temporary file in dir beside secretsPath, and
+// returns its path.
+func stageSecrets(dir string, sops []byte, secretsPath string, s *config.Secrets) (string, error) {
+	scratch, err := os.MkdirTemp("", "paisans-request-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(scratch)
+	if err := os.WriteFile(filepath.Join(scratch, config.SOPSConfigName), sops, 0o600); err != nil {
+		return "", err
+	}
+	recipients, err := config.Recipients(scratch)
+	if err != nil {
+		return "", err
+	}
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(secretsPath)+".request-")
+	if err != nil {
+		return "", err
+	}
+	tmp.Close()
+	if _, err := config.WriteSecretsBytes(tmp.Name(), s, recipients); err != nil {
+		os.Remove(tmp.Name())
+		return "", &ui.Problem{Hint: "the secrets cannot be re-encrypted", Explain: errLine(err) + ". Nothing was written.", Cause: err}
+	}
+	return tmp.Name(), nil
+}
+
+// replaceKeepingMode writes data over the file at path through a temporary
+// file beside it, renamed over it, with the file's permissions.
+func replaceKeepingMode(path string, data []byte) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(info.Mode().Perm()); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
+}
