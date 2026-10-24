@@ -932,12 +932,22 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 		}
 		dests = append(dests, dest)
 	}
-	deploymentID, hosts, err := recoverID(r, dests, *id)
+	return recoverFiles(r, l, dests, a, *id, held, *execute, ans, stdin, stdout, nil)
+}
+
+// recoverFiles is a recovery onto l, a workstation without files, from
+// dests, trusting from a: it finds the deployment (id when given), gathers
+// from every site its newest versions name, and, with execute, writes the
+// head's files and records the root and, from held, the signing key. accept,
+// when set, runs on each head's configuration before anything is written,
+// and a refusal from it is returned as it is.
+func recoverFiles(r ui.Reporter, l configstore.Local, dests []config.Destination, a configstore.Anchor, id string, held map[string]string, execute bool, ans answerer, stdin io.Reader, stdout io.Writer, accept func(head *config.Config) error) error {
+	deploymentID, hosts, err := recoverID(r, dests, id)
 	if err != nil {
 		return err
 	}
 	noAnchor := noAnchorNamed("")
-	g, err := gatherAt(r, l, hosts, deploymentID, a, gatherMode{execute: *execute, answers: ans, noAnchor: noAnchor}, stdin, stdout)
+	g, err := gatherAt(r, l, hosts, deploymentID, a, gatherMode{execute: execute, answers: ans, noAnchor: noAnchor}, stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -952,12 +962,17 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 		return err
 	}
 	r.Section("every site the newest versions name")
-	g, err = gatherAt(r, l, sites, deploymentID, a, gatherMode{execute: *execute, accepted: g.Seen, answers: ans, noAnchor: noAnchor}, stdin, stdout)
+	g, err = gatherAt(r, l, sites, deploymentID, a, gatherMode{execute: execute, accepted: g.Seen, answers: ans, noAnchor: noAnchor}, stdin, stdout)
 	if err != nil {
 		return err
 	}
+	if accept != nil {
+		if err := acceptHeads(l, g, accept); err != nil {
+			return err
+		}
+	}
 	if g.Verdict.Fork {
-		if !*execute {
+		if !execute {
 			return forkProblem(g, "--execute will write each head's files to "+l.Incoming()+"/<sha>/.")
 		}
 		for _, h := range g.Verdict.Heads {
@@ -980,7 +995,7 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 	if a.Named && pin != "" {
 		r.Warn("confirm the root "+pin+" with another operator before applying", "--key trusted the history it leads to, and a key alone cannot tell this deployment's history from an older incarnation every site that answered serves. Compare it with their .paisans/config-root, or a root's line of their "+progname.Cmd()+" deployment log.")
 	}
-	if !*execute {
+	if !execute {
 		r.Step("write the files of "+describe(g, head)).End(ui.Pending, "--execute will write them")
 		return nil
 	}
@@ -995,6 +1010,29 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 		saveVersion(r, l, head, g.Versions[head].Revision, files, key, "recovered into "+l.Dir)
 	}
 	r.Result("recovered %s into %s", describe(g, head), l.Dir)
+	return nil
+}
+
+// acceptHeads runs accept on the configuration of each of g's heads, from
+// the workstation's store.
+func acceptHeads(l configstore.Local, g configstore.Gathered, accept func(head *config.Config) error) error {
+	cache, err := l.Cache()
+	if err != nil {
+		return err
+	}
+	for _, h := range g.Verdict.Heads {
+		f, err := cache.Files(h)
+		if err != nil {
+			return err
+		}
+		cfg, err := config.LoadBytes(f.Paisans)
+		if err != nil {
+			return fmt.Errorf("version %s: %w", h, err)
+		}
+		if err := accept(cfg); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
