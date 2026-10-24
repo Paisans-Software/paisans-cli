@@ -15,6 +15,10 @@ changes share a bullet. Detailed notes are on the corresponding
 - `operator add` declares an operator in `paisans-stack.yaml` and names them in the chosen sites' `ssh.keys`, asking at a terminal and taking `--name`, `--email`, `--key` and `--site` or `--all-sites` without one.
 - `--site` of `doctor` and `operator add`, `--only` and `--recreate` of `deployment apply`, `--replaced` of `secrets rotate` and `--name` of `dns prune` take several values separated by commas.
 
+### Removed
+
+- `deployment apply`, `publish`, `pull`, `recover` and `operator register` no longer ask for `partial` when few sites answer; each goes ahead on whichever sites do.
+
 ## [0.3.0-rc.8] - 2026-10-23
 
 ### Fixed

@@ -4510,12 +4510,11 @@ since the file is still encrypted to their key.
 A version that was really published verifies forever, so someone who controls a
 site can delete the newer ones there and serve an old one. Applying it would put
 back old secrets, undoing a `storage rotate-key`. No signature can prove a
-version is the newest, so three memories make an old one visible:
+version is the newest, so two memories make an old one visible:
 
 | Memory | What it does | Why it is there |
 |--------|--------------|-----------------|
 | The workstation | `.paisans/config-seen` holds the newest revision seen; a head with a lower one is refused until the operator types `rollback`, which re-bases the record to the head chosen once the command commits its change. A run that stops, and every dry run, leaves the record as it was | the site the workstation reaches may be the one lying; a record nothing could lower would trap an operator restoring from an old backup, so the typed word lowers it deliberately |
-| A majority of sites | a pull, recovery, registration, the publish of a first version or `deployment apply --execute` counts the sites it reached directly over ssh; with no more than half it asks for `partial` | a lying site can hide newer versions only from a workstation that reaches no honest site, which a majority makes unlikely. A version that arrived through another site's sync counts toward finding the newest, but never toward the majority, since "these peers answered" is that site's word |
 | The hosts | each host's grant record also holds the hash and revision of the version last applied to it, and `deployment apply` refuses an older revision, or another version at the same revision, unless the operator types `rollback` | a host that has had a newer version is a witness a deleted ref cannot erase; the same revision under another hash is a version another operator applied there, which this apply would replace |
 
 So a host attacker can roll back only the hosts they hold. What stays is a fresh
@@ -4591,16 +4590,14 @@ paisans deployment recover --from admin@203.0.113.9 --key ~/.ssh/id_ed25519.pub 
   `.paisans/signing-key`, and every later `publish` and `deployment apply` signs with it.
   It attests only a head whose files equal the operator's local files, since an
   attestation says "I hold this version"; otherwise it shows the difference. It
-  changes only the sites' stores, and nothing without `--execute`. With
-  `--execute` it asks for `partial` when no more than half the sites answered
-  directly, since the attestation becomes the operator's anchor.
+  changes only the sites' stores, and nothing without `--execute`. It goes
+  ahead on whichever sites answer.
 * **`paisans deployment publish`** commits the files with the base as parent, signs,
   and pushes to every site it reaches. It refuses when its base is not the
   sites' head, when no loaded key belongs to an operator the parent lists, and when
   no site answers; a site that missed it gets it from its peers. A first
   version, with no trusted head among the sites that answered, starts the
-  history, so with no more than half the sites reached directly it asks for
-  `partial`: an empty site must not start a second history silently.
+  history. It goes ahead on whichever sites answer.
 * **`paisans deployment pull`** moves files with no local edits to the head. Over
   local edits on an older base it refuses, shows the difference, and with
   `--execute` writes the head's files to `.paisans/incoming/` to merge by hand
@@ -6121,7 +6118,7 @@ command.
 
 Every command that asks for a confirmation takes `--yes`, which answers it as
 typing it would, so the command runs from a script with no terminal on stdin:
-each word a command asks to have typed (`approve`, `create`, `partial`,
+each word a command asks to have typed (`approve`, `create`,
 `rollback`, `prune`, `sign out`, `revoked`, `lose writes`, `lose objects`, a
 site's, an app's or a user's name), and each y/N question (`site admit`'s
 grants, and its ufw question with `--site`). `docs/commands.md` lists the
