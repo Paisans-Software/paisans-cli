@@ -10,6 +10,12 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+## [0.3.0-rc.7] - 2026-10-23
+
+### Fixed
+
+- `deployment apply` and `failover test` restart a service that joins another's PID, IPC or network namespace after that service runs again, so Wiki.js's bootstrap comes back up with the app instead of staying exited.
+
 ## [0.3.0-rc.6] - 2026-10-23
 
 ### Added
@@ -262,7 +268,8 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.
 - The gateway refuses any request to Pocket ID that carries an `X-API-Key` header with 403, so Pocket ID's API keys work only on the mesh.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.6...develop
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.7...develop
+[0.3.0-rc.7]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.6...v0.3.0-rc.7
 [0.3.0-rc.6]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.5...v0.3.0-rc.6
 [0.3.0-rc.5]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.4...v0.3.0-rc.5
 [0.3.0-rc.4]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.3...v0.3.0-rc.4
