@@ -39,6 +39,7 @@ const (
 	FoundationUptime             = "uptime"
 	FoundationAccount            = "account"
 	FoundationEngagement         = "engagement"
+	FoundationValkey             = "valkey"
 )
 
 // foundationNames are the images every foundation names.
@@ -46,6 +47,7 @@ var foundationNames = map[string]bool{
 	FoundationEtcd: true, FoundationHAProxy: true, FoundationGarage: true, FoundationCaddy: true,
 	FoundationHeartbeat: true, FoundationPocketID: true, FoundationOperatorReconciler: true,
 	FoundationOAuth2Proxy: true, FoundationUptime: true, FoundationAccount: true,
+	FoundationValkey: true,
 }
 
 // optionalFoundationNames are the images a foundation may name and need

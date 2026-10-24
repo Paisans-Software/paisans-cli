@@ -13,7 +13,7 @@
     },
     {
       "path": "srv/paisans/f2a9/account/compose.yaml",
-      "sha256": "1b18f8792d3d267627d8ff265e3b2bef85a2d5c6e2dc83abd4def4124ac604fb",
+      "sha256": "5a9ee909f7ec6319ed15d580068d6af16f967c7d1051d4f25e93a75449f711c3",
       "mode": "0644"
     },
     {
@@ -53,7 +53,7 @@
     },
     {
       "path": "srv/paisans/f2a9/blog/config.ini",
-      "sha256": "3c2f507cf9b28b90abc1de5969da6e630ed37dca309131749e557d25071757ec",
+      "sha256": "fd64c0b949120bb64932e2964c8171d8783cd89616dc4a4245afb7471300a49a",
       "mode": "0600"
     },
     {

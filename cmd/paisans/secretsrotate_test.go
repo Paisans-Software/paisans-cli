@@ -238,6 +238,7 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 		"apps.chat.mas_signing_key",
 		"apps.chat.mas_matrix_secret",
 		"apps.gate.cookie_secret",
+		"apps.gate.session_store_password",
 		"apps.health.session_secret",
 		"apps.talk.app_secret",
 		"apps.blog.s3_secret_access_key",
@@ -598,7 +599,7 @@ func TestRotationsHoldTheOAuthUnitPath(t *testing.T) {
 func TestSecretsRotateAllRefusesAnUnfilledFile(t *testing.T) {
 	noRotateHost(t)
 	configPath, secretsPath := rotateDeployment(t, func(text string) string {
-		out := strings.Replace(text, "    cookie_secret: \"fixture-not-a-secret-gate-cookie\"\n", "    {}\n", 1)
+		out := strings.Replace(text, "    cookie_secret: \"fixture-not-a-secret-gate-cookie\"\n", "", 1)
 		if out == text {
 			t.Fatal("the fixture's gate cookie line moved")
 		}

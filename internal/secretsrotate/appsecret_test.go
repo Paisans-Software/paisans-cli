@@ -31,7 +31,7 @@ type selfWorld struct {
 
 var selfKeysFor = map[string][]string{
 	"forum":  {"app_secret", "mercure_jwt_secret", "valkey_password", "oauth_passphrase", "oauth_encryption_key", "oauth_private_key", "oauth_public_key"},
-	"gate":   {"cookie_secret"},
+	"gate":   {"cookie_secret", "session_store_password"},
 	"health": {"session_secret"},
 	"chat":   {"mas_signing_key", "mas_matrix_secret"},
 	"id":     {"static_api_key"},
@@ -209,6 +209,7 @@ func TestAppSelfCosts(t *testing.T) {
 		restart  bool
 	}{
 		{"forum", "app_secret", true, false}, {"gate", "cookie_secret", true, false},
+		{"gate", "session_store_password", true, false},
 		{"health", "session_secret", true, false}, {"account", "session_key", true, false},
 		{"chat", "mas_signing_key", true, false}, {"chat", "mas_matrix_secret", true, false},
 		{"forum", "mercure_jwt_secret", false, true}, {"forum", "valkey_password", false, true},
