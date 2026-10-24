@@ -547,8 +547,8 @@ reconciler checks Pocket ID against the operators*).
 under `operators` and their name in the `ssh.keys` of the sites they may log
 in to, and leaves every other line of `paisans-stack.yaml` as it was. At a
 terminal it asks `create`'s questions for whatever its flags did not give;
-without one it takes `--name`, `--email`, `--key` and `--site` or
-`--all-sites` and asks nothing. It reaches no host: the next `deployment apply
+without one it takes `--name`, `--email`, `--key` and `--site` (one site,
+or several separated by commas) or `--all-sites` and asks nothing. It reaches no host: the next `deployment apply
 --execute` gives them their sites and their Pocket ID account, and their age
 public key goes into `.sops.yaml` by hand, followed by `sops updatekeys
 secrets.enc.yaml`. See *`paisans operator add`* in
@@ -10032,7 +10032,7 @@ their own, and their healthchecks do not notice.
 An outage is the worst time to remember which container to look at, which etcd
 key holds the answer, or which Patroni log line means what.
 `paisans doctor` reaches every declared site, or only those named with
-`--site` (repeatable), reads its state, and prints one line per finding,
+`--site` (repeatable or comma-separated), reads its state, and prints one line per finding,
 `ok`, `WARN` or `FAIL`, with how to recover under each `FAIL`. A check it could
 not make is a `WARN` saying it was skipped and why, never an `ok`: it found
 nothing right, and the closing line counts it apart from the checks that

@@ -30,9 +30,10 @@ func runOperatorAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	configPath := fs.String("config", config.FileName, configHelp)
 	name := fs.String("name", "", "the operator's full name, first and last")
 	email := fs.String("email", "", "the operator's email address")
-	var keys, sites pathList
-	fs.Var(&keys, "key", "a public key file (.pub), or one key line itself; once per key or file")
-	fs.Var(&sites, "site", "a site the operator may log in to (repeatable)")
+	var keys pathList
+	var sites nameList
+	fs.Var(&keys, "key", "a public key file (.pub), or one key line itself (repeatable)")
+	fs.Var(&sites, "site", "a site the operator may log in to (repeatable, or comma-separated)")
 	allSites := fs.Bool("all-sites", false, "let the operator log in to every site")
 	pos, err := parseAll(fs, args)
 	if err != nil {

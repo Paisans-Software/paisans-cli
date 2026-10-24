@@ -123,6 +123,20 @@ func TestOperatorAddKeyFileAndSite(t *testing.T) {
 	}
 }
 
+// --site takes several sites separated by commas.
+func TestOperatorAddCommaSites(t *testing.T) {
+	path := createdDeployment(t)
+	var site string
+	for name := range loadOperators(t, path).Sites {
+		site = name
+	}
+	err := runOperatorAdd([]string{"carol", "--name", "Carol Example", "--email", "carol@example.org",
+		"--key", createCarolKey, "--site", site + "," + site, "--config", path}, notATerminal(t), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "given twice") {
+		t.Errorf("err = %v, want the site given twice refused", err)
+	}
+}
+
 // Without a terminal nothing is asked, so a missing answer is refused, by the
 // flags that give it, and nothing is written.
 func TestOperatorAddRefusesMissingFlags(t *testing.T) {
