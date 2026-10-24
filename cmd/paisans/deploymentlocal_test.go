@@ -119,7 +119,7 @@ func TestRecoverSavesTheVersion(t *testing.T) {
 	recoverHosts(t, answer)
 	dir := t.TempDir()
 	var out bytes.Buffer
-	if err := runDeployment([]string{"recover", "--from", "ubuntu@203.0.113.9", "--root", sha, "--config", filepath.Join(dir, "paisans-stack.yaml"), "--execute"}, answering(t, "partial\n"), &out); err != nil {
+	if err := runDeployment([]string{"recover", "--from", "ubuntu@203.0.113.9", "--root", sha, "--config", filepath.Join(dir, "paisans-stack.yaml"), "--execute"}, noTerminalStdin(), &out); err != nil {
 		t.Fatal(err)
 	}
 	rec, ok, _ := st.Load(fixtureID(t))

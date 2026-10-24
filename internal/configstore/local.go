@@ -498,7 +498,6 @@ type Reached struct {
 type Gathered struct {
 	Verdict  Verdict
 	Reached  []Reached
-	Majority bool // sites reached directly are more than half of those configured
 	Synced   bool // each site was asked to sync with its peers first
 	Versions map[string]Version
 	Holders  map[string][]string // version -> the sites whose answer held it
@@ -559,18 +558,17 @@ type GatherOptions struct {
 }
 
 // GatherAnchored collects every version the sites hold into the cache and
-// judges them from the anchor a. configured is how many sites the
-// configuration declares, which the majority is counted against.
+// judges them from the anchor a.
 //
 // A head older than the newest this workstation has seen is a
 // *RollbackError, returned with the complete Gathered; otherwise a head
 // newer than the record is carried in Gathered.Seen, for the command to
 // record once it commits. A gather never writes the record itself.
-func GatherAnchored(l Local, sites map[string]apply.Transport, configured int, id string, a Anchor, o GatherOptions) (Gathered, error) {
-	return gather(l, sites, configured, id, a, o, Pull)
+func GatherAnchored(l Local, sites map[string]apply.Transport, id string, a Anchor, o GatherOptions) (Gathered, error) {
+	return gather(l, sites, id, a, o, Pull)
 }
 
-func gather(l Local, sites map[string]apply.Transport, configured int, id string, a Anchor, o GatherOptions, pull PullFunc) (Gathered, error) {
+func gather(l Local, sites map[string]apply.Transport, id string, a Anchor, o GatherOptions, pull PullFunc) (Gathered, error) {
 	sync := o.Sync
 	cache, err := l.Cache()
 	if err != nil {
@@ -578,7 +576,6 @@ func gather(l Local, sites map[string]apply.Transport, configured int, id string
 	}
 	d := deployment.Deployment{ID: id}
 	g := Gathered{Holders: map[string][]string{}, Signers: map[string]string{}, Synced: sync}
-	direct := 0
 	for _, name := range slices.Sorted(maps.Keys(sites)) {
 		bundle, report, err := pull(sites[name], d, sync)
 		if err == nil && bundle != nil {
@@ -601,9 +598,7 @@ func gather(l Local, sites map[string]apply.Transport, configured int, id string
 			r.SyncErr = report.SyncErr
 		}
 		g.Reached = append(g.Reached, r)
-		direct++
 	}
-	g.Majority = configured > 0 && 2*direct > configured
 	return judgeHeld(l, cache, g, id, a)
 }
 

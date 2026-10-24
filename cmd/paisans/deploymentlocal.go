@@ -103,7 +103,7 @@ var fetchGather = func(l configstore.Local, host string, t apply.Transport, id s
 	if err != nil {
 		return configstore.Gathered{}, err
 	}
-	return configstore.GatherAnchored(l, map[string]apply.Transport{host: t}, 1, id, a, configstore.GatherOptions{})
+	return configstore.GatherAnchored(l, map[string]apply.Transport{host: t}, id, a, configstore.GatherOptions{})
 }
 
 // runDeploymentFetch is `paisans deployment fetch`: every deployment in the

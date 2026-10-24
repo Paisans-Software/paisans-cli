@@ -90,7 +90,7 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 		answers:  ans,
 		noAnchor: "Pin the first version you trust with --root <sha>; an operator who has one can read its hash from " + progname.Cmd() + " deployment log.",
 	}
-	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, anchor, m, stdin, stdout)
+	g, err := gatherAt(r, l, sites, cfg.ID, anchor, m, stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -130,15 +130,7 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 		if write {
 			r.Step("write the files of "+describe(g, head)).End(ui.Pending, "--execute will write them")
 		}
-		if !g.Majority {
-			r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "--execute will ask for the word "+partialWord+" at a terminal.")
-		}
 		return nil
-	}
-	// The attestation becomes this workstation's anchor, so it is made only
-	// from a majority, or once the operator says partial.
-	if err := confirmPartial(ans, stdin, stdout, g, len(sites)); err != nil {
-		return err
 	}
 	s := r.Step("sign and push the attestation, signed with " + k.Fingerprint)
 	sha, pushed, err := configstore.AttestFrom(l, g, sites, pin, key, configSignWith(key), configNow())
@@ -170,7 +162,7 @@ func registerConfig(l configstore.Local, path, pin string) (*config.Config, erro
 	if pin == "" {
 		return nil, &ui.Problem{Hint: "there are no configuration files here", Explain: "operator register attests the version you hold, and reads the sites from " + config.FileName + ". Run it beside your files with --config, or pin the first version you trust with --root <sha> to attest the version it leads to and write its files."}
 	}
-	g, err := configstore.GatherAnchored(l, nil, 0, "", configstore.Anchor{Root: pin}, configstore.GatherOptions{})
+	g, err := configstore.GatherAnchored(l, nil, "", configstore.Anchor{Root: pin}, configstore.GatherOptions{})
 	var rb *configstore.RollbackError
 	if errors.As(err, &rb) {
 		err = nil

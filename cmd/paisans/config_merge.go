@@ -36,7 +36,7 @@ func secretsOnlyEdits(local, base, head configstore.Files) bool {
 //
 // handled is false when this is not that case, and the caller refuses as it
 // always has.
-func pullMergingSecrets(r ui.Reporter, l configstore.Local, g configstore.Gathered, id, head, base, root string, held map[string]string, configured int, local, theirs configstore.Files, execute bool, ans answerer, stdin io.Reader, stdout io.Writer) (handled bool, err error) {
+func pullMergingSecrets(r ui.Reporter, l configstore.Local, g configstore.Gathered, id, head, base, root string, held map[string]string, local, theirs configstore.Files, execute bool, ans answerer, stdin io.Reader, stdout io.Writer) (handled bool, err error) {
 	if base == "" {
 		return false, nil
 	}
@@ -83,13 +83,7 @@ func pullMergingSecrets(r ui.Reporter, l configstore.Local, g configstore.Gather
 	}
 	if !execute {
 		r.Step("merge the local secrets into "+describe(g, head)).End(ui.Pending, "--execute will write them")
-		if !g.Majority {
-			r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), configured), "--execute will ask for the word "+partialWord+" at a terminal.")
-		}
 		return true, nil
-	}
-	if err := confirmPartial(ans, stdin, stdout, g, configured); err != nil {
-		return true, err
 	}
 	// The recipients are the ones the head's .sops.yaml names, read from a
 	// scratch copy so that nothing in the working directory changes until the

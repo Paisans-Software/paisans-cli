@@ -156,10 +156,9 @@ func TestOperatorRegisterDryRunThenExecute(t *testing.T) {
 	}
 }
 
-// With fewer than a majority of sites reached directly, register --execute
-// asks for partial even when it writes no files, and without a terminal
-// refuses with nothing signed, pushed or recorded.
-func TestOperatorRegisterWithoutAMajorityAsksPartial(t *testing.T) {
+// With one site of four reached directly, register --execute signs the
+// attestation and records the key, at no terminal and with nothing asked.
+func TestOperatorRegisterFromOneSiteAsksNothing(t *testing.T) {
 	shas, answer, files, key, pub := storedHistoryKey(t, 1, 0)
 	var runs []string
 	l := registerWorkstation(t, answer, files[0], &runs, pub)
@@ -169,19 +168,13 @@ func TestOperatorRegisterWithoutAMajorityAsksPartial(t *testing.T) {
 	t.Cleanup(func() { configSignWith = savedSign })
 	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
 	var out bytes.Buffer
-	err := runOperator([]string{"register", "--root", shas[0], "--config", cfgPath, "--execute"}, noTerminalStdin(), &out)
-	if err == nil || !strings.Contains(err.Error(), "partial") {
-		t.Fatalf("got %v", problemText(err))
-	}
-	for _, name := range []string{"signing-key", "config-head", "config-root", "config-seen"} {
-		if _, err := os.Stat(filepath.Join(l.Dir, ".paisans", name)); !os.IsNotExist(err) {
-			t.Errorf("a refused register wrote %s", name)
-		}
-	}
-	if err := runOperator([]string{"register", "--root", shas[0], "--config", cfgPath, "--execute"}, answering(t, "partial\n"), &out); err != nil {
+	if err := runOperator([]string{"register", "--root", shas[0], "--config", cfgPath, "--execute"}, noTerminalStdin(), &out); err != nil {
 		t.Fatal(problemText(err))
 	}
 	if k, _ := l.SigningKey(); k != pub {
-		t.Fatalf("key %q after partial", k)
+		t.Fatalf("key %q", k)
+	}
+	if strings.Contains(out.String(), "partial") {
+		t.Fatalf("output names partial:\n%s", out.String())
 	}
 }

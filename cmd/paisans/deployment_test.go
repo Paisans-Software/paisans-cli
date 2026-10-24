@@ -229,35 +229,22 @@ func must[T any](v T, err error) T {
 	return v
 }
 
-// A recovery that reaches one of the fixture's four sites directly asks for
-// partial at a terminal, and without one is refused before anything is
-// written.
-func TestConfigRecoverWithoutAMajorityAsksPartial(t *testing.T) {
+// A recovery that reaches one of the fixture's four sites directly writes
+// the files at no terminal, with nothing asked.
+func TestConfigRecoverFromOneSiteAsksNothing(t *testing.T) {
 	sha, answer, f := storedVersion(t)
 	recoverHosts(t, answer)
 	dir := t.TempDir()
 	args := []string{"recover", "--from", "ubuntu@203.0.113.9", "--root", sha, "--config", filepath.Join(dir, "paisans-stack.yaml"), "--execute"}
 
 	var out bytes.Buffer
-	err := runDeployment(args, noTerminalStdin(), &out)
-	if err == nil || !strings.Contains(err.Error(), "partial") {
-		t.Fatalf("no terminal: %v", err)
-	}
-	l := configstore.Local{Dir: dir}
-	if l.HasFiles() {
-		t.Fatal("a refused recovery wrote the files")
-	}
-	if h, _ := l.Head(); h != "" {
-		t.Fatalf("a refused recovery recorded head %s", h)
-	}
-
-	out.Reset()
-	if err := runDeployment(args, answering(t, "partial\n"), &out); err != nil {
+	if err := runDeployment(args, noTerminalStdin(), &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "Type 'partial'") {
-		t.Fatalf("prompt: %q", out.String())
+	if strings.Contains(out.String(), "partial") {
+		t.Fatalf("output names partial: %q", out.String())
 	}
+	l := configstore.Local{Dir: dir}
 	got, err := l.Files()
 	if err != nil || !got.Equal(f) {
 		t.Fatalf("files %v", err)
@@ -270,9 +257,8 @@ func TestConfigRecoverWithoutAMajorityAsksPartial(t *testing.T) {
 	}
 }
 
-// Without --execute a recovery writes nothing, and any other answer than
-// partial refuses.
-func TestConfigRecoverDryRunAndWrongWordWriteNothing(t *testing.T) {
+// Without --execute a recovery writes nothing.
+func TestConfigRecoverDryRunWritesNothing(t *testing.T) {
 	sha, answer, _ := storedVersion(t)
 	recoverHosts(t, answer)
 	dir := t.TempDir()
@@ -280,9 +266,6 @@ func TestConfigRecoverDryRunAndWrongWordWriteNothing(t *testing.T) {
 	var out bytes.Buffer
 	if err := runDeployment(args, noTerminalStdin(), &out); err != nil {
 		t.Fatal(err)
-	}
-	if err := runDeployment(append(args, "--execute"), answering(t, "yes\n"), &out); err == nil {
-		t.Fatal("yes was taken for partial")
 	}
 	if (configstore.Local{Dir: dir}).HasFiles() {
 		t.Fatal("files written")
@@ -540,7 +523,7 @@ func TestConfigRecoverRefusesAnInjectedID(t *testing.T) {
 	allSitesUp(answer, &runs)
 	dir := t.TempDir()
 	var out bytes.Buffer
-	err := runDeployment([]string{"recover", "--from", "ubuntu@203.0.113.9", "--root", strings.Repeat("a", 40), "--config", filepath.Join(dir, "paisans-stack.yaml"), "--execute"}, answering(t, "partial\n"), &out)
+	err := runDeployment([]string{"recover", "--from", "ubuntu@203.0.113.9", "--root", strings.Repeat("a", 40), "--config", filepath.Join(dir, "paisans-stack.yaml"), "--execute"}, noTerminalStdin(), &out)
 	if text := problemText(err); err == nil || !strings.Contains(text, "no admission record for any deployment") || strings.Contains(text, "touch /pwned") {
 		t.Fatalf("got %v: %s", err, text)
 	}
@@ -599,7 +582,7 @@ func TestDryRunGatherNotesTheSkippedSyncOnlyWithPeers(t *testing.T) {
 			sites[n] = &storeHost{name: n, answer: answer}
 		}
 		var b bytes.Buffer
-		if _, err := gatherAt(ui.NewPlain(&b, false), l, sites, len(sites), id.ID, a, gatherMode{}, noTerminalStdin(), io.Discard); err != nil {
+		if _, err := gatherAt(ui.NewPlain(&b, false), l, sites, id.ID, a, gatherMode{}, noTerminalStdin(), io.Discard); err != nil {
 			t.Fatalf("%d sites: %v", len(sites), problemText(err))
 		}
 		if got := strings.Contains(b.String(), note); got != tc.want {
@@ -809,8 +792,8 @@ func TestConfigPublishDryRunChecksTheSigner(t *testing.T) {
 }
 
 // Typing rollback lowers the seen record only once the command commits: a
-// pull whose partial question is then declined leaves it as it was.
-func TestConfigRollbackThenDeclinedPartialLeavesSeen(t *testing.T) {
+// pull that is refused the word leaves it as it was.
+func TestConfigRollbackRefusedLeavesSeen(t *testing.T) {
 	shas, answer, files := storedHistory(t, 2, 0)
 	l := pullWorkstation(t, answer, shas[0], shas[0], files[0])
 	recoverHosts(t, answer) // home-a alone answers: one of four sites
@@ -820,7 +803,7 @@ func TestConfigRollbackThenDeclinedPartialLeavesSeen(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	err := runDeployment([]string{"pull", "--config", filepath.Join(l.Dir, "paisans-stack.yaml"), "--execute"}, answering(t, "rollback\n"), &out)
+	err := runDeployment([]string{"pull", "--config", filepath.Join(l.Dir, "paisans-stack.yaml"), "--execute"}, answering(t, "no\n"), &out)
 	if err == nil || !strings.Contains(out.String(), "Type 'rollback'") {
 		t.Fatalf("got %v\n%s", err, out.String())
 	}
@@ -829,27 +812,6 @@ func TestConfigRollbackThenDeclinedPartialLeavesSeen(t *testing.T) {
 	}
 	if h, _ := l.Head(); h != shas[0] {
 		t.Fatalf("head moved to %s", h)
-	}
-}
-
-// A pull --execute --root that refuses records neither the root nor a newer
-// revision seen.
-func TestConfigRefusedPullWithRootRecordsNothing(t *testing.T) {
-	shas, answer, files := storedHistory(t, 2, 0)
-	recoverHosts(t, answer) // home-a alone answers: one of four sites
-	l := configstore.Local{Dir: t.TempDir()}
-	l.WriteFiles(files[0])
-	l.SetHead(shas[0])
-	var out bytes.Buffer
-	err := runDeployment([]string{"pull", "--root", shas[0], "--config", filepath.Join(l.Dir, "paisans-stack.yaml"), "--execute"}, noTerminalStdin(), &out)
-	if err == nil || !strings.Contains(err.Error(), "partial") {
-		t.Fatalf("got %v", err)
-	}
-	if rev, _, _ := l.Seen(); rev != 0 {
-		t.Fatalf("seen raised to %d", rev)
-	}
-	if r, _ := l.Root(); r != "" {
-		t.Fatalf("root %s recorded", r)
 	}
 }
 
@@ -872,11 +834,9 @@ func TestConfigDryRunsRecordNothingSeen(t *testing.T) {
 	}
 }
 
-// A first version, with no trusted head among the sites that answered,
-// needs a majority of sites reached directly or partial typed at a
-// terminal: a workstation reaching only an empty site must not start a
-// second history silently.
-func TestConfigPublishOfAFirstVersionWithoutAMajorityAsksPartial(t *testing.T) {
+// A first version published from one site of four that answered, holding
+// nothing, is signed and pushed at no terminal, with nothing asked.
+func TestPublishFirstVersionFromOneSiteAsksNothing(t *testing.T) {
 	key, pub := testKey(t)
 	recoverHosts(t, "__PAISANS_EMPTY__\n") // home-a alone answers, holding nothing
 	saved, savedSign := agentKeys, configSignWith
@@ -894,20 +854,13 @@ func TestConfigPublishOfAFirstVersionWithoutAMajorityAsksPartial(t *testing.T) {
 	if err := runDeployment([]string{"publish", "--config", cfgPath}, noTerminalStdin(), &out); err != nil {
 		t.Fatal(problemText(err))
 	}
-	if !strings.Contains(rep.String(), "WARN only 1 of 4 sites answered directly") {
-		t.Errorf("dry run report:\n%s\nout:\n%s", rep.String(), out.String())
+	if strings.Contains(rep.String(), "WARN only") {
+		t.Errorf("dry run warned:\n%s", rep.String())
 	}
-	err := runDeployment([]string{"publish", "--config", cfgPath, "--execute"}, noTerminalStdin(), &out)
-	if err == nil || !strings.Contains(err.Error(), "partial") {
-		t.Fatalf("no terminal: %v", problemText(err))
-	}
-	if h, _ := l.Head(); h != "" {
-		t.Fatalf("a refused publish recorded head %s", h)
-	}
-	if err := runDeployment([]string{"publish", "--config", cfgPath, "--execute"}, answering(t, "partial\n"), &out); err != nil {
+	if err := runDeployment([]string{"publish", "--config", cfgPath, "--execute"}, noTerminalStdin(), &out); err != nil {
 		t.Fatal(problemText(err))
 	}
 	if h, _ := l.Head(); h == "" {
-		t.Fatal("no head after partial")
+		t.Fatal("no head after publishing")
 	}
 }
