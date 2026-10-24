@@ -15,7 +15,7 @@ import (
 // into main carrying a Version with no matching tag is released as
 // v<Version>. Once a release is cut, `make dev` moves develop to the next
 // -dev, so a build of develop never reports a release it is not.
-const Version = "0.3.0-dev"
+const Version = "0.3.0-rc.8"
 
 // Compare orders two versions, MAJOR.MINOR.PATCH with an optional
 // -<pre-release> and no v, as semantic versioning orders them: negative when
