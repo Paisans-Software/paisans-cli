@@ -256,3 +256,86 @@ func (f answerFixture) nothingMade(t *testing.T, dir string, out []byte) {
 		t.Errorf("%s holds %d entries", dir, len(entries))
 	}
 }
+
+func TestAnswerRefusesADifferentInviteRecordedHere(t *testing.T) {
+	f := newAnswerFixture(t)
+	dir := t.TempDir()
+	if err, _ := f.answer(dir, f.inviterKey); err != nil {
+		t.Fatal(err)
+	}
+	// Same deployment, another invite: the bytes differ.
+	inv, _, err := operatorinvite.InviteSigner(f.invite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Another operator, dave, invites the same key to the same deployment.
+	davePriv, davePub := testKey(t)
+	dk, _, _ := config.ParseKeyLine(davePub)
+	inv.Inviter = operatorinvite.Inviter{Name: "dave", Fingerprint: dk.Fingerprint}
+	body := operatorinvite.EncodeInvite(inv)
+	signFromFile(t, davePriv)
+	sig, err := operatorinvite.Sign(davePub, operatorinvite.InviteNamespace, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signFromFile(t, f.carolPriv)
+	other := operatorinvite.Signed(body, sig)
+	var out bytes.Buffer
+	err = answerInvite(ui.NewPlain(io.Discard, false), dir, other, davePub, "Carol Jones", "carol@example.org", "", strings.NewReader(""), &out)
+	if err == nil || !strings.Contains(problemText(err), "--config") || !strings.Contains(problemText(err), "remove") {
+		t.Fatalf("got %q", problemText(err))
+	}
+	if out.Len() != 0 {
+		t.Errorf("wrote %q", out.String())
+	}
+	got, _ := os.ReadFile(filepath.Join(dir, ".paisans", "invite"))
+	if !bytes.Equal(got, f.invite) {
+		t.Error("the recorded invite was replaced")
+	}
+}
+
+func TestReadJoinWithoutInviteIsNotRecorded(t *testing.T) {
+	f := newAnswerFixture(t)
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".paisans"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".paisans", "inviter.pub"), []byte(f.inviterKey+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok, err := readJoin(dir); ok || err != nil {
+		t.Fatalf("ok %v, err %v", ok, err)
+	}
+	if err, out := f.answer(dir, f.inviterKey); err != nil || len(out) == 0 {
+		t.Fatalf("answering failed: %v", err)
+	}
+}
+
+func TestAnswerRefusesThisDeploymentsFilesHere(t *testing.T) {
+	f := newAnswerFixture(t)
+	dir := t.TempDir()
+	body, err := os.ReadFile(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err, out := f.answer(dir, f.inviterKey)
+	if err == nil || !strings.Contains(problemText(err), "already holds") {
+		t.Fatalf("got %q", problemText(err))
+	}
+	if len(out) != 0 || len(f.keystore.Items) != 0 {
+		t.Errorf("wrote %q, keystore %v", out, f.keystore.Items)
+	}
+}
+
+func TestRegisterInviteRefusesRegisteringFlags(t *testing.T) {
+	for _, flag := range [][]string{{"--key", "k.pub"}, {"--root", "abc"}, {"--execute"}} {
+		var out bytes.Buffer
+		err := runOperatorRegister(append([]string{"--invite", "x"}, flag...), strings.NewReader(""), &out)
+		if err == nil || !strings.Contains(problemText(err), "--invite answers an invite") {
+			t.Errorf("%v: got %q", flag, problemText(err))
+		}
+	}
+}

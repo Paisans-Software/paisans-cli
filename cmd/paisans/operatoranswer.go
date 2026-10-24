@@ -58,7 +58,7 @@ func answerInvite(r ui.Reporter, dir string, invite []byte, inviterKey, name, em
 	}
 	step.Done(key.Fingerprint)
 
-	if err := checkAnswerDir(dir, inv); err != nil {
+	if err := checkAnswerDir(dir, inv, invite); err != nil {
 		return err
 	}
 
@@ -138,7 +138,7 @@ func askAnswer(p *create.Prompter, q, given string, check func(string) error) (s
 // checkAnswerDir refuses a directory that belongs to another answer: one
 // holding a paisans-stack.yaml, which the join that follows would not
 // apply, or an invite recorded for another deployment.
-func checkAnswerDir(dir string, inv operatorinvite.Invite) error {
+func checkAnswerDir(dir string, inv operatorinvite.Invite, invite []byte) error {
 	other := func(what string) error {
 		return &ui.Problem{
 			Hint:    ui.ShortPath(dir) + " " + what,
@@ -168,31 +168,58 @@ func checkAnswerDir(dir string, inv operatorinvite.Invite) error {
 		if i.Deployment != inv.Deployment {
 			return other("records an invite to another deployment")
 		}
+		if !bytes.Equal(recorded, invite) {
+			return &ui.Problem{
+				Hint:    ui.ShortPath(dir) + " records a different invite",
+				Explain: "An earlier request answered it, and may still be on its way, so the record is not replaced. Answer this invite in a new directory with --config <dir>/" + config.FileName + ", or remove " + ui.ShortPath(filepath.Join(dir, ".paisans", inviteFile)) + " if the old invite is abandoned. Nothing was made or written.",
+			}
+		}
 	}
 	return nil
 }
 
-// recordJoin writes the invite, verbatim, and the inviter's key under
-// dir/.paisans/, for readJoin.
+// recordJoin writes the inviter's key and then the invite, verbatim, under
+// dir/.paisans/, each through a temporary file and a rename. The invite is
+// written last: readJoin takes it as the mark that the record is whole.
 func recordJoin(dir string, invite []byte, inviterKey string) error {
 	state := filepath.Join(dir, ".paisans")
 	if err := os.MkdirAll(state, 0o700); err != nil {
 		return err
 	}
-	for name, data := range map[string][]byte{inviteFile: invite, inviterFile: []byte(strings.TrimSpace(inviterKey) + "\n")} {
-		path := filepath.Join(state, name)
-		if err := os.WriteFile(path, data, 0o600); err != nil {
-			return err
-		}
-		if err := os.Chmod(path, 0o600); err != nil {
+	for _, f := range []struct {
+		name string
+		data []byte
+	}{{inviterFile, []byte(strings.TrimSpace(inviterKey) + "\n")}, {inviteFile, invite}} {
+		if err := writeFileAtomic(filepath.Join(state, f.name), f.data); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// readJoin is the invite and inviter's key an answer recorded in dir, and ok
-// false when it recorded none.
+// writeFileAtomic writes data to path at 0600 through a rename, so a reader
+// never sees half of it.
+func writeFileAtomic(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
+}
+
+// readJoin is the invite and inviter's key an answer recorded in dir. ok is
+// false when the invite, which is written last, is not there.
 func readJoin(dir string) (invite []byte, inviterKey string, ok bool, err error) {
 	invite, err = os.ReadFile(filepath.Join(dir, ".paisans", inviteFile))
 	if errors.Is(err, os.ErrNotExist) {

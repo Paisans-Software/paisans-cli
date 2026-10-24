@@ -73,9 +73,9 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 		}
 		return registerInvite(*invite, *inviterKey, *name, *email, *ageFile, *configPath, stdin, stdout)
 	}
-	for flagName, v := range map[string]string{"--inviter-key": *inviterKey, "--name": *name, "--email": *email, "--age-private-key-file": *ageFile} {
-		if v != "" {
-			return &ui.Problem{Hint: flagName + " needs --invite", Explain: "It answers an invite: " + progname.Cmd() + " operator register --invite <file> --inviter-key <key>."}
+	for _, stray := range []struct{ flag, value string }{{"--inviter-key", *inviterKey}, {"--name", *name}, {"--email", *email}, {"--age-private-key-file", *ageFile}} {
+		if stray.value != "" {
+			return &ui.Problem{Hint: stray.flag + " needs --invite", Explain: "It answers an invite: " + progname.Cmd() + " operator register --invite <file> --inviter-key <key>."}
 		}
 	}
 	ans, err := answers()
