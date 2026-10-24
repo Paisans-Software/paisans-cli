@@ -76,6 +76,7 @@ const (
 	BlueprintPocketID    Blueprint = "pocket-id"
 	BlueprintUptime      Blueprint = "uptime"
 	BlueprintAccount     Blueprint = "account"
+	BlueprintEngagement  Blueprint = "engagement"
 )
 
 // Config is a whole deployment, declared. It records intent and never status:

@@ -35,6 +35,8 @@ images:
   operator-reconciler: "ghcr.io/paisans-software/operator-reconciler:0.3.*"
   uptime: "ghcr.io/paisans-software/uptime:1.1.*-oidc.*"
   account: "ghcr.io/paisans-software/paisans-account-service:0.5.*"
+  # 0.1, the first engagement digest.
+  engagement: "ghcr.io/paisans-software/paisans-engagement-service:0.1.*"
 # By Postgres major. A major is data, so a deployment's
 # cluster.postgres_version chooses it and no track moves it. Spilo
 # publishes one repository per major, each on its own release line.

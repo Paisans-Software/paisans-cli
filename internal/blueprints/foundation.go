@@ -38,6 +38,7 @@ const (
 	FoundationOAuth2Proxy        = "oauth2-proxy"
 	FoundationUptime             = "uptime"
 	FoundationAccount            = "account"
+	FoundationEngagement         = "engagement"
 )
 
 // foundationNames are the images every foundation names.
@@ -45,6 +46,19 @@ var foundationNames = map[string]bool{
 	FoundationEtcd: true, FoundationHAProxy: true, FoundationGarage: true, FoundationCaddy: true,
 	FoundationHeartbeat: true, FoundationPocketID: true, FoundationOperatorReconciler: true,
 	FoundationOAuth2Proxy: true, FoundationUptime: true, FoundationAccount: true,
+}
+
+// optionalFoundationNames are the images a foundation may name and need
+// not: each is a reserved blueprint's that core catalogs released before it
+// do not publish. Requiring one would make this toolkit skip every such
+// release, so a deployment without that blueprint keeps reading them, and
+// one with it is refused when its image is resolved (FoundationImage).
+var optionalFoundationNames = map[string]bool{FoundationEngagement: true}
+
+// knownFoundationName reports whether name is an image a foundation may
+// name, required or optional.
+func knownFoundationName(name string) bool {
+	return foundationNames[name] || optionalFoundationNames[name]
 }
 
 // supportedTags is, for each image the toolkit's code is written against, the
@@ -111,8 +125,8 @@ func ParseFoundation(raw []byte) (*foundationSpec, error) {
 		}
 	}
 	for _, name := range sortedKeys(s.Images) {
-		if !foundationNames[name] {
-			return nil, fmt.Errorf("%s: images.%s: not an image this toolkit runs; it runs %s", FoundationFile, name, strings.Join(sortedKeys(foundationNames), ", "))
+		if !knownFoundationName(name) {
+			return nil, fmt.Errorf("%s: images.%s: not an image this toolkit runs; it runs %s", FoundationFile, name, strings.Join(knownFoundationNames(), ", "))
 		}
 		if err := CheckFoundationImage(name, s.Images[name]); err != nil {
 			return nil, fmt.Errorf("%s: images.%s: %w", FoundationFile, name, err)
@@ -191,6 +205,14 @@ func imageTag(ref string) (string, error) {
 	return r.Tag, nil
 }
 
+// knownFoundationNames is every image a foundation may name, sorted.
+func knownFoundationNames() []string {
+	out := sortedKeys(foundationNames)
+	out = append(out, sortedKeys(optionalFoundationNames)...)
+	sort.Strings(out)
+	return out
+}
+
 func sortedKeys[V any](m map[string]V) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
@@ -249,6 +271,9 @@ func FoundationImage(name string) (string, error) {
 		return "", err
 	}
 	image, ok := s.Images[name]
+	if !ok && optionalFoundationNames[name] {
+		return "", fmt.Errorf("the core catalog's %s has no %s image; it needs a catalog release that publishes one", FoundationFile, name)
+	}
 	if !ok {
 		return "", fmt.Errorf("the core catalog's %s names no image %s", FoundationFile, name)
 	}

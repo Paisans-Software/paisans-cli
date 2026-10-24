@@ -512,7 +512,7 @@ func checkServiceImage(svc Service) error {
 	case svc.Image != "" && svc.Foundation != "":
 		return fmt.Errorf("names both image and foundation; a service runs one")
 	case svc.Foundation != "":
-		if !foundationNames[svc.Foundation] {
+		if !knownFoundationName(svc.Foundation) {
 			return fmt.Errorf("foundation: %q is not an image the foundation names", svc.Foundation)
 		}
 	case svc.Image != "":
