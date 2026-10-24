@@ -70,9 +70,8 @@ const mbinTablesPending = "has not created its tables yet"
 // none of those writes Mbin's tables: a temporary table lives in the
 // session's own schema, and a function runs with its caller's rights unless
 // it is SECURITY DEFINER, and Mbin's migrations create no function at all
-// (read at v1.16.4). CONNECT is granted all
-// the same, so the reader still connects after an operator revokes it from
-// PUBLIC.
+// (read at v1.16.4). CONNECT is granted all the same, so the reader still
+// connects after an operator revokes it from PUBLIC.
 //
 // Every statement is idempotent, so it runs on every apply. Identifiers are
 // quoted here, by QuoteIdent, rather than by format('%I') in the block:
@@ -162,10 +161,19 @@ func (p *Plan) OwedGrants() []string { return p.owedGrants }
 
 // checkLeader is a quiet apply's part of the bootstrap: whether this site's
 // Patroni leads, and so whether it grants. There is nothing to create, so it
-// is the wait for a primary and no more.
+// is the wait for a primary and no more. A failure here leaves every app
+// stack as it was, running, so it says that and not what a failed bootstrap
+// says.
 func checkLeader(plan *Plan, t Transport) error {
 	done := plan.step("wait for Patroni primary")
-	err := waitForPrimary(plan, t)
+	var roles []string
+	for _, r := range plan.Bootstrap.Readers {
+		roles = append(roles, r.Role)
+	}
+	roles = append(roles, plan.owedGrants...)
+	slices.Sort(roles)
+	roles = slices.Compact(roles)
+	err := waitForPrimary(plan, t, fmt.Sprintf("app stacks are unchanged, and only the grant of %s did not run", strings.Join(roles, ", ")))
 	if replica, ok := err.(errReplica); ok {
 		done.Done("")
 		plan.leader = replica.leader
@@ -174,7 +182,7 @@ func checkLeader(plan *Plan, t Transport) error {
 	}
 	finish(done, err)
 	if err != nil {
-		return fmt.Errorf("no reader was granted its reads: %w", err)
+		return err
 	}
 	plan.primary = true
 	return nil

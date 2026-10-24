@@ -3269,10 +3269,11 @@ each app the leftovers belong to, which is the command that takes them off
 #### A blueprint can come from a catalog
 
 The blueprints built into the toolkit are the reserved five (`pocket-id`, the
-gate, `account`, `uptime`, `engagement`). The first party ones, `mbin`,
-`wikijs` and the rest, are the **core catalog**'s, which the toolkit fetches at its newest
-release this toolkit reads (see *Images follow tracks*). Any other comes from a **catalog**: a git repository of blueprints the deployment
-declares and pins to a commit, and an app names it qualified:
+gate, `account`, `uptime`, `engagement`). The first party ones, `mbin`, `wikijs`
+and the rest, are the **core catalog**'s, which the toolkit fetches at its
+newest release this toolkit reads (see *Images follow tracks*). Any other comes
+from a **catalog**: a git repository of blueprints the deployment declares and
+pins to a commit, and an app names it qualified:
 
 ```yaml
 catalogs:

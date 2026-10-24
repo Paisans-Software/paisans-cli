@@ -224,7 +224,10 @@ func (e errReplica) Error() string { return "replica of " + e.leader }
 // docs/rest_api.rst, "GET /cluster"). curl runs inside the Spilo container,
 // which installs it (zalando/spilo, postgres-appliance/build_scripts/
 // prepare.sh), so the host needs nothing beyond Docker.
-func waitForPrimary(plan *Plan, t Transport) error {
+//
+// stopped is what the apply did not do because of a failure here, which
+// differs between the bootstrap and a quiet apply's leader check.
+func waitForPrimary(plan *Plan, t Transport, stopped string) error {
 	command := fmt.Sprintf("%s curl -s --max-time 5 http://%s/cluster", patroniCompose(plan.Deployment), plan.Bootstrap.Patroni)
 	infra := plan.Deployment.ComposeCmd(infraStack)
 	attempts := int(primaryWait / primaryPoll)
@@ -243,8 +246,8 @@ func waitForPrimary(plan *Plan, t Transport) error {
 				return errReplica{leader: leader}
 			case leader != "":
 				return fmt.Errorf(
-					"%s: Patroni's leader is %q, which is not one of cluster.sites (%s), so no app database was created and no app stack was started. Each Patroni member's name must equal its site's name; read PATRONI_NAME in %s and `%s logs patroni` on the leader's host",
-					plan.Site, leader, strings.Join(plan.Bootstrap.ClusterSites, ", "), plan.Deployment.Path(infraStack, "patroni.env"), infra)
+					"%s: Patroni's leader is %q, which is not one of cluster.sites (%s), so %s. Each Patroni member's name must equal its site's name; read PATRONI_NAME in %s and `%s logs patroni` on the leader's host, then apply again",
+					plan.Site, leader, strings.Join(plan.Bootstrap.ClusterSites, ", "), stopped, plan.Deployment.Path(infraStack, "patroni.env"), infra)
 			}
 			last = strings.TrimSpace(out)
 		} else {
@@ -255,8 +258,8 @@ func waitForPrimary(plan *Plan, t Transport) error {
 		}
 	}
 	return fmt.Errorf(
-		"%s: no Patroni primary after %s, so no app database was created and no app stack was started. Last answer from %s:\n%s\nRead `%s logs patroni` on the host; \"waiting on etcd\" on a new deployment means a member of etcd.members has not been applied yet. Then apply again: it resumes here",
-		plan.Site, primaryWait, plan.Bootstrap.Patroni, last, infra)
+		"%s: no Patroni primary after %s, so %s. Last answer from %s:\n%s\nRead `%s logs patroni` on the host; \"waiting on etcd\" on a new deployment means a member of etcd.members has not been applied yet. Then apply again: it resumes here",
+		plan.Site, primaryWait, stopped, plan.Bootstrap.Patroni, last, infra)
 }
 
 func contains(list []string, s string) bool {
@@ -414,7 +417,7 @@ func runBootstrap(plan *Plan, t Transport) error {
 		}
 	}
 	done := plan.step("wait for Patroni primary")
-	err := waitForPrimary(plan, t)
+	err := waitForPrimary(plan, t, "no app database was created and no app stack was started")
 	if _, replica := err.(errReplica); replica {
 		done.Done("")
 	} else {

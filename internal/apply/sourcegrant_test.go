@@ -502,3 +502,44 @@ func TestAReplicaKeepsAnOwedGrant(t *testing.T) {
 		t.Errorf("a replica dropped an owed grant: %q", record)
 	}
 }
+
+// A quiet apply that cannot tell who leads fails, since the grant did not
+// run, and says what it left alone: every app stack is as it was, so the
+// bootstrap's "no app stack was started" would be untrue here.
+func TestAQuietApplyThatFindsNoLeaderSaysTheAppsAreUntouched(t *testing.T) {
+	for _, c := range []struct {
+		name, leader, want string
+	}{
+		{"no primary", "", "no Patroni primary after"},
+		{"a leader outside cluster.sites", "stranger", `Patroni's leader is "stranger"`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			noWait(t)
+			host := &orderedHost{fakeHost: newHost()}
+			if err := apply.Execute(bootstrapPlan(t, host.fakeHost), host); err != nil {
+				t.Fatal(err)
+			}
+			host.commands, host.inputs = nil, nil
+			host.leader = c.leader
+			again := bootstrapPlan(t, host.fakeHost)
+			if len(again.Actions) != 0 {
+				t.Fatalf("the second apply has actions, so it does not test a quiet apply: %+v", again.Actions)
+			}
+			err := apply.Execute(again, host)
+			if err == nil {
+				t.Fatal("a quiet apply that found no leader passed")
+			}
+			for _, want := range []string{c.want, "app stacks are unchanged", "only the grant of digest_reader did not run", "logs patroni", "then apply again"} {
+				if !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(want)) {
+					t.Errorf("the failure does not say %q:\n%v", want, err)
+				}
+			}
+			if strings.Contains(err.Error(), "no app stack was started") || strings.Contains(err.Error(), "no app database was created") {
+				t.Errorf("the failure says the bootstrap's consequence, which is untrue here:\n%v", err)
+			}
+			if host.ran(`\connect`) {
+				t.Error("the grant ran with no leader known")
+			}
+		})
+	}
+}
