@@ -1,8 +1,10 @@
 # A weekly digest email for every member
 
-Status: draft, awaiting the founder's approval. Settled in session on
-2026-10-24 except where a line is marked *provisional*, which is the
-author's call and open to correction.
+Status: approved by the founder in session, 2026-10-24. Implemented by
+`feat/engagement-blueprint` here, `feat/weekly-digest` in
+`paisans-engagement-service` and `feat/engagement-image` in
+`paisans-blueprints`. A line marked *provisional* is the author's call
+and open to correction.
 
 ## Why
 
