@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"sort"
 	"strings"
 
@@ -92,6 +93,21 @@ func ReadVariableKeyFor(command string) (VariableKey, error) {
 		Hint:    fmt.Sprintf("the SOPS_AGE_* variables hold %d age keys, and %s needs one", len(order), command),
 		Explain: variablesHoldSeveral(command, strings.Join(lines, "\n")),
 	}
+}
+
+// VariablesHolding is every set SOPS_AGE_* variable that holds the key
+// whose public key is recipient, among others or alone, in the order
+// ageVariables lists them. A variable that cannot be read holds nothing
+// here: it is looked through, not judged.
+func VariablesHolding(recipient string) []string {
+	var out []string
+	for _, name := range AgeVariablesSet() {
+		recipients, err := variableRecipients(name, os.Getenv(name))
+		if err == nil && slices.Contains(recipients, recipient) {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 func variableUnreadable(command, name string) string {

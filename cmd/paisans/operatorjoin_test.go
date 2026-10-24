@@ -20,8 +20,9 @@ import (
 )
 
 // joinFixture is carol's workstation after she answered alice's invite: the
-// invite and alice's key recorded in dir, carol's ssh key in the agent, and
-// her age key in the keystore. The sites serve a history whose root, v1, is
+// invite and alice's key pending in the data directory, her age key bound
+// there and kept in the keystore, carol's ssh key in the agent, and dir an
+// empty folder to join in. The sites serve a history whose root, v1, is
 // the invite's, and whose head lists carol when the fixture was made so.
 type joinFixture struct {
 	dir        string
@@ -70,6 +71,7 @@ func encryptedFixtureSecrets(t *testing.T, recipient string) []byte {
 func newJoinFixture(t *testing.T, listed, opens bool) joinFixture {
 	t.Helper()
 	withoutAgeKey(t)
+	withDataDir(t)
 	alicePriv, alicePub := testKey(t)
 	carolPriv, carolPub := testKey(t)
 	carol, _ := age.GenerateX25519Identity()
@@ -112,9 +114,13 @@ func newJoinFixture(t *testing.T, listed, opens bool) joinFixture {
 		t.Fatal(problemText(err))
 	}
 
-	// carol's workstation holds the recorded answer, and nothing else.
+	// carol's workstation holds what her answer recorded, and an empty
+	// folder.
 	dir := t.TempDir()
-	if err := recordJoin(dir, invite.Bytes(), alicePub, ageKey{Recipient: carol.Recipient().String(), Source: joinAgeSource}); err != nil {
+	if err := recordAgeBinding(fixtureDeploymentID, ageKey{Recipient: carol.Recipient().String(), Source: joinAgeSource}); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordPending(fixtureDeploymentID, invite.Bytes(), alicePub); err != nil {
 		t.Fatal(err)
 	}
 	var runs []string
@@ -232,6 +238,12 @@ func TestJoinRecoversAndAttests(t *testing.T) {
 	if strings.Contains(out, "operator add --request") || !strings.Contains(out, "open the secrets with your age key") {
 		t.Fatalf("secrets that open named a remedy, or were not checked:\n%s", out)
 	}
+	if _, err := os.Stat(filepath.Join(dataDir(t), "invites", fixtureDeploymentID)); !os.IsNotExist(err) {
+		t.Errorf("the pending invite was kept after the join: %v", err)
+	}
+	if recipient, _ := recordedAge(t, fixtureDeploymentID); recipient == "" {
+		t.Error("the age binding was removed")
+	}
 	// Once the files are there, register is register.
 	if _, err := f.register(t); err != nil {
 		t.Fatal(problemText(err))
@@ -286,7 +298,7 @@ func TestJoinSaysWhenYourKeyIsNotReached(t *testing.T) {
 	if !(configstore.Local{Dir: f.dir}).HasFiles() || !pushed(*f.runs) {
 		t.Fatal("the join did not complete")
 	}
-	recipient, _, err := readJoinAge(f.dir)
+	recipient, _, _, err := readAgeBinding(fixtureDeploymentID)
 	if err != nil || recipient == "" {
 		t.Fatalf("no recorded age key: %v", err)
 	}
@@ -322,7 +334,7 @@ func TestJoinRefusedLoginNamesTheInvitesHosts(t *testing.T) {
 	}
 	_, err := f.register(t, "--execute")
 	wantAskInviter(t, err)
-	inv, _, _ := joinRecorded(configstore.Local{Dir: f.dir})
+	inv, _, _ := pendingInvite(fixtureDeploymentID)
 	text := problemText(err)
 	for _, s := range inv.Sites {
 		host := config.Destination{User: s.User, Host: s.Host, Port: s.Port}.String()
@@ -355,8 +367,9 @@ func TestJoinSaysTheSitesHoldAFork(t *testing.T) {
 	recoverHosts(t, answer)
 	allSitesUp(answer, f.runs)
 	_, err = f.register(t, "--execute")
-	if err == nil || !strings.Contains(problemText(err), "the sites hold a fork") || strings.Contains(problemText(err), "do not know you") {
-		t.Fatalf("got %s", problemText(err))
+	text := problemText(err)
+	if err == nil || !strings.Contains(text, "the sites hold a fork") || strings.Contains(text, "do not know you") {
+		t.Fatalf("got %s", text)
 	}
 	f.wroteNothing(t)
 	if _, statErr := os.Stat(configstore.Local{Dir: f.dir}.Incoming()); !os.IsNotExist(statErr) {
@@ -427,6 +440,7 @@ func TestJoinRefusesRootAndKey(t *testing.T) {
 // named opens the joined secrets, and her key signs from then on.
 func TestInviteAnswerAcceptJoin(t *testing.T) {
 	withoutAgeKey(t)
+	withDataDir(t)
 	alicePriv, alicePub := testKey(t)
 	carolPriv, carolPub := testKey(t)
 	aliceAge, _ := age.GenerateX25519Identity()
@@ -474,12 +488,10 @@ func TestInviteAnswerAcceptJoin(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 2. carol answers it on her own workstation.
+	// 2. carol answers it on her own workstation, in one folder.
 	as(carolKeys, carolPriv, carolPub)
-	dir := t.TempDir()
-	carolConfig := filepath.Join(dir, config.FileName)
 	var request bytes.Buffer
-	if err := runOperatorRegister([]string{"--invite", inviteFile, "--inviter-key", alicePub, "--name", "Carol Jones", "--email", "carol@example.org", "--config", carolConfig}, noTerminalStdin(), &request); err != nil {
+	if err := runOperatorRegister([]string{"--invite", inviteFile, "--inviter-key", alicePub, "--name", "Carol Jones", "--email", "carol@example.org", "--config", filepath.Join(t.TempDir(), config.FileName)}, noTerminalStdin(), &request); err != nil {
 		t.Fatal(problemText(err))
 	}
 	q, _, err := operatorinvite.ParseRequest(request.Bytes())
@@ -512,8 +524,10 @@ func TestInviteAnswerAcceptJoin(t *testing.T) {
 	allSitesUp(answer, &runs)
 	report := plainReporter(t)
 
-	// 5. carol joins.
+	// 5. carol joins, in another folder.
 	as(carolKeys, carolPriv, carolPub)
+	dir := t.TempDir()
+	carolConfig := filepath.Join(dir, config.FileName)
 	if err := runOperator([]string{"register", "--config", carolConfig, "--execute"}, noTerminalStdin(), &bytes.Buffer{}); err != nil {
 		t.Fatalf("%s\n%s", problemText(err), report.String())
 	}
@@ -539,5 +553,44 @@ func TestInviteAnswerAcceptJoin(t *testing.T) {
 	}
 	if !strings.Contains(report.String(), "open the secrets with your age key") || strings.Contains(report.String(), "they do not open") {
 		t.Fatalf("the join's check failed:\n%s", report.String())
+	}
+}
+
+// With invites to two deployments pending, an empty folder's join is refused
+// naming both, and --id selects one; an --id with no pending invite is
+// refused.
+func TestJoinSelectsAPendingInvite(t *testing.T) {
+	f := newJoinFixture(t, true, true)
+	const otherID = "11111111-2222-4333-8444-555555555555"
+	if err := recordPending(otherID, []byte("an invite\n"), f.carolPub); err != nil {
+		t.Fatal(err)
+	}
+	_, err := f.register(t)
+	text := problemText(err)
+	if err == nil || !strings.Contains(text, fixtureDeploymentID) || !strings.Contains(text, otherID) || !strings.Contains(text, "--id") {
+		t.Fatalf("got %s", text)
+	}
+	f.wroteNothing(t)
+	if _, err := f.register(t, "--id", "22222222-2222-4333-8444-555555555555"); err == nil || !strings.Contains(problemText(err), "22222222-2222-4333-8444-555555555555") {
+		t.Fatalf("an id with no pending invite: %v", problemText(err))
+	}
+	out, err := f.register(t, "--id", fixtureDeploymentID)
+	if err != nil {
+		t.Fatal(problemText(err))
+	}
+	if !strings.Contains(out, "join ") {
+		t.Fatalf("--id did not join:\n%s", out)
+	}
+}
+
+// --id selects a pending invite for a folder without files; one with files
+// registers, and takes none.
+func TestRegisterRefusesIDBesideFiles(t *testing.T) {
+	f := newJoinFixture(t, true, true)
+	if _, err := f.register(t, "--execute"); err != nil {
+		t.Fatal(problemText(err))
+	}
+	if _, err := f.register(t, "--id", fixtureDeploymentID); err == nil || !strings.Contains(problemText(err), "--id") {
+		t.Fatalf("got %v", problemText(err))
 	}
 }

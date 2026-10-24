@@ -12,6 +12,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/keystore"
+	"github.com/paisans-software/paisans-cli/internal/localstore"
 	"github.com/paisans-software/paisans-cli/internal/operatorinvite"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -33,6 +34,7 @@ type answerFixture struct {
 func newAnswerFixture(t *testing.T) answerFixture {
 	t.Helper()
 	withoutAgeKey(t)
+	withDataDir(t)
 	ks := keystore.NewMemory()
 	withKeystore(t, ks)
 	reporterOverride = ui.NewPlain(io.Discard, false)
@@ -78,28 +80,40 @@ func TestAnswerWritesSignedRequest(t *testing.T) {
 	if !strings.HasPrefix(q.Age, "age1") || q.Age != want.Recipient {
 		t.Fatalf("age %q, want %q", q.Age, want.Recipient)
 	}
-	got, err := os.ReadFile(filepath.Join(dir, ".paisans", "invite"))
+	base := dataDir(t)
+	got, err := os.ReadFile(filepath.Join(base, "invites", inv.Deployment, "invite"))
 	if err != nil || !bytes.Equal(got, f.invite) {
-		t.Fatalf("recorded invite %q, %v", got, err)
+		t.Fatalf("pending invite %q, %v", got, err)
 	}
-	invite, key, ok, err := readJoin(dir)
+	invite, key, ok, err := readPending(inv.Deployment)
 	if err != nil || !ok || !bytes.Equal(invite, f.invite) || key != f.inviterKey {
-		t.Fatalf("readJoin: %q %q %v %v", invite, key, ok, err)
+		t.Fatalf("readPending: %q %q %v %v", invite, key, ok, err)
 	}
-	for path, mode := range map[string]os.FileMode{".paisans": 0o700, ".paisans/invite": 0o600, ".paisans/inviter.pub": 0o600, ".paisans/age-recipient": 0o600} {
-		info, err := os.Stat(filepath.Join(dir, path))
+	if recipient, _ := recordedAge(t, inv.Deployment); recipient != q.Age {
+		t.Errorf("bound %q, want %q", recipient, q.Age)
+	}
+	for path, mode := range map[string]os.FileMode{
+		"invites/" + inv.Deployment:                  0o700,
+		"invites/" + inv.Deployment + "/invite":      0o600,
+		"invites/" + inv.Deployment + "/inviter.pub": 0o600,
+		"age":                                  0o700,
+		"age/" + inv.Deployment + ".recipient": 0o600,
+	} {
+		info, err := os.Stat(filepath.Join(base, path))
 		if err != nil || info.Mode().Perm() != mode {
 			t.Errorf("%s: %v, %v, want %v", path, info, err, mode)
 		}
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Errorf("the answer wrote %d entries into the folder", len(entries))
 	}
 }
 
 func TestAnswerTwiceSameAgeKey(t *testing.T) {
 	f := newAnswerFixture(t)
-	dir := t.TempDir()
 	var ages []string
 	for range 2 {
-		err, out := f.answer(dir, f.inviterKey)
+		err, out := f.answer(t.TempDir(), f.inviterKey)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -138,58 +152,6 @@ func TestAnswerRefusesKeyNotInAgent(t *testing.T) {
 		t.Fatalf("got %q", problemText(err))
 	}
 	f.nothingMade(t, dir, out)
-}
-
-func TestAnswerRefusesOtherDeploymentHere(t *testing.T) {
-	f := newAnswerFixture(t)
-	dir := t.TempDir()
-	body, err := os.ReadFile(fixtureConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
-	other := strings.Replace(string(body), "id: "+fixtureDeploymentID, "id: 11111111-2222-4333-8444-555555555555", 1)
-	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte(other), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	err, out := f.answer(dir, f.inviterKey)
-	if err == nil || !strings.Contains(problemText(err), "--config") {
-		t.Fatalf("got %q", problemText(err))
-	}
-	if _, statErr := os.Stat(filepath.Join(dir, ".paisans")); statErr == nil {
-		t.Error(".paisans was created")
-	}
-	if len(out) != 0 || len(f.keystore.Items) != 0 {
-		t.Errorf("wrote %q, keystore %v", out, f.keystore.Items)
-	}
-}
-
-func TestAnswerRefusesARecordedInviteForAnotherDeployment(t *testing.T) {
-	f := newAnswerFixture(t)
-	dir := t.TempDir()
-	// An invite for another deployment, signed by carol's own key standing
-	// as its inviter, recorded as an earlier answer would have.
-	inv, _, err := operatorinvite.InviteSigner(f.invite)
-	if err != nil {
-		t.Fatal(err)
-	}
-	k, _, _ := config.ParseKeyLine(f.carolPub)
-	inv.Deployment = "11111111-2222-4333-8444-555555555555"
-	inv.Inviter.Fingerprint = k.Fingerprint
-	body := operatorinvite.EncodeInvite(inv)
-	sig, err := operatorinvite.Sign(f.carolPub, operatorinvite.InviteNamespace, body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := recordJoin(dir, operatorinvite.Signed(body, sig), f.carolPub, ageKey{}); err != nil {
-		t.Fatal(err)
-	}
-	err, out := f.answer(dir, f.inviterKey)
-	if err == nil || !strings.Contains(problemText(err), "--config") {
-		t.Fatalf("got %q", problemText(err))
-	}
-	if len(out) != 0 || len(f.keystore.Items) != 0 {
-		t.Errorf("wrote %q, keystore %v", out, f.keystore.Items)
-	}
 }
 
 func TestAnswerWithoutTerminalNeedsNameAndEmail(t *testing.T) {
@@ -257,78 +219,10 @@ func (f answerFixture) nothingMade(t *testing.T, dir string, out []byte) {
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 		t.Errorf("%s holds %d entries", dir, len(entries))
 	}
-}
-
-func TestAnswerRefusesADifferentInviteRecordedHere(t *testing.T) {
-	f := newAnswerFixture(t)
-	dir := t.TempDir()
-	if err, _ := f.answer(dir, f.inviterKey); err != nil {
-		t.Fatal(err)
-	}
-	// Same deployment, another invite: the bytes differ.
-	inv, _, err := operatorinvite.InviteSigner(f.invite)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Another operator, dave, invites the same key to the same deployment.
-	davePriv, davePub := testKey(t)
-	dk, _, _ := config.ParseKeyLine(davePub)
-	inv.Inviter = operatorinvite.Inviter{Name: "dave", Fingerprint: dk.Fingerprint}
-	body := operatorinvite.EncodeInvite(inv)
-	signFromFile(t, davePriv)
-	sig, err := operatorinvite.Sign(davePub, operatorinvite.InviteNamespace, body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	signFromFile(t, f.carolPriv)
-	other := operatorinvite.Signed(body, sig)
-	var out bytes.Buffer
-	err = answerInvite(ui.NewPlain(io.Discard, false), dir, other, davePub, "Carol Jones", "carol@example.org", "", strings.NewReader(""), &out)
-	if err == nil || !strings.Contains(problemText(err), "--config") || !strings.Contains(problemText(err), "remove") {
-		t.Fatalf("got %q", problemText(err))
-	}
-	if out.Len() != 0 {
-		t.Errorf("wrote %q", out.String())
-	}
-	got, _ := os.ReadFile(filepath.Join(dir, ".paisans", "invite"))
-	if !bytes.Equal(got, f.invite) {
-		t.Error("the recorded invite was replaced")
-	}
-}
-
-func TestReadJoinWithoutInviteIsNotRecorded(t *testing.T) {
-	f := newAnswerFixture(t)
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".paisans"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".paisans", "inviter.pub"), []byte(f.inviterKey+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, ok, err := readJoin(dir); ok || err != nil {
-		t.Fatalf("ok %v, err %v", ok, err)
-	}
-	if err, out := f.answer(dir, f.inviterKey); err != nil || len(out) == 0 {
-		t.Fatalf("answering failed: %v", err)
-	}
-}
-
-func TestAnswerRefusesThisDeploymentsFilesHere(t *testing.T) {
-	f := newAnswerFixture(t)
-	dir := t.TempDir()
-	body, err := os.ReadFile(fixtureConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, config.FileName), body, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	err, out := f.answer(dir, f.inviterKey)
-	if err == nil || !strings.Contains(problemText(err), "already holds") {
-		t.Fatalf("got %q", problemText(err))
-	}
-	if len(out) != 0 || len(f.keystore.Items) != 0 {
-		t.Errorf("wrote %q, keystore %v", out, f.keystore.Items)
+	for _, sub := range []string{"invites", "age"} {
+		if entries, _ := os.ReadDir(filepath.Join(dataDir(t), sub)); len(entries) != 0 {
+			t.Errorf("the data directory's %s holds %d entries", sub, len(entries))
+		}
 	}
 }
 
@@ -351,10 +245,10 @@ func (f answerFixture) answerShowing(t *testing.T, dir, name, email, keyFile str
 	return err, out.Bytes(), report.String()
 }
 
-// recordedAge is the age key and source the answer in dir recorded.
-func recordedAge(t *testing.T, dir string) (string, string) {
+// recordedAge is the age key and source bound to deployment id.
+func recordedAge(t *testing.T, id string) (string, string) {
 	t.Helper()
-	recipient, source, err := readJoinAge(dir)
+	recipient, source, _, err := readAgeBinding(id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,7 +289,7 @@ func TestAnswerReadsAnExistingKeyFile(t *testing.T) {
 	if len(f.keystore.Items) != 0 {
 		t.Errorf("keystore holds %v", f.keystore.Items)
 	}
-	if recipient, source := recordedAge(t, dir); recipient != q.Age || source != keyFile {
+	if recipient, source := recordedAge(t, fixtureDeploymentID); recipient != q.Age || source != keyFile {
 		t.Errorf("recorded %q from %q, want %q from %q", recipient, source, q.Age, keyFile)
 	}
 }
@@ -436,7 +330,7 @@ func TestAnswerTakesTheVariablesKey(t *testing.T) {
 	if !strings.Contains(report, "SOPS_AGE_KEY") || strings.Contains(report, identity.String()) {
 		t.Errorf("the source is not named, or the key was printed:\n%s", report)
 	}
-	if recipient, source := recordedAge(t, dir); recipient != q.Age || !strings.Contains(source, "SOPS_AGE_KEY") {
+	if recipient, source := recordedAge(t, fixtureDeploymentID); recipient != q.Age || !strings.Contains(source, "SOPS_AGE_KEY") {
 		t.Errorf("recorded %q from %q", recipient, source)
 	}
 }
@@ -474,5 +368,198 @@ func TestAnswerSaysWhatComesNext(t *testing.T) {
 		if !strings.Contains(report, want) {
 			t.Errorf("lacks %q:\n%s", want, report)
 		}
+	}
+}
+
+// withDataDir points the workstation's data directory at a directory of the
+// test's own.
+func withDataDir(t *testing.T) {
+	t.Helper()
+	t.Setenv(localstore.DirVariable, t.TempDir())
+}
+
+// dataDir is the workstation's data directory.
+func dataDir(t *testing.T) string {
+	t.Helper()
+	base, err := localstore.Base()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base
+}
+
+// The answer reads and writes nothing in the folder: one holding another
+// deployment's files answers as an empty one does, and is left as it was.
+func TestAnswerLeavesTheFolderAlone(t *testing.T) {
+	f := newAnswerFixture(t)
+	dir := t.TempDir()
+	body, err := os.ReadFile(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := strings.Replace(string(body), "id: "+fixtureDeploymentID, "id: 11111111-2222-4333-8444-555555555555", 1)
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte(other), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err, out := f.answer(dir, f.inviterKey); err != nil || len(out) == 0 {
+		t.Fatalf("got %q", problemText(err))
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Errorf("the folder holds %d entries, want its one file", len(entries))
+	}
+}
+
+// otherInvite is an invite to f's deployment for carol's key from another
+// operator, dave, and dave's key line.
+func (f answerFixture) otherInvite(t *testing.T) ([]byte, string) {
+	t.Helper()
+	inv, _, err := operatorinvite.InviteSigner(f.invite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	davePriv, davePub := testKey(t)
+	dk, _, _ := config.ParseKeyLine(davePub)
+	inv.Inviter = operatorinvite.Inviter{Name: "dave", Fingerprint: dk.Fingerprint}
+	body := operatorinvite.EncodeInvite(inv)
+	signFromFile(t, davePriv)
+	sig, err := operatorinvite.Sign(davePub, operatorinvite.InviteNamespace, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signFromFile(t, f.carolPriv)
+	return operatorinvite.Signed(body, sig), davePub
+}
+
+// A second, different invite to a deployment whose invite is pending is
+// refused, from any folder, naming the pending invite to remove; the
+// pending one is kept. The identical invite answers again.
+func TestAnswerRefusesASecondInviteWhilePending(t *testing.T) {
+	f := newAnswerFixture(t)
+	if err, _ := f.answer(t.TempDir(), f.inviterKey); err != nil {
+		t.Fatal(err)
+	}
+	other, davePub := f.otherInvite(t)
+	var out bytes.Buffer
+	err := answerInvite(ui.NewPlain(io.Discard, false), t.TempDir(), other, davePub, "Carol Jones", "carol@example.org", "", strings.NewReader(""), &out)
+	pending := filepath.Join(dataDir(t), "invites", fixtureDeploymentID, "invite")
+	if err == nil || !strings.Contains(problemText(err), ui.ShortPath(pending)) {
+		t.Fatalf("got %q", problemText(err))
+	}
+	if out.Len() != 0 {
+		t.Errorf("wrote %q", out.String())
+	}
+	if got, _ := os.ReadFile(pending); !bytes.Equal(got, f.invite) {
+		t.Error("the pending invite was replaced")
+	}
+	if err, out := f.answer(t.TempDir(), f.inviterKey); err != nil || len(out) == 0 {
+		t.Fatalf("the identical invite: %q", problemText(err))
+	}
+}
+
+// A pending invite is one whose invite file, written last, is there.
+func TestReadPendingWithoutInviteIsNotPending(t *testing.T) {
+	f := newAnswerFixture(t)
+	dir := filepath.Join(dataDir(t), "invites", fixtureDeploymentID)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "inviter.pub"), []byte(f.inviterKey+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok, err := readPending(fixtureDeploymentID); ok || err != nil {
+		t.Fatalf("ok %v, err %v", ok, err)
+	}
+	if ids, err := pendingInvites(); err != nil || len(ids) != 0 {
+		t.Fatalf("pending %v, %v", ids, err)
+	}
+	if err, out := f.answer(t.TempDir(), f.inviterKey); err != nil || len(out) == 0 {
+		t.Fatalf("answering failed: %v", err)
+	}
+}
+
+// requestAge is the age key the request in out names.
+func requestAge(t *testing.T, out []byte) string {
+	t.Helper()
+	q, _, err := operatorinvite.ParseRequest(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return q.Age
+}
+
+// A later answer, in another folder, with a SOPS_AGE_KEY set to another key,
+// names the key the first answer bound, found in the keystore, and says the
+// variable is set beside it.
+func TestReanswerUsesTheBoundKeyOverAVariable(t *testing.T) {
+	f := newAnswerFixture(t)
+	err, out := f.answer(t.TempDir(), f.inviterKey)
+	if err != nil {
+		t.Fatal(problemText(err))
+	}
+	first := requestAge(t, out)
+	other, _ := age.GenerateX25519Identity()
+	t.Setenv("SOPS_AGE_KEY", other.String())
+	err, out, report := f.answerShowing(t, t.TempDir(), "Carol Jones", "carol@example.org", "", strings.NewReader(""))
+	if err != nil {
+		t.Fatal(problemText(err))
+	}
+	if got := requestAge(t, out); got != first {
+		t.Fatalf("age %q, want the bound %q", got, first)
+	}
+	if !strings.Contains(report, "SOPS_AGE_KEY") {
+		t.Errorf("the variable beside the bound key is not said:\n%s", report)
+	}
+	if len(f.keystore.Items) != 1 {
+		t.Errorf("the store holds %d items, want 1", len(f.keystore.Items))
+	}
+}
+
+// A later answer without the --age-private-key-file the first one read finds
+// the bound key in the keystore.
+func TestReanswerFindsTheBoundKeyInTheKeystore(t *testing.T) {
+	f := newAnswerFixture(t)
+	identity, _ := age.GenerateX25519Identity()
+	keyFile := filepath.Join(t.TempDir(), "carol.key")
+	if err := os.WriteFile(keyFile, []byte(identity.String()+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err, _, _ := f.answerShowing(t, t.TempDir(), "Carol Jones", "carol@example.org", keyFile, strings.NewReader("")); err != nil {
+		t.Fatal(problemText(err))
+	}
+	if err := f.keystore.Put(fixtureDeploymentID, identity.String(), identity.Recipient().String()); err != nil {
+		t.Fatal(err)
+	}
+	err, out := f.answer(t.TempDir(), f.inviterKey)
+	if err != nil {
+		t.Fatal(problemText(err))
+	}
+	if got := requestAge(t, out); got != identity.Recipient().String() {
+		t.Fatalf("age %q, want the bound %q", got, identity.Recipient())
+	}
+}
+
+// A later answer where no source holds the bound key is refused, naming the
+// key and the binding file, and makes no key and writes nothing.
+func TestReanswerRefusesWithoutTheBoundKey(t *testing.T) {
+	f := newAnswerFixture(t)
+	identity, _ := age.GenerateX25519Identity()
+	t.Setenv("SOPS_AGE_KEY", identity.String())
+	if err, _ := f.answer(t.TempDir(), f.inviterKey); err != nil {
+		t.Fatal(problemText(err))
+	}
+	t.Setenv("SOPS_AGE_KEY", "")
+	os.Unsetenv("SOPS_AGE_KEY")
+	binding := filepath.Join(dataDir(t), "age", fixtureDeploymentID+".recipient")
+	before, _ := os.ReadFile(binding)
+	err, out := f.answer(t.TempDir(), f.inviterKey)
+	text := problemText(err)
+	if err == nil || !strings.Contains(text, identity.Recipient().String()) || !strings.Contains(text, ui.ShortPath(binding)) {
+		t.Fatalf("got %q", text)
+	}
+	if len(out) != 0 || len(f.keystore.Items) != 0 {
+		t.Errorf("wrote %q, keystore %v", out, f.keystore.Items)
+	}
+	if after, _ := os.ReadFile(binding); !bytes.Equal(before, after) {
+		t.Error("the binding changed")
 	}
 }

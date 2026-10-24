@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"filippo.io/age"
 
@@ -130,6 +131,70 @@ func operatorAgeKey(r ui.Reporter, command, id, configPath, keyFile string) (age
 	noteKeyHome(r, keyFile, export)
 	r.Warn("this is the only copy of the age key", "Losing it loses access to every secret encrypted to it. Keep a backup of "+k.Source+".")
 	return k, nil
+}
+
+// boundAgeKey is the age key bound to deployment id, whose public key is
+// bound and which the answer that bound it found at boundSource. Every
+// source operatorAgeKey takes is searched for it, and the first in that
+// order that holds it is used, even where an earlier source holds another
+// key: a SOPS_AGE_* variable, the keystore item for id, and keyFile when it
+// exists. None holding it is refused, and no key is made in its place.
+func boundAgeKey(r ui.Reporter, id, bound, boundSource, keyFile string) (ageKey, error) {
+	step := r.Step("age key")
+	if variables := config.VariablesHolding(bound); len(variables) > 0 {
+		step.Done("bound to this deployment, from " + andList(variables) + ", public key " + bound)
+		return ageKey{Recipient: bound, Source: "from " + andList(variables)}, nil
+	}
+	// A key found elsewhere while a variable is set is one the later
+	// commands do not decrypt with.
+	besides := func() {
+		if set := config.AgeVariablesSet(); len(set) > 0 {
+			r.Warn(andList(set)+" is set and does not hold the age key bound to this deployment", "Every later command decrypts with what "+andList(set)+" reads, so the bound key is not used while it is set. Unset it, or point it at the bound key.")
+		}
+	}
+	stored, err := config.AgeKeystore.Get(id)
+	switch {
+	case err == nil:
+		if recipient, err := recipientOf(stored); err == nil && recipient == bound {
+			source := config.AgeKeystore.Describe(id)
+			step.Done("bound to this deployment, " + source + ", public key " + bound)
+			besides()
+			return ageKey{Recipient: bound, Source: source}, nil
+		}
+	case !errors.Is(err, keystore.ErrNotFound) && !errors.Is(err, keystore.ErrUnavailable):
+		err = &ui.Problem{Hint: "the keystore could not be read", Explain: "Looking for " + config.AgeKeystore.Describe(id) + " failed. Nothing was made or written.", Cause: err}
+		step.Fail(err)
+		return ageKey{}, err
+	}
+	if keyFile != "" {
+		abs, err := filepath.Abs(keyFile)
+		if err != nil {
+			return ageKey{}, err
+		}
+		if info, err := os.Stat(abs); err == nil && !info.IsDir() {
+			if recipient, err := readKeyFile(abs); err == nil && recipient == bound {
+				source := ui.ShortPath(abs)
+				step.Done("bound to this deployment, " + source + ", public key " + bound)
+				besides()
+				noteKeyHome(r, keyFile, "SOPS_AGE_KEY_FILE="+shellQuote(abs))
+				return ageKey{Recipient: bound, Source: source, where: abs}, nil
+			}
+		}
+	}
+	binding, err := ageBindingPath(id)
+	if err != nil {
+		return ageKey{}, err
+	}
+	from := ""
+	if boundSource != "" {
+		from = ", which it took from " + strings.TrimPrefix(boundSource, "from ")
+	}
+	err = &ui.Problem{
+		Hint:    "no age key here is the one bound to this deployment",
+		Explain: fmt.Sprintf("The first answer for deployment %s named the age key %s%s, and every later answer names the same one, so that what the inviter accepts opens with it. No SOPS_AGE_* variable, %s or --age-private-key-file holds it. Make it reachable through one of them and run this again, or remove %s to start over with another key. Nothing was made or written.", id, bound, from, config.AgeKeystore.Describe(id), ui.ShortPath(binding)),
+	}
+	step.Fail(err)
+	return ageKey{}, err
 }
 
 // recipientOf is the public key of the age secret key in key.

@@ -60,6 +60,7 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 	inviterKey := fs.String("inviter-key", "", "with --invite: the inviting operator's public key, a .pub file or the key line")
 	name := fs.String("name", "", "with --invite: your full name, first and last; asked for at a terminal when not given")
 	email := fs.String("email", "", "with --invite: your email address; asked for at a terminal when not given")
+	id := fs.String("id", "", "with no files here: join the invite pending for this deployment id, when invites to several are pending")
 	ageFile := fs.String("age-private-key-file", "", "with --invite: keep a new age key in this file, outside the configuration's directory, rather than the keystore; an existing file is read")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -68,8 +69,8 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 		return &ui.Problem{Hint: "operator register takes no argument", Explain: "Got " + strings.Join(fs.Args(), " ") + "."}
 	}
 	if *invite != "" {
-		if *keyPath != "" || *root != "" || *execute {
-			return &ui.Problem{Hint: "--invite answers an invite and registers nothing", Explain: "--key, --root and --execute belong to registering, which comes after the invite is accepted."}
+		if *keyPath != "" || *root != "" || *execute || *id != "" {
+			return &ui.Problem{Hint: "--invite answers an invite and registers nothing", Explain: "--key, --root, --id and --execute belong to registering, which comes after the invite is accepted."}
 		}
 		return registerInvite(*invite, *inviterKey, *name, *email, *ageFile, *configPath, stdin, stdout)
 	}
@@ -86,16 +87,19 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 	if err != nil {
 		return err
 	}
-	// Where an answer recorded an invite and the files are not there yet,
+	// Where the files are not there and an answer left an invite pending,
 	// register joins: the invite names the root and the key.
+	if l.HasFiles() && *id != "" {
+		return &ui.Problem{Hint: "--id selects a pending invite to join, and " + ui.ShortPath(l.Dir) + " holds the files", Explain: "A join writes the files into a directory without them. Here register registers, and reads the deployment from " + config.FileName + "; run it without --id."}
+	}
 	if !l.HasFiles() {
-		invite, ok, err := joinRecorded(l)
+		invite, ok, err := selectPending(*id)
 		if err != nil {
 			return err
 		}
 		if ok {
 			if *keyPath != "" || *root != "" {
-				return &ui.Problem{Hint: "--key and --root do not apply to a join", Explain: "The invite recorded here names the key you sign with and the root trust starts from."}
+				return &ui.Problem{Hint: "--key and --root do not apply to a join", Explain: "The pending invite names the key you sign with and the root trust starts from."}
 			}
 			return joinInvite(reporter(), l, invite, *execute, ans, stdin, stdout)
 		}

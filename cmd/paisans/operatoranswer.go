@@ -11,6 +11,8 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/create"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/localstore"
 	"github.com/paisans-software/paisans-cli/internal/operatorinvite"
 	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -21,21 +23,25 @@ import (
 // workstation, checks an invite, makes their age key, gives a name and an
 // email, and writes a signed request to stdout. It reaches no host.
 
-// The invite, the inviter's key and the age key the request names are
-// recorded under .paisans/ for the join that follows the operator's
-// acceptance. ageRecipientFile holds the age public key on its first line and where
-// the answer found the key on its second.
+// What an answer records lives in the workstation's data directory
+// (localstore.Base), keyed by the deployment id, so the join can run in any
+// folder: the pending invite, verbatim, and the inviter's key under
+// invites/<id>/, and the age key the first answer for the deployment named
+// under age/<id>.recipient, its public key on the first line and where the
+// answer found it on the second.
 const (
-	inviteFile       = "invite"
-	inviterFile      = "inviter.pub"
-	ageRecipientFile = "age-recipient"
+	inviteFile  = "invite"
+	inviterFile = "inviter.pub"
 )
 
 // answerInvite answers the signed invite with a request on stdout, and
-// records the invite and inviterKey under dir/.paisans/. Nothing is made, in
-// the keystore or in dir, until the invite verifies, the agent holds its
-// key, and dir holds no other deployment's files. name and email are asked
-// for at a terminal when they are not given.
+// records it and inviterKey as the deployment's pending invite. Nothing is
+// made or written until the invite verifies, the agent holds its key, and
+// no other invite to the deployment is pending. The first answer for a
+// deployment binds the age key it names to it; every later one names the
+// bound key. dir is only where the key file check looks; nothing in it is
+// read or written. name and email are asked for at a terminal when they are
+// not given.
 func answerInvite(r ui.Reporter, dir string, invite []byte, inviterKey, name, email, keyFile string, stdin io.Reader, stdout io.Writer) error {
 	step := r.Step("check invite")
 	inv, err := operatorinvite.ParseInvite(invite, inviterKey)
@@ -61,7 +67,11 @@ func answerInvite(r ui.Reporter, dir string, invite []byte, inviterKey, name, em
 	}
 	step.Done(key.Fingerprint)
 
-	if err := checkAnswerDir(dir, inv, invite); err != nil {
+	if err := checkPending(inv.Deployment, invite); err != nil {
+		return err
+	}
+	bound, boundSource, isBound, err := readAgeBinding(inv.Deployment)
+	if err != nil {
 		return err
 	}
 
@@ -72,8 +82,12 @@ func answerInvite(r ui.Reporter, dir string, invite []byte, inviterKey, name, em
 		}
 	}
 
-	configPath := filepath.Join(dir, config.FileName)
-	age, err := operatorAgeKey(r, "operator register", inv.Deployment, configPath, keyFile)
+	var age ageKey
+	if isBound {
+		age, err = boundAgeKey(r, inv.Deployment, bound, boundSource, keyFile)
+	} else {
+		age, err = operatorAgeKey(r, "operator register", inv.Deployment, filepath.Join(dir, config.FileName), keyFile)
+	}
 	if err != nil {
 		return err
 	}
@@ -102,13 +116,18 @@ func answerInvite(r ui.Reporter, dir string, invite []byte, inviterKey, name, em
 	}
 	step.Done("")
 
-	if err := recordJoin(dir, invite, inviterKey, age); err != nil {
+	if !isBound {
+		if err := recordAgeBinding(inv.Deployment, age); err != nil {
+			return err
+		}
+	}
+	if err := recordPending(inv.Deployment, invite, inviterKey); err != nil {
 		return err
 	}
 	if _, err := stdout.Write(operatorinvite.Signed(body, sig)); err != nil {
 		return err
 	}
-	r.Note("send the request to "+inv.Inviter.Name, "Once they have accepted it with "+progname.Cmd()+" operator add --request and applied it with "+progname.Cmd()+" deployment apply --execute, run "+progname.Cmd()+" operator register --execute in "+ui.ShortPath(dir)+".")
+	r.Note("send the request to "+inv.Inviter.Name, "Once they have accepted it with "+progname.Cmd()+" operator add --request and applied it with "+progname.Cmd()+" deployment apply --execute, run "+progname.Cmd()+" operator register --execute in an empty directory, where the files go.")
 	return nil
 }
 
@@ -141,71 +160,80 @@ func askAnswer(p *create.Prompter, q, given string, check func(string) error) (s
 	return p.Text(q, "", check)
 }
 
-// checkAnswerDir refuses a directory that belongs to another answer: one
-// holding a paisans-stack.yaml, which the join that follows would not
-// apply, or an invite recorded for another deployment.
-func checkAnswerDir(dir string, inv operatorinvite.Invite, invite []byte) error {
-	other := func(what string) error {
-		return &ui.Problem{
-			Hint:    ui.ShortPath(dir) + " " + what,
-			Explain: "Answer the invite in an empty directory, or name one with --config <dir>/" + config.FileName + ". Nothing was made or written.",
-		}
+// invitesDir is where pending invites are kept, one directory per
+// deployment id.
+func invitesDir() (string, error) {
+	base, err := localstore.Base()
+	return filepath.Join(base, "invites"), err
+}
+
+// pendingDir is the directory of deployment id's pending invite. The id is
+// checked first, since it becomes a path.
+func pendingDir(id string) (string, error) {
+	if !deployment.ValidID(id) {
+		return "", fmt.Errorf("%q is not a deployment id", id)
 	}
-	switch cfg, err := config.Load(filepath.Join(dir, config.FileName)); {
-	case err == nil && cfg.ID != inv.Deployment:
-		return other("holds another deployment's " + config.FileName)
-	case err == nil:
-		return &ui.Problem{
-			Hint:    ui.ShortPath(dir) + " already holds this deployment's " + config.FileName,
-			Explain: "An operator who has the files does not join from an invite. Answer it in an empty directory, or name one with --config <dir>/" + config.FileName + ". Nothing was made or written.",
-		}
-	case !errors.Is(err, os.ErrNotExist):
+	dir, err := invitesDir()
+	return filepath.Join(dir, id), err
+}
+
+// ageBindingPath is the file that binds deployment id to the age key its
+// first answer named.
+func ageBindingPath(id string) (string, error) {
+	if !deployment.ValidID(id) {
+		return "", fmt.Errorf("%q is not a deployment id", id)
+	}
+	base, err := localstore.Base()
+	return filepath.Join(base, "age", id+".recipient"), err
+}
+
+// checkPending refuses an invite to a deployment whose pending invite is
+// another one: the request that answered it may still be on its way, so it
+// is not replaced. The same invite answers again.
+func checkPending(id string, invite []byte) error {
+	pending, _, ok, err := readPending(id)
+	if err != nil || !ok || bytes.Equal(pending, invite) {
 		return err
 	}
-	recorded, _, ok, err := readJoin(dir)
+	dir, err := pendingDir(id)
 	if err != nil {
 		return err
 	}
-	if ok {
-		i, _, err := operatorinvite.InviteSigner(recorded)
-		if err != nil {
-			return &ui.Problem{Hint: "the invite recorded in " + ui.ShortPath(dir) + " cannot be read", Explain: "Remove " + ui.ShortPath(filepath.Join(dir, ".paisans", inviteFile)) + " or name another directory with --config. Nothing was made or written.", Cause: err}
-		}
-		if i.Deployment != inv.Deployment {
-			return other("records an invite to another deployment")
-		}
-		if !bytes.Equal(recorded, invite) {
-			return &ui.Problem{
-				Hint:    ui.ShortPath(dir) + " records a different invite",
-				Explain: "An earlier request answered it, and may still be on its way, so the record is not replaced. Answer this invite in a new directory with --config <dir>/" + config.FileName + ", or remove " + ui.ShortPath(filepath.Join(dir, ".paisans", inviteFile)) + " if the old invite is abandoned. Nothing was made or written.",
-			}
-		}
+	return &ui.Problem{
+		Hint:    "another invite to deployment " + id + " is pending",
+		Explain: "An earlier request answered it, and may still be on its way, so it is not replaced. Join it with " + progname.Cmd() + " operator register --execute once it is accepted, or remove " + ui.ShortPath(filepath.Join(dir, inviteFile)) + " if it is abandoned, then run this again. Nothing was made or written.",
 	}
-	return nil
 }
 
-// recordJoin writes the inviter's key, the age key the request names and
-// then the invite, verbatim, under dir/.paisans/, each through a temporary
-// file and a rename. The invite is written last: readJoin takes it as the
-// mark that the record is whole.
-func recordJoin(dir string, invite []byte, inviterKey string, age ageKey) error {
-	state := filepath.Join(dir, ".paisans")
-	if err := os.MkdirAll(state, 0o700); err != nil {
+// recordPending writes the inviter's key and then the invite, verbatim, as
+// deployment id's pending invite, each through a temporary file and a
+// rename. The invite is written last: readPending takes it as the mark that
+// the record is whole.
+func recordPending(id string, invite []byte, inviterKey string) error {
+	dir, err := pendingDir(id)
+	if err != nil {
 		return err
 	}
-	for _, f := range []struct {
-		name string
-		data []byte
-	}{
-		{inviterFile, []byte(strings.TrimSpace(inviterKey) + "\n")},
-		{ageRecipientFile, []byte(age.Recipient + "\n" + age.home() + "\n")},
-		{inviteFile, invite},
-	} {
-		if err := writeFileAtomic(filepath.Join(state, f.name), f.data); err != nil {
-			return err
-		}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
 	}
-	return nil
+	if err := writeFileAtomic(filepath.Join(dir, inviterFile), []byte(strings.TrimSpace(inviterKey)+"\n")); err != nil {
+		return err
+	}
+	return writeFileAtomic(filepath.Join(dir, inviteFile), invite)
+}
+
+// recordAgeBinding binds deployment id to age: its public key, and where it
+// is kept, said in full.
+func recordAgeBinding(id string, age ageKey) error {
+	path, err := ageBindingPath(id)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return writeFileAtomic(path, []byte(age.Recipient+"\n"+age.home()+"\n"))
 }
 
 // writeFileAtomic writes data to path at 0600 through a synced file renamed
@@ -233,39 +261,83 @@ func writeFileAtomic(path string, data []byte) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-// readJoin is the invite and inviter's key an answer recorded in dir. ok is
+// readPending is deployment id's pending invite and the inviter's key. ok is
 // false when the invite, which is written last, is not there.
-func readJoin(dir string) (invite []byte, inviterKey string, ok bool, err error) {
-	invite, err = os.ReadFile(filepath.Join(dir, ".paisans", inviteFile))
+func readPending(id string) (invite []byte, inviterKey string, ok bool, err error) {
+	dir, err := pendingDir(id)
+	if err != nil {
+		return nil, "", false, err
+	}
+	invite, err = os.ReadFile(filepath.Join(dir, inviteFile))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, "", false, nil
 	}
 	if err != nil {
 		return nil, "", false, err
 	}
-	key, err := os.ReadFile(filepath.Join(dir, ".paisans", inviterFile))
+	key, err := os.ReadFile(filepath.Join(dir, inviterFile))
 	if err != nil {
 		return nil, "", false, err
 	}
 	return invite, string(bytes.TrimSpace(key)), true, nil
 }
 
-// readJoinAge is the age public key the answer in dir named in its request,
-// and where it found the key. Both are empty when none is recorded.
-func readJoinAge(dir string) (recipient, source string, err error) {
-	data, err := os.ReadFile(filepath.Join(dir, ".paisans", ageRecipientFile))
+// pendingInvites is the id of every deployment with a pending invite,
+// sorted.
+func pendingInvites() ([]string, error) {
+	dir, err := invitesDir()
+	if err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
-		return "", "", nil
+		return nil, nil
 	}
 	if err != nil {
-		return "", "", err
+		return nil, err
+	}
+	var ids []string
+	for _, e := range entries {
+		if !e.IsDir() || !deployment.ValidID(e.Name()) {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(dir, e.Name(), inviteFile)); err == nil {
+			ids = append(ids, e.Name())
+		}
+	}
+	return ids, nil
+}
+
+// removePending removes deployment id's pending invite, once joined.
+func removePending(id string) error {
+	dir, err := pendingDir(id)
+	if err != nil {
+		return err
+	}
+	return os.RemoveAll(dir)
+}
+
+// readAgeBinding is the age public key bound to deployment id, and where the
+// answer that bound it found the key. ok is false when none is bound.
+func readAgeBinding(id string) (recipient, source string, ok bool, err error) {
+	path, err := ageBindingPath(id)
+	if err != nil {
+		return "", "", false, err
+	}
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", "", false, nil
+	}
+	if err != nil {
+		return "", "", false, err
 	}
 	recipient, source, _ = strings.Cut(strings.TrimSpace(string(data)), "\n")
-	return strings.TrimSpace(recipient), strings.TrimSpace(source), nil
+	recipient = strings.TrimSpace(recipient)
+	return recipient, strings.TrimSpace(source), recipient != "", nil
 }
 
 // registerInvite is operator register --invite: it reads the invite file and
-// the inviter's key, and answers beside configPath. Progress goes to stderr,
+// the inviter's key, and answers them. Progress goes to stderr,
 // so stdout holds the request alone.
 func registerInvite(inviteArg, inviterArg, name, email, keyFile, configPath string, stdin io.Reader, stdout io.Writer) error {
 	if inviterArg == "" {

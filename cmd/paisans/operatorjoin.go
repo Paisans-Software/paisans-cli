@@ -19,27 +19,59 @@ import (
 
 // What follows is the join of `paisans operator register`
 // (docs/specs/2026-10-24-operator-invite.md, *operator register, again:
-// joining*): run where an answer recorded an invite, before the deployment's
-// files are there, register recovers them from the invite's root and sites,
-// then signs their attestation with the invite's key.
+// joining*): run in a folder without the deployment's files, with an
+// invite an answer left pending, register recovers them from the invite's
+// root and sites, then signs their attestation with the invite's key.
 
-// joinRecorded is the invite an answer recorded in l.Dir, checked again
-// against the inviter's key recorded beside it. ok is false when none is
-// recorded.
-func joinRecorded(l configstore.Local) (_ operatorinvite.Invite, ok bool, err error) {
-	signed, inviterKey, ok, err := readJoin(l.Dir)
+// pendingInvite is deployment id's pending invite, checked again against
+// the inviter's key recorded beside it. ok is false when none is pending.
+func pendingInvite(id string) (_ operatorinvite.Invite, ok bool, err error) {
+	signed, inviterKey, ok, err := readPending(id)
 	if err != nil || !ok {
 		return operatorinvite.Invite{}, false, err
 	}
 	inv, err := operatorinvite.ParseInvite(signed, inviterKey)
 	if err != nil {
+		dir, _ := pendingDir(id)
 		return inv, false, &ui.Problem{
-			Hint:    "the invite recorded in " + ui.ShortPath(l.Dir) + " cannot be used",
-			Explain: "It does not verify with the inviter's key recorded beside it, in " + ui.ShortPath(filepath.Join(l.Dir, ".paisans", inviterFile)) + ". Answer the invite again with " + progname.Cmd() + " operator register --invite <file> --inviter-key <key>. Nothing was written.",
+			Hint:    "the pending invite to deployment " + id + " cannot be used",
+			Explain: "It does not verify with the inviter's key recorded beside it, in " + ui.ShortPath(filepath.Join(dir, inviterFile)) + ". Answer the invite again with " + progname.Cmd() + " operator register --invite <file> --inviter-key <key>. Nothing was written.",
 			Cause:   err,
 		}
 	}
 	return inv, true, nil
+}
+
+// selectPending is the pending invite a join in a folder without files
+// takes: the one for id when id is given, else the only one pending. ok is
+// false when none is pending and no id is given. Which of several is never
+// guessed.
+func selectPending(id string) (_ operatorinvite.Invite, ok bool, err error) {
+	ids, err := pendingInvites()
+	if err != nil {
+		return operatorinvite.Invite{}, false, err
+	}
+	if id != "" {
+		inv, ok, err := pendingInvite(id)
+		if err == nil && !ok {
+			pending := "None is pending."
+			if len(ids) > 0 {
+				pending = "Invites to " + andList(ids) + " are pending."
+			}
+			err = &ui.Problem{Hint: "no invite to deployment " + id + " is pending", Explain: pending + " An invite is pending once " + progname.Cmd() + " operator register --invite has answered it. Nothing was written."}
+		}
+		return inv, ok, err
+	}
+	switch len(ids) {
+	case 0:
+		return operatorinvite.Invite{}, false, nil
+	case 1:
+		return pendingInvite(ids[0])
+	}
+	return operatorinvite.Invite{}, false, &ui.Problem{
+		Hint:    fmt.Sprintf("invites to %d deployments are pending", len(ids)),
+		Explain: "Which one to join here is not guessed: " + strings.Join(ids, ", ") + ". Name it with --id <deployment-id>. Nothing was written.",
+	}
 }
 
 // joinInvite recovers the deployment invite names into l, from the invite's
@@ -47,6 +79,8 @@ func joinRecorded(l configstore.Local) (_ operatorinvite.Invite, ok bool, err er
 // its username, and with execute signs the attestation of the recovered
 // version with that key. A root a site serves is never trusted in place of
 // the invite's. Whether the recovered secrets open is said, not refused.
+// Once the files are written the invite is no longer pending, since from
+// then on register in l.Dir is plain register; the age binding is kept.
 func joinInvite(r ui.Reporter, l configstore.Local, invite operatorinvite.Invite, execute bool, ans answerer, stdin io.Reader, stdout io.Writer) error {
 	key, _, err := config.ParseKeyLine(invite.Key)
 	if err != nil {
@@ -93,6 +127,9 @@ func joinInvite(r ui.Reporter, l configstore.Local, invite operatorinvite.Invite
 		r.Step("attest the recovered version, signed with "+key.Fingerprint).End(ui.Pending, "--execute will sign and push it")
 		return nil
 	}
+	if err := removePending(invite.Deployment); err != nil {
+		return err
+	}
 	path := filepath.Join(l.Dir, config.FileName)
 	checkJoinSecrets(r, l.Dir, invite.Deployment)
 	cfg, err := config.Load(path)
@@ -120,8 +157,8 @@ func notAppliedProblem(what, more string, cause error) error {
 
 // checkJoinSecrets says whether the recovered secrets in dir open with this
 // workstation's age key. One that does not is a failed check and not a
-// refusal, since the files are the operator's either way. The age key the
-// answer recorded tells whose step is missing: secrets encrypted to it that
+// refusal, since the files are the operator's either way. The age key bound
+// to the deployment tells whose step is missing: secrets encrypted to it that
 // do not open are this workstation's to fix, and secrets not encrypted to it
 // are an acceptance that did not re-encrypt them.
 func checkJoinSecrets(r ui.Reporter, dir, id string) {
@@ -134,7 +171,7 @@ func checkJoinSecrets(r ui.Reporter, dir, id string) {
 	}
 	s.End(ui.Failed, "they do not open")
 	hint, explain := ui.Describe(err)
-	recipient, source, rerr := readJoinAge(dir)
+	recipient, source, _, rerr := readAgeBinding(id)
 	data, derr := os.ReadFile(path)
 	if rerr == nil && derr == nil && recipient != "" && slices.Contains(config.FileRecipients(data), recipient) {
 		from := ""
