@@ -111,7 +111,8 @@ Mbin release that changes the schema fails the grant loudly at `apply`
 rather than widening it.
 
 The service also has **its own database** for its own state: who
-unsubscribed, and which member was sent which week.
+unsubscribed, which member was sent which week, and which threads each
+sent digest showed.
 
 ## What the email says
 
@@ -208,6 +209,18 @@ subscribes to and the member visited Mbin during the week. Mbin's
 `user.last_active` is the only visit signal, and it updates at most once a
 day, so it says the member was there, not that they saw this thread
 (*provisional*).
+
+### Already sent
+
+Founder decision, 2026-10-24: a thread an earlier digest showed the member
+comes back only when it has new comments this week, and then it is shown by
+this week's activity. Its excerpt is the best comment posted this week, and
+its figure is its new comments this week rather than its total. A thread
+that came back for votes alone has nothing new to show and is left out. A
+returning thread is ranked by this week's comments and people alone, so its
+history does not carry it, and it may still be the featured thread
+(*provisional* on the ranking and on leaving out a vote-only return).
+Unsubscribing forgets which threads a member was shown.
 
 ### Always excluded
 
