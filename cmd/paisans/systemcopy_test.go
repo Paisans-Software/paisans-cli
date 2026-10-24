@@ -21,17 +21,27 @@ func withDataDir(t *testing.T) {
 }
 
 // withSystemCopy points the workstation's data directory at a directory of
-// the test's own and returns deployment id's system copy there, created
-// empty.
+// the test's own and returns deployment id's system copy there, with an
+// empty store and no head.
 func withSystemCopy(t *testing.T, id string) configstore.Local {
 	t.Helper()
 	withDataDir(t)
+	return addSystemCopy(t, id)
+}
+
+// addSystemCopy is deployment id's system copy in the data directory as it
+// is, with an empty store and no head.
+func addSystemCopy(t *testing.T, id string) configstore.Local {
+	t.Helper()
 	st, err := openStore()
 	if err != nil {
 		t.Fatal(err)
 	}
 	l, err := st.Local(id)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Cache(); err != nil {
 		t.Fatal(err)
 	}
 	return l
@@ -56,10 +66,7 @@ func fixtureDraft(t *testing.T, id string) string {
 // holds; --id naming another is refused.
 func TestSystemForByDraftID(t *testing.T) {
 	want := withSystemCopy(t, fixtureDeploymentID)
-	st, _ := openStore()
-	if _, err := st.Local(otherID); err != nil {
-		t.Fatal(err)
-	}
+	addSystemCopy(t, otherID)
 	path := fixtureDraft(t, fixtureDeploymentID)
 	sys, d, id, err := systemFor(path, "")
 	if err != nil {
@@ -105,13 +112,9 @@ func TestSystemForOnlyCopy(t *testing.T) {
 // refusal lists every id.
 func TestSystemForNeedsIDWhenSeveral(t *testing.T) {
 	withSystemCopy(t, fixtureDeploymentID)
-	st, _ := openStore()
-	other, err := st.Local(otherID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	other := addSystemCopy(t, otherID)
 	path := filepath.Join(t.TempDir(), config.FileName)
-	_, _, _, err = systemFor(path, "")
+	_, _, _, err := systemFor(path, "")
 	if text := problemText(err); err == nil || !strings.Contains(text, fixtureDeploymentID) || !strings.Contains(text, otherID) || !strings.Contains(text, "--id") {
 		t.Fatalf("got %v\n%s", err, text)
 	}
@@ -149,6 +152,38 @@ func TestSystemForRefusesMissingCopy(t *testing.T) {
 			t.Errorf("%s: the folder changed", name)
 		}
 	}
+}
+
+// A deployment directory that holds no store and no head is no system
+// copy, and neither is what taking the lock leaves: a draft of it is
+// refused as one with none, and deployment list shows nothing.
+func TestSystemForIgnoresWhatIsNoCopy(t *testing.T) {
+	withDataDir(t)
+	st, err := openStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := fixtureDraft(t, fixtureDeploymentID)
+	unlock, err := st.Lock(fixtureDeploymentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+	check := func(what string) {
+		t.Helper()
+		_, _, _, err := systemFor(path, "")
+		if text := problemText(err); err == nil || !strings.Contains(text, "deployment recover") {
+			t.Errorf("%s: %v\n%s", what, err, text)
+		}
+		if listed, err := st.List(); len(listed) != 0 || err != nil {
+			t.Errorf("%s: List = %v, %v", what, listed, err)
+		}
+	}
+	check("after a lock")
+	if _, err := st.Local(fixtureDeploymentID); err != nil {
+		t.Fatal(err)
+	}
+	check("an empty directory")
 }
 
 // A draft started from the system copy is its head's files, with the line

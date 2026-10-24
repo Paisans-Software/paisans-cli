@@ -73,7 +73,7 @@ func systemFor(configPath, id string) (sys configstore.Local, d draft.Draft, dep
 		deploymentID = cfg.ID
 	case id != "":
 		if !deployment.ValidID(id) {
-			return sys, d, "", &ui.Problem{Hint: fmt.Sprintf("%q is not a deployment id", id), Explain: progname.Cmd() + " deployment list prints the id of each deployment on this workstation."}
+			return sys, d, "", &ui.Problem{Hint: fmt.Sprintf("%q is not a deployment id", id), Explain: "--id takes the whole id, as " + progname.Cmd() + " deployment list prints it for each deployment on this workstation."}
 		}
 		deploymentID = id
 	default:
@@ -106,6 +106,11 @@ func systemFor(configPath, id string) (sys configstore.Local, d draft.Draft, dep
 
 // startDraft writes the system copy's head files into d with the marker
 // naming that head. A system copy with no head has nothing to draft from.
+// The head is taken as trusted without judging it again: a system copy's
+// config-head is written only after a trust decision, by a deploy of a
+// version this workstation signed, a recovery or join that judged it, or a
+// fetch that checks out a verified head; a version a fetch sets aside never
+// becomes the head.
 func startDraft(sys configstore.Local, d draft.Draft) error {
 	m, f, err := systemHead(sys)
 	if err != nil {

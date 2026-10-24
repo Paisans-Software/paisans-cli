@@ -340,3 +340,28 @@ func TestCheckoutRefusesUnverifiedAndFork(t *testing.T) {
 		}
 	}
 }
+
+// --head naming a version the store holds but does not trust, signed by a
+// key no operator lists, is refused, and nothing is written.
+func TestCheckoutHeadRefusesAnUntrustedVersion(t *testing.T) {
+	c := newSavedCopy(t)
+	cache, err := c.l.Cache()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stranger, _ := testKey(t)
+	next := c.files[1]
+	next.Paisans = append(append([]byte{}, next.Paisans...), "# stranger\n"...)
+	sha, err := cache.Commit(next, []string{c.shas[1]}, 3, stranger, time.Unix(1_800_000_000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	err = checkout(dir, "--head", sha, "--execute")
+	if text := problemText(err); err == nil || !strings.Contains(text, "not a trusted head") || !strings.Contains(text, c.shas[1]) {
+		t.Fatalf("got %v\n%s", err, text)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Errorf("wrote %v", entries)
+	}
+}

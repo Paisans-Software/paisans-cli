@@ -74,8 +74,8 @@ func TestLocal(t *testing.T) {
 	}
 }
 
-// A record reads back, and list shows every directory, one without a
-// readable record too.
+// A record reads back, and list shows every copy, one without a readable
+// record too.
 func TestRecordAndList(t *testing.T) {
 	s := Store{Base: t.TempDir()}
 	a := Saved{ID: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01", Domain: "example.org", SHA: "0123456789abcdef0123456789abcdef01234567", Revision: 3, Status: Verified, Source: "test", SavedAt: time.Unix(1_800_000_000, 0).UTC()}
@@ -87,8 +87,14 @@ func TestRecordAndList(t *testing.T) {
 		t.Fatalf("Load = %+v, %v, %v", got, ok, err)
 	}
 	b := "0b7dc4e1-f2a9-4c3a-9e2f-5a6b7c8d9e01"
-	if _, err := s.Local(b); err != nil {
-		t.Fatal(err)
+	for _, id := range []string{a.ID, b} {
+		l, err := s.Local(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := l.Cache(); err != nil {
+			t.Fatal(err)
+		}
 	}
 	listed, err := s.List()
 	if err != nil || len(listed) != 2 {
@@ -130,8 +136,22 @@ func TestLockRefusesSecondWriter(t *testing.T) {
 		t.Fatalf("after unlock: %v", err)
 	}
 	again()
-	if _, err := os.Stat(filepath.Join(s.Base, "deployments", id, ".lock")); err != nil {
+	if _, err := os.Stat(filepath.Join(s.Base, "locks", id+".lock")); err != nil {
 		t.Errorf("lock file: %v", err)
+	}
+	// A lock taken before the copy exists, as a recovery takes it, makes
+	// no copy.
+	if _, err := os.Lstat(filepath.Join(s.Base, "deployments")); err == nil {
+		t.Error("locking made deployments/")
+	}
+	if _, ok, err := s.Held(id); ok || err != nil {
+		t.Errorf("Held after a lock: %v, %v", ok, err)
+	}
+	if listed, err := s.List(); len(listed) != 0 || err != nil {
+		t.Errorf("List after a lock: %v, %v", listed, err)
+	}
+	if _, err := s.Lock("../x"); err == nil {
+		t.Error("a path accepted as an id")
 	}
 }
 
@@ -140,11 +160,11 @@ func TestLockRefusesSecondWriter(t *testing.T) {
 func TestLockIgnoresAStaleFile(t *testing.T) {
 	s := Store{Base: t.TempDir()}
 	const id = "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
-	dir := filepath.Join(s.Base, "deployments", id)
+	dir := filepath.Join(s.Base, "locks")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, ".lock"), []byte("99999999 paisans deployment apply --execute\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, id+".lock"), []byte("99999999 paisans deployment apply --execute\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	unlock, err := s.Lock(id)
@@ -155,7 +175,8 @@ func TestLockIgnoresAStaleFile(t *testing.T) {
 }
 
 // Held opens a deployment's system copy only when it exists, and creates
-// nothing.
+// nothing. A directory with no store and no head is no copy, for Held and
+// for List alike; one with either is.
 func TestHeldCreatesNothing(t *testing.T) {
 	s := Store{Base: t.TempDir()}
 	const id = "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
@@ -165,8 +186,21 @@ func TestHeldCreatesNothing(t *testing.T) {
 	if entries, _ := os.ReadDir(s.Base); len(entries) != 0 {
 		t.Fatalf("wrote %v", entries)
 	}
-	if _, err := s.Local(id); err != nil {
+	empty, err := s.Local(id)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if _, ok, err := s.Held(id); err != nil || ok {
+		t.Fatalf("an empty directory: Held = %v, %v", ok, err)
+	}
+	if listed, err := s.List(); len(listed) != 0 || err != nil {
+		t.Fatalf("an empty directory: List = %v, %v", listed, err)
+	}
+	if _, err := empty.Cache(); err != nil {
+		t.Fatal(err)
+	}
+	if listed, err := s.List(); len(listed) != 1 || listed[0].ID != id {
+		t.Fatalf("a copy with a store: List = %v, %v", listed, err)
 	}
 	l, ok, err := s.Held(id)
 	if err != nil || !ok || l.Dir != filepath.Join(s.Base, "deployments", id) {

@@ -121,7 +121,10 @@ func (s Store) Local(id string) (configstore.Local, error) {
 }
 
 // Held is deployment id's copy when the store holds one, opened without
-// creating anything, and false when it holds none.
+// creating anything, and false when it holds none. A copy is a directory
+// with a store or a head: what a recovery, a join, a fetch or a deploy
+// wrote. An empty directory, or one holding only a record, is none, so
+// nothing but those writers ever makes a copy that trust is read from.
 func (s Store) Held(id string) (configstore.Local, bool, error) {
 	if !deployment.ValidID(id) {
 		return configstore.Local{}, false, fmt.Errorf("%q is not a deployment id", id)
@@ -137,12 +140,26 @@ func (s Store) Held(id string) (configstore.Local, bool, error) {
 	if !info.IsDir() {
 		return configstore.Local{}, false, fmt.Errorf("%s is not a directory", dir)
 	}
-	return configstore.Local{Dir: dir}, true, nil
+	l := configstore.Local{Dir: dir}
+	ok, err := isCopy(l)
+	if err != nil || !ok {
+		return configstore.Local{}, false, err
+	}
+	return l, true, nil
 }
 
-// lockFile is the file in a deployment's directory a writer holds a lock on.
-// It also names the holder, for the refusal of the next.
-const lockFile = ".lock"
+// isCopy reports whether l holds a store or a head.
+func isCopy(l configstore.Local) (bool, error) {
+	if _, ok, err := l.HeldStore(); err != nil || ok {
+		return ok, err
+	}
+	head, err := l.Head()
+	return head != "", err
+}
+
+// locksDir holds one lock file per deployment, outside deployments/, so
+// taking a lock never makes a directory that reads as a copy.
+func (s Store) locksDir() string { return filepath.Join(s.Base, "locks") }
 
 // LockedError is a lock another writer holds.
 type LockedError struct {
@@ -163,18 +180,22 @@ func (e *LockedError) Error() string {
 	return "the system copy of " + e.ID + " is being written by " + holder
 }
 
-// Lock takes the lock on deployment id's copy, which every command that
-// writes the copy holds while it does, so two writers never interleave. It
-// does not wait: a lock another process holds is a *LockedError naming it.
-// The lock is the operating system's, released when its holder exits, so a
-// lock file a process left behind when it died does not block the next. The
-// returned func releases the lock and leaves the file.
+// Lock takes the lock on deployment id's copy, <Base>/locks/<id>.lock,
+// which every command that writes the copy holds while it does, so two
+// writers never interleave. It does not wait: a lock another process holds
+// is a *LockedError naming it. The lock is the operating system's, released
+// when its holder exits, so a lock file a process left behind when it died
+// does not block the next. It is taken before a copy exists as well, by a
+// recovery, and creates nothing under deployments/. The returned func
+// releases the lock and leaves the file.
 func (s Store) Lock(id string) (unlock func(), err error) {
-	l, err := s.Local(id)
-	if err != nil {
+	if !deployment.ValidID(id) {
+		return nil, fmt.Errorf("%q is not a deployment id", id)
+	}
+	if err := os.MkdirAll(s.locksDir(), 0o700); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(filepath.Join(l.Dir, lockFile), os.O_RDWR|os.O_CREATE, 0o600)
+	f, err := os.OpenFile(filepath.Join(s.locksDir(), id+".lock"), os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -309,9 +330,10 @@ type Listed struct {
 	Err error
 }
 
-// List is every deployment in the store, by id. A directory whose record is
-// missing or unreadable is listed with Err, not left out, since it still
-// holds whatever was written into it.
+// List is every copy in the store, by id. A copy whose record is missing or
+// unreadable is listed with Err, not left out, since it still holds whatever
+// was written into it. A directory that is no copy, holding no store and no
+// head, is left out: there is nothing in it to list.
 func (s Store) List() ([]Listed, error) {
 	entries, err := os.ReadDir(s.root())
 	if errors.Is(err, os.ErrNotExist) {
@@ -326,6 +348,13 @@ func (s Store) List() ([]Listed, error) {
 			continue
 		}
 		l := Listed{Dir: filepath.Join(s.root(), e.Name())}
+		if ok, err := isCopy(configstore.Local{Dir: l.Dir}); err == nil && !ok {
+			continue
+		} else if err != nil {
+			l.ID, l.Err = e.Name(), err
+			out = append(out, l)
+			continue
+		}
 		rec, ok, err := s.Load(e.Name())
 		switch {
 		case err != nil:
