@@ -557,10 +557,10 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	execute := fs.Bool("execute", false, "actually write files and restart services")
 	var overwrite pathList
 	fs.Var(&overwrite, "overwrite", "replace this conflicting file although it differs from the last apply's record (repeatable)")
-	var recreate pathList
-	var only pathList
-	fs.Var(&only, "only", "apply only this stack's files and actions, and leave the rest of the site as it is (repeatable)")
-	fs.Var(&recreate, "recreate", "replace every container of this stack with up -d --force-recreate, even if nothing changed (repeatable)")
+	var recreate nameList
+	var only nameList
+	fs.Var(&only, "only", "apply only this stack's files and actions, and leave the rest of the site as it is (repeatable, or comma-separated)")
+	fs.Var(&recreate, "recreate", "replace every container of this stack with up -d --force-recreate, even if nothing changed (repeatable, or comma-separated)")
 	minFree := fs.String("min-free", "3G", "free space Docker's data root must have before a stack pulls an image, Eg: 2G")
 	keepImages := fs.Bool("keep-images", false, "leave the images this apply supersedes on the host, Eg: to keep one to roll back to")
 	mustAll := fs.Bool("require-all", false, "exit 1 when the run is degraded: a site pending or down")
@@ -1660,9 +1660,9 @@ func dnsInitResult(updates, creates int, provider string) string {
 // configuration no longer implies, under the rules internal/dns/prune.go
 // states. A dry run by default, like dns init, and it reaches no host.
 func runDNSPrune(args []string) error {
-	var vouched pathList
+	var vouched nameList
 	r, cfg, wants, provider, execute, err := dnsSetup("dns prune", "actually delete the records listed as remove", args, func(fs *flag.FlagSet) {
-		fs.Var(&vouched, "name", "vouch that this exact name, outside community.domain and no longer configured, was this deployment's (repeatable)")
+		fs.Var(&vouched, "name", "vouch that this exact name, outside community.domain and no longer configured, was this deployment's (repeatable, or comma-separated)")
 	})
 	if err != nil {
 		return err
@@ -1813,11 +1813,12 @@ func warnUnencrypted(r ui.Reporter, path string) {
 	r.Warn(path+" is not encrypted", config.PlaintextSecretsVariable+"=1 is set, which reads plaintext secrets for tests and fixtures. A real deployment keeps its secrets under sops.")
 }
 
-// pathList collects a repeatable flag. --overwrite takes one path each time it
-// is given, so that every file replaced against its record was named on its
-// own: a pattern or a blanket switch would let one decision cover files the
-// operator never looked at. --recreate takes one stack each time, for the same
-// reason.
+// pathList collects a repeatable flag whose values may hold a comma, such as
+// a path or a key line, so it takes one value each time it is given.
+// --overwrite takes one path each time, so that every file replaced against
+// its record was named on its own: a pattern or a blanket switch would let one
+// decision cover files the operator never looked at. --recreate, a nameList,
+// names each stack for the same reason.
 type pathList []string
 
 func (l *pathList) String() string { return strings.Join(*l, ",") }

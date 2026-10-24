@@ -24,6 +24,9 @@ import (
 // from then on the operator's own signature is where trust starts.
 
 func runOperator(args []string, stdin io.Reader, stdout io.Writer) error {
+	if len(args) > 0 && args[0] == "add" {
+		return runOperatorAdd(args[1:], stdin, stdout)
+	}
 	if len(args) > 0 && args[0] == "register" {
 		return runOperatorRegister(args[1:], stdin, stdout)
 	}
@@ -34,9 +37,9 @@ func runOperator(args []string, stdin io.Reader, stdout io.Writer) error {
 		return runOperatorGrants(args[1:])
 	}
 	if len(args) == 0 {
-		return &ui.Problem{Hint: "operator takes one subcommand", Explain: "Use register, magic-link or grants."}
+		return &ui.Problem{Hint: "operator takes one subcommand", Explain: "Use add, register, magic-link or grants."}
 	}
-	return &ui.Problem{Hint: fmt.Sprintf("operator has no subcommand %q", args[0]), Explain: "Use register, magic-link or grants."}
+	return &ui.Problem{Hint: fmt.Sprintf("operator has no subcommand %q", args[0]), Explain: "Use add, register, magic-link or grants."}
 }
 
 func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error {

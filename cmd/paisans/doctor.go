@@ -49,8 +49,8 @@ func runDoctor(args []string) error {
 	fs := newFlagSet("doctor", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
-	var only pathList
-	fs.Var(&only, "site", "look at this site only (repeatable); every check then runs on the named sites alone")
+	var only nameList
+	fs.Var(&only, "site", "look at this site only (repeatable, or comma-separated); every check then runs on the named sites alone")
 	execute := fs.Bool("execute", false, "remove the config: keys in "+config.FileName+" that only repeat a value gating requires, before reading any site; no site is changed")
 	secretsPath := fs.String("secrets", "", "path to the secrets, which hold the DNS token the workstation's check uses (default: secrets.enc.yaml beside the config)")
 	if err := fs.Parse(args); err != nil {

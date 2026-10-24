@@ -125,3 +125,22 @@ func TestRetryLinesStayOffAStdoutThatCarriesData(t *testing.T) {
 		t.Errorf("the retry did not reach stderr:\n%s", stderr)
 	}
 }
+
+// A name list takes one name or several separated by commas each time it is
+// given, and refuses an empty one.
+func TestNameList(t *testing.T) {
+	var l nameList
+	for _, v := range []string{"a", "b, c", "d"} {
+		if err := l.Set(v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := strings.Join(l, " "); got != "a b c d" {
+		t.Errorf("got %q", got)
+	}
+	for _, bad := range []string{"", "a,,b", "a,", ",a"} {
+		if err := new(nameList).Set(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}

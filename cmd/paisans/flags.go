@@ -157,3 +157,23 @@ func errReporter(r ui.Reporter) ui.Reporter {
 	routeLoginNotes(e)
 	return e
 }
+
+// nameList collects a repeatable flag whose values are names that never
+// hold a comma, such as sites, stacks, secret paths and DNS names: each time
+// it is given it takes one name, or several separated by commas, so
+// --site a,b is --site a --site b. Each name is still given exactly; an
+// empty one, as in a,,b, is refused.
+type nameList []string
+
+func (l *nameList) String() string { return strings.Join(*l, ",") }
+
+func (l *nameList) Set(value string) error {
+	for _, name := range strings.Split(value, ",") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return fmt.Errorf("%q names nothing between two commas, or at an end", value)
+		}
+		*l = append(*l, name)
+	}
+	return nil
+}

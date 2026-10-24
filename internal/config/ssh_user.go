@@ -100,6 +100,10 @@ func lineEnding(data []byte) string {
 	return "\n"
 }
 
+// PlainString reports whether value, written plain, is read back by YAML as
+// the same string, rather than as null, a boolean, a number or anything else.
+func PlainString(value string) bool { return plainOrQuoted(value) == value }
+
 // plainOrQuoted is value as YAML is to read it back: plain when the plain
 // text is read as the same string, double quoted when it would be read as
 // something else, Eg: null or true.
