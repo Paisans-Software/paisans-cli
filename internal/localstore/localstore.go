@@ -20,10 +20,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/configstore"
@@ -114,6 +118,88 @@ func (s Store) Local(id string) (configstore.Local, error) {
 		return configstore.Local{}, err
 	}
 	return configstore.Local{Dir: dir}, nil
+}
+
+// Held is deployment id's copy when the store holds one, opened without
+// creating anything, and false when it holds none.
+func (s Store) Held(id string) (configstore.Local, bool, error) {
+	if !deployment.ValidID(id) {
+		return configstore.Local{}, false, fmt.Errorf("%q is not a deployment id", id)
+	}
+	dir := filepath.Join(s.root(), id)
+	info, err := os.Stat(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return configstore.Local{}, false, nil
+	}
+	if err != nil {
+		return configstore.Local{}, false, err
+	}
+	if !info.IsDir() {
+		return configstore.Local{}, false, fmt.Errorf("%s is not a directory", dir)
+	}
+	return configstore.Local{Dir: dir}, true, nil
+}
+
+// lockFile is the file in a deployment's directory a writer holds a lock on.
+// It also names the holder, for the refusal of the next.
+const lockFile = ".lock"
+
+// LockedError is a lock another writer holds.
+type LockedError struct {
+	ID string
+	// Holder is what the lock file says: the holder's pid and command line.
+	Holder string
+}
+
+func (e *LockedError) Error() string {
+	holder := e.Holder
+	if holder == "" {
+		holder = "another process"
+	} else if pid, cmd, ok := strings.Cut(holder, " "); ok {
+		holder = "pid " + pid + " (" + cmd + ")"
+	} else {
+		holder = "pid " + holder
+	}
+	return "the system copy of " + e.ID + " is being written by " + holder
+}
+
+// Lock takes the lock on deployment id's copy, which every command that
+// writes the copy holds while it does, so two writers never interleave. It
+// does not wait: a lock another process holds is a *LockedError naming it.
+// The lock is the operating system's, released when its holder exits, so a
+// lock file a process left behind when it died does not block the next. The
+// returned func releases the lock and leaves the file.
+func (s Store) Lock(id string) (unlock func(), err error) {
+	l, err := s.Local(id)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(filepath.Join(l.Dir, lockFile), os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		holder, _ := io.ReadAll(io.LimitReader(f, 4096))
+		f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, &LockedError{ID: id, Holder: strings.TrimSpace(string(holder))}
+		}
+		return nil, fmt.Errorf("locking %s: %w", f.Name(), err)
+	}
+	unlock = func() {
+		syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		f.Close()
+	}
+	line := strconv.Itoa(os.Getpid()) + " " + strings.Join(os.Args, " ") + "\n"
+	if err := f.Truncate(0); err != nil {
+		unlock()
+		return nil, err
+	}
+	if _, err := f.WriteAt([]byte(line), 0); err != nil {
+		unlock()
+		return nil, err
+	}
+	return unlock, nil
 }
 
 // Save makes the copy of deployment id the version sha that src's cache

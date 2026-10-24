@@ -124,16 +124,20 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	gitDirect(dir)
-	// No test saves to the operator's own deployments: every saved copy
-	// lands in a directory of the run's own.
-	dataDir, err := os.MkdirTemp("", "paisans-data-")
-	if err != nil {
+	// No test reads or writes the operator's own deployments, and none
+	// shares a system copy with another, since the fixture's id is shared:
+	// the data directory every test starts with is one that cannot be
+	// made, under a regular file, so nothing is ever kept there. A test that
+	// reads or writes a system copy gives itself a directory of its own
+	// (withDataDir, withSystemCopy).
+	blocker := filepath.Join(dir, "no-data-dir")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
 		fmt.Fprintln(os.Stderr, err)
+		os.RemoveAll(dir)
 		os.Exit(1)
 	}
-	os.Setenv(localstore.DirVariable, dataDir)
+	os.Setenv(localstore.DirVariable, filepath.Join(blocker, "data"))
 	code := m.Run()
-	os.RemoveAll(dataDir)
 	os.RemoveAll(dir)
 	os.Exit(code)
 }

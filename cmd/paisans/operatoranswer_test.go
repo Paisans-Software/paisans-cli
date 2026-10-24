@@ -371,13 +371,6 @@ func TestAnswerSaysWhatComesNext(t *testing.T) {
 	}
 }
 
-// withDataDir points the workstation's data directory at a directory of the
-// test's own.
-func withDataDir(t *testing.T) {
-	t.Helper()
-	t.Setenv(localstore.DirVariable, t.TempDir())
-}
-
 // dataDir is the workstation's data directory.
 func dataDir(t *testing.T) string {
 	t.Helper()

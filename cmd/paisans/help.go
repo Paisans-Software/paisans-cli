@@ -385,11 +385,12 @@ var helpCommands = []helpCommand{
 	},
 	{
 		name:    "deployment checkout",
-		summary: "Copy a saved deployment into an empty directory to edit.",
-		usage:   []string{"paisans deployment checkout <id, start of id, or domain> [--config " + config.FileName + "] [--execute]"},
-		detail: "Copy a deployment saved on this workstation (see deployment list) into the empty directory of --config: " + config.FileName + ", secrets.enc.yaml and .sops.yaml, and in .paisans/ the store with every version and its signature, the signing key, the pinned root, the head and the highest revision seen, so deployment log, pull and publish trust there as they do in the saved copy. " +
-			"The saved copy is judged from its own anchor first, and the copy again once written; a copy that differs is removed. Refuses a directory with any of those files, and an unverified or forked saved copy, which deployment recover --root <sha> pins instead. " +
-			"Never overwrites a file, and reaches no host. The saved copy may be behind the sites; deployment pull brings it up to date. Writes nothing without --execute.",
+		summary: "Start a draft from a deployment's system copy.",
+		usage:   []string{"paisans deployment checkout [--id <id>] [--head <sha>] [--config " + config.FileName + "] [--execute]"},
+		detail: "Write the three files of a deployment's system copy on this workstation (see deployment list) into the folder of --config, which holds no draft: " + config.FileName + ", secrets.enc.yaml and .sops.yaml, with a first line in " + config.FileName + " naming the version they were drafted from. " +
+			"The deployment is the only one on this workstation, or the one --id names. The system copy is judged from its own anchor first; an unverified or forked one is refused, which deployment recover --root <sha> pins instead. " +
+			"--head <sha> writes that trusted head of the system copy's store in place of its own version, the files a hand merge for deployment publish --merge starts from. " +
+			"Never overwrites a file, writes nothing to the system copy, and reaches no host. The system copy may be behind the sites; deployment pull brings the draft up to date. Writes nothing without --execute.",
 	},
 	{
 		name:    "deployment fetch",

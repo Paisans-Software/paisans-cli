@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -14,11 +13,12 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
+	"github.com/paisans-software/paisans-cli/internal/draft"
 	"github.com/paisans-software/paisans-cli/internal/localstore"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
-// savedCopy is a saved copy of the fixture deployment as an earlier apply
+// savedCopy is the fixture deployment's system copy as an earlier apply
 // left it: every version of a two-version history in its store, the first
 // checked out, the key that signed both recorded as its anchor. The sites
 // answer with the whole history, so the copy is one version behind them.
@@ -35,12 +35,12 @@ type savedCopy struct {
 
 func newSavedCopy(t *testing.T) savedCopy {
 	t.Helper()
-	st := ownStore(t)
-	shas, answer, files, key, pub := storedHistoryKey(t, 2, 0)
-	l, err := st.Local(fixtureID(t))
+	l := withSystemCopy(t, fixtureID(t))
+	st, err := openStore()
 	if err != nil {
 		t.Fatal(err)
 	}
+	shas, answer, files, key, pub := storedHistoryKey(t, 2, 0)
 	cache, err := l.Cache()
 	if err != nil {
 		t.Fatal(err)
@@ -70,100 +70,117 @@ func newSavedCopy(t *testing.T) savedCopy {
 	return savedCopy{st: st, l: l, shas: shas, files: files, answer: answer, key: key, pub: pub, report: &b}
 }
 
-// checkout runs deployment checkout of what into dir.
-func checkout(dir, what string, more ...string) error {
-	return runDeployment(append([]string{"checkout", what, "--config", filepath.Join(dir, config.FileName)}, more...), noTerminalStdin(), &bytes.Buffer{})
+// checkout runs deployment checkout into dir.
+func checkout(dir string, more ...string) error {
+	return runDeployment(append([]string{"checkout", "--config", filepath.Join(dir, config.FileName)}, more...), noTerminalStdin(), &bytes.Buffer{})
 }
 
-// A checkout is a workstation in its own right: the saved copy's files and
-// trust state, nothing else, and log, pull and publish work on it from the
-// key it carries, with no root pinned.
-func TestCheckoutMakesAWorkstation(t *testing.T) {
+// A checkout starts a draft from the system copy: its head's files, with the
+// line naming that head, and the system copy is left as it was.
+func TestCheckoutStartsDraft(t *testing.T) {
 	c := newSavedCopy(t)
 	dir := filepath.Join(t.TempDir(), "work")
-	if err := checkout(dir, fixtureID(t), "--execute"); err != nil {
+	if err := checkout(dir, "--execute"); err != nil {
 		t.Fatal(problemText(err))
 	}
-	l := configstore.Local{Dir: dir}
-	if got, err := l.Files(); err != nil || !got.Equal(c.files[0]) {
-		t.Fatalf("files: %v", err)
+	got, err := draft.Draft{Dir: dir}.Files()
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, name := range []string{config.FileName, "secrets.enc.yaml", ".sops.yaml", ".paisans/signing-key", ".paisans/config-head", ".paisans/config-seen"} {
-		want, _ := os.ReadFile(filepath.Join(c.l.Dir, name))
-		got, err := os.ReadFile(filepath.Join(dir, name))
-		if err != nil || !bytes.Equal(got, want) {
-			t.Errorf("%s differs from the saved copy's: %v", name, err)
-		}
-		wi, _ := os.Stat(filepath.Join(c.l.Dir, name))
-		gi, err := os.Stat(filepath.Join(dir, name))
-		if err != nil || gi.Mode().Perm() != wi.Mode().Perm() {
-			t.Errorf("%s: mode %v, the saved copy's %v", name, gi.Mode().Perm(), wi.Mode().Perm())
-		}
+	if m, ok := draft.ReadMarker(got.Paisans); !ok || m != (draft.Marker{Revision: 1, SHA: c.shas[0]}) {
+		t.Errorf("marker %v, %v", m, ok)
+	}
+	got.Paisans, got.Blueprints = draft.StripMarker(got.Paisans), c.files[0].Blueprints
+	if !got.Equal(c.files[0]) {
+		t.Error("the draft is not the system copy's files")
 	}
 	if fi, _ := os.Stat(filepath.Join(dir, "secrets.enc.yaml")); fi.Mode().Perm() != 0o600 {
 		t.Errorf("secrets.enc.yaml is %v", fi.Mode().Perm())
 	}
-	for _, name := range []string{"saved.json", ".paisans/incoming", ".paisans/config-root"} {
-		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
-			t.Errorf("%s was copied", name)
-		}
-	}
-	if b, err := os.ReadFile(filepath.Join(dir, ".paisans", ".gitignore")); err != nil || !strings.Contains(string(b), "signing-key") {
-		t.Errorf(".paisans/.gitignore: %q, %v", b, err)
+	if h, _ := c.l.Head(); h != c.shas[0] {
+		t.Errorf("the system copy moved to %s", h)
 	}
 	if !strings.Contains(c.report.String(), "deployment pull") {
 		t.Errorf("no pull suggested:\n%s", c.report.String())
 	}
-
-	cfg := filepath.Join(dir, config.FileName)
-	var out bytes.Buffer
-	if err := runDeployment([]string{"log", "--config", cfg}, noTerminalStdin(), &out); err != nil {
+	// --id names the deployment, as it does with several system copies.
+	dir = t.TempDir()
+	if err := checkout(dir, "--id", fixtureID(t), "--execute"); err != nil {
 		t.Fatal(problemText(err))
 	}
-	if !strings.Contains(out.String(), c.shas[1][:12]) || strings.Contains(out.String(), "not trusted") {
-		t.Fatalf("log:\n%s", out.String())
-	}
-	if err := runDeployment([]string{"pull", "--config", cfg, "--execute"}, noTerminalStdin(), &out); err != nil {
-		t.Fatal(problemText(err))
-	}
-	if h, _ := l.Head(); h != c.shas[1] {
-		t.Fatalf("pull left the head at %s", h)
-	}
-	savedKeys, savedSign := agentKeys, configSignWith
-	agentKeys = func() []string { return []string{c.pub} }
-	configSignWith = func(string) string { return c.key }
-	t.Cleanup(func() { agentKeys, configSignWith = savedKeys, savedSign })
-	edited := c.files[1]
-	edited.Paisans = append(append([]byte{}, edited.Paisans...), "# next\n"...)
-	if err := l.WriteFiles(edited); err != nil {
-		t.Fatal(err)
-	}
-	if err := runDeployment([]string{"publish", "--config", cfg, "--execute"}, noTerminalStdin(), &out); err != nil {
-		t.Fatal(problemText(err))
-	}
-	if h, _ := l.Head(); h == c.shas[1] || h == "" {
-		t.Fatalf("publish left the head at %q", h)
-	}
-	if r, _ := l.Root(); r != "" {
-		t.Errorf("a root was pinned: %s", r)
-	}
-	if h, _ := c.l.Head(); h != c.shas[0] {
-		t.Errorf("the saved copy moved to %s", h)
+	if !(draft.Draft{Dir: dir}).Has() {
+		t.Error("--id: nothing checked out")
 	}
 }
 
-// A pinned root is carried with the rest of the trust state.
-func TestCheckoutCarriesThePinnedRoot(t *testing.T) {
+// --head writes a trusted head of the system copy's store, which need not be
+// the system copy's own files, with the line naming it; a version that is
+// not a trusted head is refused.
+func TestCheckoutHeadWritesThatHead(t *testing.T) {
 	c := newSavedCopy(t)
-	if err := c.l.SetRoot(c.shas[0]); err != nil {
-		t.Fatal(err)
-	}
 	dir := t.TempDir()
-	if err := checkout(dir, fixtureID(t), "--execute"); err != nil {
+	if err := checkout(dir, "--head", c.shas[1], "--execute"); err != nil {
 		t.Fatal(problemText(err))
 	}
-	if r, _ := (configstore.Local{Dir: dir}).Root(); r != c.shas[0] {
-		t.Errorf("root %q", r)
+	got, err := draft.Draft{Dir: dir}.Files()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m, ok := draft.ReadMarker(got.Paisans); !ok || m != (draft.Marker{Revision: 2, SHA: c.shas[1]}) {
+		t.Errorf("marker %v, %v", m, ok)
+	}
+	got.Paisans, got.Blueprints = draft.StripMarker(got.Paisans), c.files[1].Blueprints
+	if !got.Equal(c.files[1]) {
+		t.Error("the draft is not the head's files")
+	}
+	if h, _ := c.l.Head(); h != c.shas[0] {
+		t.Errorf("the system copy moved to %s", h)
+	}
+	for _, sha := range []string{c.shas[0], strings.Repeat("0", 40), "nonsense"} {
+		dir := t.TempDir()
+		err := checkout(dir, "--head", sha, "--execute")
+		if text := problemText(err); err == nil || !strings.Contains(text, c.shas[1]) {
+			t.Errorf("%s: %v\n%s", sha, err, text)
+		}
+		if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+			t.Errorf("%s: wrote %v", sha, entries)
+		}
+	}
+}
+
+// A folder that holds any of the three files is refused, and nothing in it
+// is written.
+func TestCheckoutRefusesExistingDraft(t *testing.T) {
+	newSavedCopy(t)
+	for _, existing := range []string{config.FileName, "secrets.enc.yaml", ".sops.yaml"} {
+		dir := t.TempDir()
+		path := filepath.Join(dir, existing)
+		os.WriteFile(path, []byte("mine\n"), 0o644)
+		err := checkout(dir, "--execute")
+		if text := problemText(err); err == nil || !strings.Contains(text, "already") {
+			t.Errorf("%s present: %v\n%s", existing, err, text)
+		}
+		if b, _ := os.ReadFile(path); string(b) != "mine\n" {
+			t.Errorf("%s was overwritten", existing)
+		}
+		if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+			t.Errorf("%s present: wrote %v", existing, entries)
+		}
+	}
+}
+
+// No checkout writes .paisans/ into the folder: neither a dry run, nor
+// --execute, nor --head.
+func TestNoFolderStateFromCheckout(t *testing.T) {
+	c := newSavedCopy(t)
+	for _, more := range [][]string{nil, {"--execute"}, {"--head", c.shas[1], "--execute"}} {
+		dir := t.TempDir()
+		if err := checkout(dir, more...); err != nil {
+			t.Fatal(problemText(err))
+		}
+		if _, err := os.Lstat(filepath.Join(dir, ".paisans")); err == nil {
+			t.Errorf("%v: .paisans written", more)
+		}
 	}
 }
 
@@ -171,9 +188,9 @@ func TestCheckoutCarriesThePinnedRoot(t *testing.T) {
 // would write in full, and the version.
 func TestCheckoutDryRunWritesNothing(t *testing.T) {
 	c := newSavedCopy(t)
-	dir, id := t.TempDir(), fixtureID(t)
+	dir := t.TempDir()
 	t.Chdir(dir)
-	if err := runDeployment([]string{"checkout", id}, noTerminalStdin(), &bytes.Buffer{}); err != nil {
+	if err := runDeployment([]string{"checkout"}, noTerminalStdin(), &bytes.Buffer{}); err != nil {
 		t.Fatal(problemText(err))
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
@@ -181,7 +198,7 @@ func TestCheckoutDryRunWritesNothing(t *testing.T) {
 	}
 	abs, _ := os.Getwd()
 	out := c.report.String()
-	for _, want := range []string{"revision 1", c.shas[0][:12], filepath.Join(abs, config.FileName), filepath.Join(abs, ".paisans", "store.git"), filepath.Join(abs, ".paisans", "signing-key"), "--execute"} {
+	for _, want := range []string{"revision 1", c.shas[0][:12], filepath.Join(abs, config.FileName), filepath.Join(abs, "secrets.enc.yaml"), "--execute"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("dry run lacks %q:\n%s", want, out)
 		}
@@ -218,7 +235,7 @@ func tree(t *testing.T, dir string) map[string]string {
 	return out
 }
 
-// Checking a saved copy out reads it and writes nothing to it, not even the
+// Checking out reads the system copy and writes nothing to it, not even the
 // .gitignore or the store's settings opening a workstation's store for
 // writing would put back: neither a dry run nor --execute.
 func TestCheckoutLeavesTheSavedCopyAsItWas(t *testing.T) {
@@ -228,7 +245,7 @@ func TestCheckoutLeavesTheSavedCopyAsItWas(t *testing.T) {
 	}
 	before := tree(t, c.st.Base)
 	for _, more := range [][]string{nil, {"--execute"}} {
-		if err := checkout(t.TempDir(), fixtureID(t), more...); err != nil {
+		if err := checkout(t.TempDir(), more...); err != nil {
 			t.Fatal(problemText(err))
 		}
 		after := tree(t, c.st.Base)
@@ -245,78 +262,7 @@ func TestCheckoutLeavesTheSavedCopyAsItWas(t *testing.T) {
 	}
 }
 
-// The deployment is found by its id, a unique prefix of it, or its domain.
-func TestCheckoutFindsByPrefixAndDomain(t *testing.T) {
-	newSavedCopy(t)
-	for _, what := range []string{fixtureID(t)[:4], "example.org"} {
-		dir := t.TempDir()
-		if err := checkout(dir, what, "--execute"); err != nil {
-			t.Fatalf("%s: %s", what, problemText(err))
-		}
-		if !(configstore.Local{Dir: dir}).HasFiles() {
-			t.Errorf("%s: nothing checked out", what)
-		}
-	}
-}
-
-// An unknown or ambiguous id names deployment list; a non-empty target is
-// refused as recover refuses it; an unverified or forked copy names the
-// recovery that pins a root. None writes anything.
-func TestCheckoutRefusals(t *testing.T) {
-	c := newSavedCopy(t)
-	const other = "f2a90000-0b7d-4c3a-9e2f-5a6b7c8d9e01"
-	if err := c.st.Record(localstore.Saved{ID: other, Domain: "example.org", SHA: c.shas[0], Revision: 1, Status: localstore.Verified}); err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct{ what, want string }{
-		{"0000", "deployment list"},
-		{"", "empty name"},
-		{"f2a9", "more than one"},
-		{"example.org", "more than one"},
-	} {
-		dir := t.TempDir()
-		err := checkout(dir, tc.what, "--execute")
-		if text := problemText(err); err == nil || !strings.Contains(text, tc.want) {
-			t.Errorf("%s: %v\n%s", tc.what, err, text)
-		}
-		if entries, _ := os.ReadDir(dir); len(entries) != 0 {
-			t.Errorf("%s: wrote %v", tc.what, entries)
-		}
-	}
-
-	for _, existing := range []string{config.FileName, ".paisans/signing-key", ".paisans/store.git", ".paisans/incoming"} {
-		dir := t.TempDir()
-		path := filepath.Join(dir, existing)
-		os.MkdirAll(filepath.Dir(path), 0o755)
-		os.WriteFile(path, []byte("mine\n"), 0o644)
-		err := checkout(dir, fixtureID(t), "--execute")
-		if text := problemText(err); err == nil || !strings.Contains(text, "already") {
-			t.Errorf("%s present: %v\n%s", existing, err, text)
-		}
-		if b, _ := os.ReadFile(path); string(b) != "mine\n" {
-			t.Errorf("%s was overwritten", existing)
-		}
-		if (configstore.Local{Dir: dir}).HasFiles() != (existing == config.FileName) {
-			t.Errorf("%s present: files were written", existing)
-		}
-	}
-
-	for _, status := range []localstore.Status{localstore.Unverified, localstore.Fork} {
-		if err := c.st.Record(localstore.Saved{ID: fixtureID(t), Domain: "example.org", SHA: c.shas[1], Revision: 2, Status: status}); err != nil {
-			t.Fatal(err)
-		}
-		dir := t.TempDir()
-		err := checkout(dir, fixtureID(t), "--execute")
-		if text := problemText(err); err == nil || !strings.Contains(text, string(status)) || !strings.Contains(text, "deployment recover") || !strings.Contains(text, "--root") {
-			t.Errorf("%s: %v\n%s", status, err, text)
-		}
-		if entries, _ := os.ReadDir(dir); len(entries) != 0 {
-			t.Errorf("%s: wrote %v", status, entries)
-		}
-	}
-}
-
-// A saved copy whose head the trust rules do not reach from its own anchor
+// A system copy whose head the trust rules do not reach from its own anchor
 // is not checked out: the checkout would carry a trust it does not have.
 func TestCheckoutRefusesACopyItsAnchorDoesNotTrust(t *testing.T) {
 	c := newSavedCopy(t)
@@ -325,7 +271,7 @@ func TestCheckoutRefusesACopyItsAnchorDoesNotTrust(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	err := checkout(dir, fixtureID(t), "--execute")
+	err := checkout(dir, "--execute")
 	if text := problemText(err); err == nil || !strings.Contains(text, "--root") {
 		t.Fatalf("got %v\n%s", err, text)
 	}
@@ -334,7 +280,7 @@ func TestCheckoutRefusesACopyItsAnchorDoesNotTrust(t *testing.T) {
 	}
 }
 
-// A saved copy whose files are not the version it records is refused, so
+// A system copy whose files are not the version it records is refused, so
 // a checkout's files are always a version its store holds.
 func TestCheckoutRefusesEditedSavedFiles(t *testing.T) {
 	c := newSavedCopy(t)
@@ -344,7 +290,7 @@ func TestCheckoutRefusesEditedSavedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	err := checkout(dir, fixtureID(t), "--execute")
+	err := checkout(dir, "--execute")
 	if text := problemText(err); err == nil || !strings.Contains(text, "deployment fetch") {
 		t.Fatalf("got %v\n%s", err, text)
 	}
@@ -353,84 +299,7 @@ func TestCheckoutRefusesEditedSavedFiles(t *testing.T) {
 	}
 }
 
-// A checkout that fails part way removes everything it wrote, the
-// directories it made included, and leaves a directory that was there, empty,
-// as it was. A saved file that is not a regular file is one such failure.
-func TestCheckoutRemovesWhatItWroteOnAFailure(t *testing.T) {
-	c := newSavedCopy(t)
-	sops := filepath.Join(c.l.Dir, ".sops.yaml")
-	real := filepath.Join(t.TempDir(), "sops")
-	b, _ := os.ReadFile(sops)
-	os.WriteFile(real, b, 0o644)
-	os.Remove(sops)
-	if err := os.Symlink(real, sops); err != nil {
-		t.Fatal(err)
-	}
-	base := t.TempDir()
-	for _, dir := range []string{filepath.Join(base, "new", "work"), base} {
-		err := checkout(dir, fixtureID(t), "--execute")
-		if text := problemText(err); err == nil || !strings.Contains(text, "could not be written") || !strings.Contains(text, "deployment checkout") {
-			t.Fatalf("%s: %v\n%s", dir, err, text)
-		}
-	}
-	if _, err := os.Lstat(filepath.Join(base, "new")); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("the directories made were left: %v", err)
-	}
-	if entries, _ := os.ReadDir(base); len(entries) != 0 {
-		t.Errorf("left %v", entries)
-	}
-}
-
-// A copy that does not judge as the saved copy did is refused, and what was
-// written is removed.
-func TestCheckoutRemovesACopyThatJudgesOtherwise(t *testing.T) {
-	newSavedCopy(t)
-	saved := judgeCopy
-	t.Cleanup(func() { judgeCopy = saved })
-	judgeCopy = func(l configstore.Local, id string) (savedTrust, error) {
-		got, err := judge(l, id)
-		got.revision++
-		return got, err
-	}
-	dir := t.TempDir()
-	err := checkout(dir, fixtureID(t), "--execute")
-	if text := problemText(err); err == nil || !strings.Contains(text, "does not judge as the saved copy") {
-		t.Fatalf("got %v\n%s", err, text)
-	}
-	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
-		t.Errorf("left %v", entries)
-	}
-}
-
-// The copy's seen record and heads are part of what must judge alike.
-func TestSameTrustComparesSeenAndHeads(t *testing.T) {
-	c := newSavedCopy(t)
-	dir := t.TempDir()
-	if err := checkout(dir, fixtureID(t), "--execute"); err != nil {
-		t.Fatal(problemText(err))
-	}
-	dst := configstore.Local{Dir: dir}
-	want, err := judge(c.l, fixtureID(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := sameTrust(dst, fixtureID(t), want); err != nil {
-		t.Fatalf("an unchanged copy: %v", err)
-	}
-	for name, change := range map[string]func(*savedTrust){
-		"seen": func(w *savedTrust) { w.seen = "2 " + c.shas[1] },
-		"fork": func(w *savedTrust) { w.fork = true },
-	} {
-		w := want
-		change(&w)
-		var d *differsError
-		if err := sameTrust(dst, fixtureID(t), w); !errors.As(err, &d) {
-			t.Errorf("%s differs: %v", name, err)
-		}
-	}
-}
-
-// A saved copy recorded as verified whose store holds a fork is refused,
+// A system copy recorded as verified whose store holds a fork is refused,
 // whatever its record says.
 func TestCheckoutRefusesAStoreHoldingAFork(t *testing.T) {
 	c := newSavedCopy(t)
@@ -444,11 +313,30 @@ func TestCheckoutRefusesAStoreHoldingAFork(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	err = checkout(dir, fixtureID(t), "--execute")
+	err = checkout(dir, "--execute")
 	if text := problemText(err); err == nil || !strings.Contains(text, "fork") || !strings.Contains(text, "--root") {
 		t.Fatalf("got %v\n%s", err, text)
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 		t.Errorf("wrote %v", entries)
+	}
+}
+
+// A system copy recorded as unverified or forked names the recovery that pins
+// a root, and writes nothing.
+func TestCheckoutRefusesUnverifiedAndFork(t *testing.T) {
+	c := newSavedCopy(t)
+	for _, status := range []localstore.Status{localstore.Unverified, localstore.Fork} {
+		if err := c.st.Record(localstore.Saved{ID: fixtureID(t), Domain: "example.org", SHA: c.shas[1], Revision: 2, Status: status}); err != nil {
+			t.Fatal(err)
+		}
+		dir := t.TempDir()
+		err := checkout(dir, "--execute")
+		if text := problemText(err); err == nil || !strings.Contains(text, string(status)) || !strings.Contains(text, "deployment recover") || !strings.Contains(text, "--root") {
+			t.Errorf("%s: %v\n%s", status, err, text)
+		}
+		if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+			t.Errorf("%s: wrote %v", status, entries)
+		}
 	}
 }

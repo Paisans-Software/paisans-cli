@@ -390,6 +390,10 @@ func (r Repo) revision(sha string) int {
 	return 0
 }
 
+// Revision is the version sha's revision as its Paisans-Revision trailer
+// says, and 0 when that is not one positive number.
+func (r Repo) Revision(sha string) int { return r.revision(sha) }
+
 // buildTrailers is b as the three trailers Commit writes, each on its own
 // line.
 func buildTrailers(b version.Build) string {

@@ -1,9 +1,12 @@
 package localstore
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -93,5 +96,83 @@ func TestRecordAndList(t *testing.T) {
 	}
 	if listed[0].ID != b || listed[0].Err == nil || listed[1].Saved != a {
 		t.Errorf("List = %+v", listed)
+	}
+}
+
+// One writer at a time: a second Lock of the same deployment is refused,
+// naming the holder's pid and command, and goes ahead once the first is
+// released. Another deployment's lock is its own.
+func TestLockRefusesSecondWriter(t *testing.T) {
+	s := Store{Base: t.TempDir()}
+	const id, other = "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01", "11111111-2222-4333-8444-555555555555"
+	unlock, err := s.Lock(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.Lock(id)
+	var held *LockedError
+	if !errors.As(err, &held) {
+		t.Fatalf("second Lock: %v", err)
+	}
+	for _, want := range []string{strconv.Itoa(os.Getpid()), os.Args[0], id} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal lacks %q: %v", want, err)
+		}
+	}
+	unlockOther, err := s.Lock(other)
+	if err != nil {
+		t.Fatalf("another deployment: %v", err)
+	}
+	unlockOther()
+	unlock()
+	again, err := s.Lock(id)
+	if err != nil {
+		t.Fatalf("after unlock: %v", err)
+	}
+	again()
+	if _, err := os.Stat(filepath.Join(s.Base, "deployments", id, ".lock")); err != nil {
+		t.Errorf("lock file: %v", err)
+	}
+}
+
+// A lock file a dead process left holds no lock: flock is released when
+// its holder exits, whatever the file says.
+func TestLockIgnoresAStaleFile(t *testing.T) {
+	s := Store{Base: t.TempDir()}
+	const id = "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
+	dir := filepath.Join(s.Base, "deployments", id)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".lock"), []byte("99999999 paisans deployment apply --execute\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := s.Lock(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+}
+
+// Held opens a deployment's system copy only when it exists, and creates
+// nothing.
+func TestHeldCreatesNothing(t *testing.T) {
+	s := Store{Base: t.TempDir()}
+	const id = "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
+	if _, ok, err := s.Held(id); err != nil || ok {
+		t.Fatalf("Held = %v, %v", ok, err)
+	}
+	if entries, _ := os.ReadDir(s.Base); len(entries) != 0 {
+		t.Fatalf("wrote %v", entries)
+	}
+	if _, err := s.Local(id); err != nil {
+		t.Fatal(err)
+	}
+	l, ok, err := s.Held(id)
+	if err != nil || !ok || l.Dir != filepath.Join(s.Base, "deployments", id) {
+		t.Fatalf("Held = %v, %v, %v", l, ok, err)
+	}
+	if _, _, err := s.Held("../x"); err == nil {
+		t.Error("a path accepted as an id")
 	}
 }
