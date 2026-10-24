@@ -393,6 +393,16 @@ func (l Local) HasFiles() bool {
 // The secrets file stays readable only by its owner, as init writes it.
 func (l Local) WriteFiles(f Files) error { return writeFiles(l.Dir, f) }
 
+// WriteFilesTo writes the three files into dir as WriteFiles does, for a
+// folder that is not a Local.
+func WriteFilesTo(dir string, f Files) error { return writeFiles(dir, f) }
+
+// The three files' names in a folder.
+const (
+	FileSecrets = nameSecrets
+	FileSOPS    = nameSOPS
+)
+
 func writeFiles(dir string, f Files) error {
 	// A version's secrets reach disk only encrypted, whoever published it:
 	// refused before any of the three files is written.
