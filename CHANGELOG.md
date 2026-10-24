@@ -13,6 +13,9 @@ changes share a bullet. Detailed notes are on the corresponding
 ### Added
 
 - `operator add` declares an operator in `paisans-stack.yaml` and names them in the chosen sites' `ssh.keys`, asking at a terminal and taking `--name`, `--email`, `--key` and `--site` or `--all-sites` without one.
+- `operator invite` writes a signed invite, `operator register --invite` answers it with a signed request and the operator's age key, and `operator add --request` declares them and re-encrypts the secrets.
+- `operator register` beside a recorded invite recovers the deployment from the invite's root and signs the operator's attestation.
+- `operator age-key` makes or shows the operator's age key for a deployment.
 - `--site` of `doctor` and `operator add`, `--only` and `--recreate` of `deployment apply`, `--replaced` of `secrets rotate` and `--name` of `dns prune` take several values separated by commas.
 
 ### Removed
