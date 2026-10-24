@@ -55,8 +55,6 @@ Three pieces, each in its own repository:
 * **No reading history.** The service never records which threads a member
   viewed. It does not read access logs and it does not ask Mbin to track
   views. "Already seen" is inferred from what the member did, below.
-* **No content from other servers.** The digest covers the deployment's
-  own magazines. Threads that federated in are left out.
 
 ## Anti goals
 
@@ -123,8 +121,10 @@ From top to bottom:
 
 1. **A heading with the week's dates.**
 2. **Three numbers for the whole community:** new threads, comments and new
-   members over the week. These are the same for every member.
-3. **One featured thread:** the hottest thread this member has not joined.
+   members over the week. These are the same for every member, and they
+   count the deployment's own content and accounts only.
+3. **One featured thread:** the hottest local thread this member has not
+   joined. It is never federated content.
    It shows its magazine, its comment count and how many people took part,
    and a short excerpt from its highest voted comment.
 4. **Three to five more threads** in a compact list, each with its magazine
@@ -162,11 +162,36 @@ on the label).
 
 ### Hot
 
-Threads and microblog posts from the deployment's own magazines, active within the past seven
+Threads and microblog posts from the deployment's own magazines, plus
+federated content within the limits below, active within the past seven
 days. How they are scored is left to the builder: votes, comment count and
 the number of distinct people taking part are the inputs the conversation
 named. A thread in a magazine the member subscribes to ranks higher for
 that member.
+
+### Federated content
+
+Mbin stores what federated in from other servers in its own database (a row
+with a non null `ap_id`), and a local member's votes, comments and
+bookmarks on it are local rows, so *Already seen* applies to it unchanged
+and its links point at the deployment's own copy. Founder decision,
+2026-10-24: it appears in a member's digest within three limits, because
+the community's moderators never reviewed it and an email sent in the
+community's name reads as endorsing what it shows.
+
+* **Only from magazines the member subscribes to themselves.** A remote
+  magazine nobody here follows never reaches anyone's digest, and one
+  member's subscription never puts it in another member's.
+* **Never the featured thread.** It appears in the compact list only.
+* **Never quoted.** No excerpt from a remote post or comment appears in the
+  email; a federated item shows its title, its magazine and one figure.
+
+Federated content is scored so that it does not crowd out local
+conversation: this server sees only the votes and comments that reached
+it, and a busy remote magazine would otherwise outrank everything local.
+How it is weighted or capped is left to the builder. Every rule in *Always
+excluded* still applies, and a remote item's NSFW flag is whatever its
+origin set.
 
 ### Already seen
 
@@ -191,7 +216,8 @@ Whatever the score, a member never sees:
 * anything from a magazine or a user they blocked;
 * anything from a magazine they are banned from;
 * anything deleted, removed by a moderator, or marked NSFW;
-* anything from another server (see *Non goals*).
+* anything from another server, unless it passes *Federated content*
+  below.
 
 ### Who receives one
 
@@ -283,7 +309,8 @@ link, so a second source adds one module and one read only grant.
 
 ## Left to the builder
 
-* How hot threads are scored.
+* How hot threads are scored, and how federated content is weighted or
+  capped against local content.
 * The shape of the read only grant in `paisans-stack.yaml`, and the checks
   that refuse a bad one.
 * The engagement service's own placement, provided exactly one copy sends.
