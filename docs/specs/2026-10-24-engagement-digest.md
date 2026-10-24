@@ -24,11 +24,11 @@ Three pieces, each in its own repository:
 
 1. **`paisans-engagement-service`**, a new repository in the organisation: a
    Go service and its container image. It holds the schedule, the queries
-   against each app it reads, the email, and the two public endpoints
-   (unsubscribe and link redirect). Go, *provisional*, because every other
+   against each app it reads, the email, and the one public endpoint,
+   unsubscribe. Go, *provisional*, because every other
    toolkit service is Go and shares `pocketid-go` and the release workflow.
 2. **An `engagement` blueprint** in `paisans-blueprints`: the container, its
-   own database, its two public routes, and the mail settings it reads.
+   own database, its public route, and the mail settings it reads.
 3. **A toolkit change** in `paisans-cli`: a way for one app to be given a
    read only role on another app's database. No blueprint does this today.
 
@@ -47,8 +47,8 @@ Three pieces, each in its own repository:
 * **No push notifications.** Mbin's Web Push fires only for its own
   notifications, and there is no API for a custom one. Push waits until that
   changes.
-* **No web interface.** The service publishes exactly two kinds of public
-  URL: unsubscribe links and redirect links. No admin panel, no preferences
+* **No web interface.** The service publishes one kind of public URL, the
+  unsubscribe link. Links in the email point straight at Mbin. No admin panel, no preferences
   page, no landing page, no archive of past digests.
 * **No per member settings.** No timezone, no choice of day, no frequency.
   One schedule for the whole deployment.
@@ -109,8 +109,7 @@ Mbin release that changes the schema fails the grant loudly at `apply`
 rather than widening it.
 
 The service also has **its own database** for its own state: who
-unsubscribed, which member was sent which week, and the redirect links it
-issued.
+unsubscribed, and which member was sent which week.
 
 ## What the email says
 
@@ -201,7 +200,6 @@ A thread is **dropped** from a member's digest if the member did any of:
 * voted on it or boosted it;
 * bookmarked it;
 * had a notification about it and opened it;
-* followed a redirect link to it from an earlier digest.
 
 A thread is **ranked lower, not dropped**, if it is in a magazine the member
 subscribes to and the member visited Mbin during the week. Mbin's
@@ -230,7 +228,7 @@ that week.
 
 **A member is their Pocket ID identity** (*provisional*): the OIDC subject,
 which Mbin stores as `user.oauthOidcId`. Every row in the service's own
-database (unsubscribes, sends, redirect links) and every signed token names
+database (unsubscribes, sends) and every unsubscribe token names
 that subject, never an Mbin user id, so a second source that knows the same
 person by the same subject joins without a migration. An Mbin account with
 no subject is not a member for the digest's purposes and gets no email.
@@ -256,7 +254,7 @@ reference to *Rule 5* in `README.md`.
 before the next member is started, so a restart or a retry partway through
 resumes without sending anyone a second copy.
 
-## The two public endpoints
+## The public endpoint
 
 The service answers on its own hostname through the gateway, without the
 Pocket ID gate: a member clicking from their inbox may not be signed in.
@@ -272,23 +270,6 @@ Pocket ID gate: a member clicking from their inbox may not be signed in.
 * The same URL goes in the `List-Unsubscribe` and `List-Unsubscribe-Post`
   headers (RFC 8058), which the large mail providers require of bulk mail.
   A one click `POST` and a `GET` from the link both unsubscribe.
-
-### Redirect links
-
-Every thread link and the button in the email point at the service, which
-redirects to Mbin. The redirect serves one purpose: a member who followed a
-link from a digest has seen that thread, and it is dropped from their later
-digests (see *Already seen*). *Provisional*: the conversation named redirect
-links as one of the two public surfaces; this purpose is the author's reading
-of why.
-
-Two rules make it safe:
-
-* **It is not an open redirect.** The link carries an identifier the service
-  issued, not a destination URL. The service looks the destination up in its
-  own database, so a crafted link cannot send anyone off the deployment.
-* **It records one row**, member and thread, and nothing about the request
-  (no IP address, no user agent).
 
 ## Mail
 
@@ -314,7 +295,7 @@ link, so a second source adds one module and one read only grant.
 * The shape of the read only grant in `paisans-stack.yaml`, and the checks
   that refuse a bad one.
 * The engagement service's own placement, provided exactly one copy sends.
-* The token format and signing key for unsubscribe and redirect links. The
+* The unsubscribe token's format and signing key. The
   key is a secret of the blueprint, rotatable with `secrets rotate`.
 * The service's own schema.
 * The mail template's markup.
@@ -322,6 +303,5 @@ link, so a second source adds one module and one read only grant.
 ## Open
 
 * The day of the week (Monday is provisional).
-* Whether the redirect link's purpose is as described above.
 * Reading a pinned source app, which needs a network path to its compose
   project and a role created inside its own Postgres.
