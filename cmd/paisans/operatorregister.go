@@ -86,6 +86,20 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 	if err != nil {
 		return err
 	}
+	// Where an answer recorded an invite and the files are not there yet,
+	// register joins: the invite names the root and the key.
+	if !l.HasFiles() {
+		invite, ok, err := joinRecorded(l)
+		if err != nil {
+			return err
+		}
+		if ok {
+			if *keyPath != "" || *root != "" {
+				return &ui.Problem{Hint: "--key and --root do not apply to a join", Explain: "The invite recorded here names the key you sign with and the root trust starts from."}
+			}
+			return joinInvite(reporter(), l, invite, *execute, ans, stdin, stdout)
+		}
+	}
 	a, err := anchorFor(l, *root)
 	if err != nil {
 		return err

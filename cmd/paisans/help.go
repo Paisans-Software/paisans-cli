@@ -453,6 +453,7 @@ var helpCommands = []helpCommand{
 		detail: "Sign an attestation of the sites' newest version with your own key, so trust starts from your signature: the key in your ssh-agent listed under your entry in operators, or the one --key names. " +
 			"Signs only a version equal to your local files, or, with no files and a root pinned, the one the pin leads to, and then writes its files. " +
 			"Records the key in .paisans/signing-key, which deployment publish signs with from then on.\n\n" +
+			"Run with no flags where operator register --invite answered an invite, before the files are there, it joins: it recovers the files from the invite's root and sites once an operator has accepted the request and applied it, signs their attestation with the invite's key, and says whether the secrets open with your age key.\n\n" +
 			"Changes only the sites' configuration stores, and nothing without --execute. It goes ahead on whichever sites answer, and with --execute it asks for the word rollback at a terminal when the newest version is older than one seen here before; --yes types it. " + yesTopic,
 	},
 	{
