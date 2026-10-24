@@ -1,0 +1,296 @@
+package apply_test
+
+import (
+	"fmt"
+	"maps"
+	"regexp"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/config"
+)
+
+// The toolkit's copy of the allowlist is the grant, and the service's copy is
+// what its queries read. Written out here rather than compared at run time,
+// since the two live in different repositories: a change to either has to be
+// made to this table as well, on purpose.
+func TestAllowlistMatchesService(t *testing.T) {
+	want := map[string][]string{
+		"entry":                 {"id", "user_id", "magazine_id", "slug", "title", "comment_count", "score", "is_adult", "visibility", "ap_id", "created_at", "last_active"},
+		"entry_comment":         {"id", "user_id", "entry_id", "magazine_id", "body", "up_votes", "favourite_count", "visibility", "is_adult", "created_at"},
+		"post":                  {"id", "user_id", "magazine_id", "slug", "body", "comment_count", "score", "is_adult", "visibility", "ap_id", "created_at", "last_active"},
+		"post_comment":          {"id", "user_id", "post_id", "magazine_id", "body", "up_votes", "favourite_count", "visibility", "is_adult", "created_at"},
+		"entry_vote":            {"user_id", "entry_id", "choice"},
+		"post_vote":             {"user_id", "post_id", "choice"},
+		"favourite":             {"user_id", "entry_id", "post_id"},
+		"bookmark":              {"user_id", "entry_id", "post_id"},
+		"notification":          {"user_id", "status", "entry_id", "entry_comment_id", "post_id", "post_comment_id"},
+		"magazine":              {"id", "name", "title", "ap_id", "is_adult", "visibility", "marked_for_deletion_at", "ap_deleted_at"},
+		"magazine_subscription": {"user_id", "magazine_id"},
+		"magazine_block":        {"user_id", "magazine_id"},
+		"magazine_ban":          {"user_id", "magazine_id", "expired_at"},
+		"user_block":            {"blocker_id", "blocked_id"},
+		"user":                  {"id", "username", "email", "is_verified", "is_banned", "is_deleted", "marked_for_deletion_at", "visibility", "type", "ap_id", "oauth_oidc_id", "last_active", "created_at"},
+	}
+	got := apply.MbinAllowlist
+	if a, b := slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(want)); !slices.Equal(a, b) {
+		t.Fatalf("tables %v, want %v", a, b)
+	}
+	for table, columns := range want {
+		if a, b := slices.Sorted(slices.Values(got[table])), slices.Sorted(slices.Values(columns)); !slices.Equal(a, b) {
+			t.Errorf("%s: columns %v, want %v", table, a, b)
+		}
+	}
+}
+
+// A role that can read a session, a token or a password hash can log in as a
+// member. None of them is ever in the grant.
+func TestAllowlistExcludesCredentials(t *testing.T) {
+	for _, table := range []string{
+		"sessions", "rememberme_token", "oauth2_access_token", "oauth2_refresh_token",
+		"oauth2_authorization_code", "oauth2_client", "oauth2_user_consent",
+		"reset_password_request", "user_push_subscription", "site", "settings",
+		"messenger_messages", "message", "message_thread", "user_note", "ap_activity", "activity",
+	} {
+		if _, ok := apply.MbinAllowlist[table]; ok {
+			t.Errorf("the grant names table %s", table)
+		}
+	}
+	oauth := regexp.MustCompile(`^oauth_.*_id$`)
+	for table, columns := range apply.MbinAllowlist {
+		for _, column := range columns {
+			switch {
+			case slices.Contains([]string{"password", "totp_secret", "totp_backup_codes", "private_key", "old_private_key", "ip"}, column):
+				t.Errorf("the grant names %s.%s", table, column)
+			case oauth.MatchString(column) && column != "oauth_oidc_id":
+				t.Errorf("the grant names %s.%s, an identity at another provider", table, column)
+			}
+		}
+	}
+}
+
+func fixtureReaders(t *testing.T) *apply.Bootstrap {
+	t.Helper()
+	cfg, secrets := fixture(t)
+	b, err := apply.Databases(cfg, secrets, "home-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b.Readers) != 1 {
+		t.Fatalf("the fixture's digest has %d readers, want 1: %+v", len(b.Readers), b.Readers)
+	}
+	return b
+}
+
+// The bootstrap creates the role and makes every transaction it opens read
+// only, so it cannot write to Mbin even through a grant it should not have.
+// It grants nothing: Mbin's tables do not exist before its first start.
+func TestBootstrapCreatesReadOnlyReader(t *testing.T) {
+	b := fixtureReaders(t)
+	if r := b.Readers[0]; r.Role != "digest_reader" || r.Database != "talk" {
+		t.Errorf("reader %s on %s, want digest_reader on talk", r.Role, r.Database)
+	}
+	sql := apply.BootstrapSQL(b)
+	for _, want := range []string{
+		`SELECT 'CREATE ROLE "digest_reader" LOGIN' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'digest_reader')\gexec`,
+		`ALTER ROLE "digest_reader" WITH LOGIN PASSWORD 'fixture-not-a-secret-digest-reader';`,
+		`ALTER ROLE "digest_reader" SET default_transaction_read_only = on;`,
+	} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("the script is missing\n  %s\nin\n%s", want, sql)
+		}
+	}
+	if strings.Contains(sql, "GRANT") {
+		t.Errorf("the bootstrap grants, before Mbin has created its tables:\n%s", sql)
+	}
+	if strings.Contains(sql, `CREATE DATABASE "digest_reader"`) {
+		t.Error("the reader is given a database of its own")
+	}
+}
+
+// A deployment whose Mbin is pinned has validation refusing it, but a
+// bootstrap reached without validation must still not create a reader for a
+// database the cluster does not hold.
+func TestNoReaderForAPinnedMbin(t *testing.T) {
+	cfg, secrets := fixture(t)
+	talk := cfg.Apps["talk"]
+	talk.Placement = config.Placement{Mode: config.PlacementPinned, Site: "home-a"}
+	cfg.Apps["talk"] = talk
+	b, err := apply.Databases(cfg, secrets, "home-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b.Readers) != 0 {
+		t.Errorf("a reader was planned on a pinned Mbin: %+v", b.Readers)
+	}
+}
+
+// The grant waits for Mbin's tables rather than failing on them: on a first
+// apply the reader exists before Mbin has run its migrations.
+func TestGrantSQLWaitsForMbinTables(t *testing.T) {
+	sql := apply.GrantSQL(fixtureReaders(t).Readers[0])
+	connect := strings.Index(sql, "\\connect \"talk\"\n")
+	guard := strings.Index(sql, "IF to_regclass('public.entry') IS NULL THEN")
+	notice := strings.Index(sql, "RAISE NOTICE")
+	grant := strings.Index(sql, "GRANT")
+	if connect < 0 || guard < 0 || notice < 0 || grant < 0 {
+		t.Fatalf("missing a part: connect %d, guard %d, notice %d, grant %d in\n%s", connect, guard, notice, grant, sql)
+	}
+	if !(connect < guard && guard < notice && notice < grant) {
+		t.Errorf("out of order: connect %d, guard %d, notice %d, grant %d in\n%s", connect, guard, notice, grant, sql)
+	}
+	if strings.Contains(sql, "REVOKE") {
+		t.Errorf("the grant revokes:\n%s", sql)
+	}
+}
+
+// SELECT is granted column by column, so a column the list leaves out is one
+// the role cannot read, and "user" is quoted, since it is a reserved word.
+func TestGrantSQLColumnGrants(t *testing.T) {
+	sql := apply.GrantSQL(fixtureReaders(t).Readers[0])
+	for _, want := range []string{
+		`GRANT CONNECT ON DATABASE "talk" TO "digest_reader";`,
+		`GRANT USAGE ON SCHEMA public TO "digest_reader";`,
+		`GRANT SELECT ("id", "username", "email", "is_verified", "is_banned", "is_deleted", "marked_for_deletion_at", "visibility", "type", "ap_id", "oauth_oidc_id", "last_active", "created_at") ON public."user" TO "digest_reader";`,
+		`GRANT SELECT ("user_id", "magazine_id") ON public."magazine_subscription" TO "digest_reader";`,
+	} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("the grant is missing\n  %s\nin\n%s", want, sql)
+		}
+	}
+	if got, want := strings.Count(sql, "GRANT SELECT"), len(apply.MbinAllowlist); got != want {
+		t.Errorf("%d SELECT grants, want one per table, %d", got, want)
+	}
+	if regexp.MustCompile(`GRANT SELECT ON|ALL TABLES`).MatchString(sql) {
+		t.Errorf("a table is granted whole:\n%s", sql)
+	}
+	if strings.Contains(sql, "fixture-not-a-secret") {
+		t.Error("the grant carries a password it has no use for")
+	}
+}
+
+// orderedHost records each script sent on stdin among the commands, so a
+// test can place it in the order the apply ran things. grantFails refuses
+// the grant script alone.
+type orderedHost struct {
+	*fakeHost
+	grantFails bool
+}
+
+func (h *orderedHost) RunInput(command, stdin string) (string, error) {
+	h.commands = append(h.commands, "stdin: "+stdin)
+	if h.grantFails && strings.Contains(stdin, `\connect`) {
+		h.inputs = append(h.inputs, stdin)
+		return "ERROR: column \"is_verified\" does not exist\n" + stdin, fmt.Errorf("exit status 3")
+	}
+	return h.fakeHost.RunInput(command, stdin)
+}
+
+func (h *orderedHost) WriteFile(path, content string, mode uint32) error {
+	h.commands = append(h.commands, "write: "+path)
+	return h.fakeHost.WriteFile(path, content, mode)
+}
+
+// The grant runs once every app stack is healthy, Mbin's among them, since
+// only Mbin's first start creates the tables it names; and before the
+// manifest, so an apply whose grant failed is not recorded as done.
+func TestGrantsRunAfterAppStacks(t *testing.T) {
+	noWait(t)
+	host := &orderedHost{fakeHost: newHost()}
+	p := bootstrapPlan(t, host.fakeHost)
+	if err := apply.Execute(p, host); err != nil {
+		t.Fatal(err)
+	}
+	grant := host.indexOf(`stdin: \connect "talk"`)
+	if grant < 0 {
+		t.Fatalf("no grant ran: %v", host.commands)
+	}
+	for _, action := range p.Actions {
+		if i := host.indexOf("/srv/paisans/f2a9/" + action.Stack + "/compose.yaml up -d"); i > grant {
+			t.Errorf("%s was started after the grant", action.Stack)
+		}
+	}
+	manifest := -1
+	for i, command := range host.commands {
+		if command == "write: "+p.Deployment.Manifest() {
+			manifest = i
+		}
+	}
+	if manifest < grant {
+		t.Errorf("the final manifest was not written after the grant: manifest %d, grant %d", manifest, grant)
+	}
+	if _, owed := host.files["/srv/paisans/f2a9/.paisans-pending.json"]; owed {
+		t.Error("an apply whose grant succeeded still owes something")
+	}
+	for _, command := range host.fakeHost.commands {
+		if strings.Contains(command, "fixture-not-a-secret-digest-reader") && !strings.HasPrefix(command, "stdin: ") {
+			t.Errorf("the reader's password is on a command line: %s", command)
+		}
+	}
+}
+
+// A grant that fails, a column Mbin renamed, stops the apply loudly rather
+// than widening the grant, and leaves the apply owing its last stack so the
+// next apply comes back to it.
+func TestAFailedGrantFailsTheApply(t *testing.T) {
+	noWait(t)
+	host := &orderedHost{fakeHost: newHost(), grantFails: true}
+	p := bootstrapPlan(t, host.fakeHost)
+	err := apply.Execute(p, host)
+	if err == nil {
+		t.Fatal("a failed grant passed")
+	}
+	if !strings.Contains(err.Error(), "is_verified") {
+		t.Errorf("the failure does not say what failed: %v", err)
+	}
+	if _, owed := host.files["/srv/paisans/f2a9/.paisans-pending.json"]; !owed {
+		t.Error("a failed grant leaves the apply owing nothing, so the next apply does not come back to it")
+	}
+	if strings.Contains(err.Error(), "fixture-not-a-secret") {
+		t.Errorf("the failure carries a password: %v", err)
+	}
+}
+
+// Without an engagement app there is nothing to grant and no psql to run for
+// it.
+func TestNoGrantWithoutAReader(t *testing.T) {
+	noWait(t)
+	host := &orderedHost{fakeHost: newHost()}
+	p := bootstrapPlan(t, host.fakeHost)
+	p.Bootstrap.Readers = nil
+	if err := apply.Execute(p, host); err != nil {
+		t.Fatal(err)
+	}
+	if host.ran(`\connect`) {
+		t.Error("a grant ran with no reader planned")
+	}
+}
+
+// A replica grants nothing: it is read only, and the grant streams to it
+// from the leader. It waits for the reader the leader creates, as it does
+// for the app roles.
+func TestAReplicaGrantsNothingAndWaitsForTheReader(t *testing.T) {
+	noWait(t)
+	host := &orderedHost{fakeHost: newHost()}
+	host.leader = "home-b"
+	host.replicaHas = []string{"account", "auth", "digest", "talk", "wiki"}
+	err := apply.Execute(bootstrapPlan(t, host.fakeHost), host)
+	if err == nil || !strings.Contains(err.Error(), "digest_reader") {
+		t.Fatalf("a replica without the reader went on: %v", err)
+	}
+	if host.ran(`\connect`) {
+		t.Error("a replica ran the grant")
+	}
+
+	host = &orderedHost{fakeHost: newHost()}
+	host.leader = "home-b"
+	host.replicaHas = []string{"account", "auth", "digest", "digest_reader", "talk", "wiki"}
+	if err := apply.Execute(bootstrapPlan(t, host.fakeHost), host); err != nil {
+		t.Fatal(err)
+	}
+	if host.ran(`\connect`) {
+		t.Error("a replica ran the grant")
+	}
+}

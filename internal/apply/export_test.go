@@ -255,3 +255,10 @@ func AuthProblem(t SSHTransport, err error, out string) error { return t.authPro
 
 // RestartTiers exposes the order a whole stack restart takes its services in.
 func RestartTiers(compose string) ([][]string, error) { return restartTiers(compose) }
+
+// MbinAllowlist exposes what the digest's reader is granted.
+var MbinAllowlist = mbinAllowlist
+
+// GrantSQL exposes the grant script, so its shape can be asserted without a
+// database.
+func GrantSQL(r Reader) string { return grantSQL(r) }

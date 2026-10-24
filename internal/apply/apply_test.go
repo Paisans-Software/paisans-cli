@@ -2246,7 +2246,7 @@ func TestAReplicaLeavesTheDatabasesToTheLeader(t *testing.T) {
 	noWait(t)
 	host := newHost()
 	host.leader = "home-b"
-	host.replicaHas = []string{"account", "auth", "digest", "talk", "wiki"}
+	host.replicaHas = []string{"account", "auth", "digest", "digest_reader", "talk", "wiki"}
 	p := bootstrapPlan(t, host)
 	said := &ui.Recorder{}
 	p.Report = said
@@ -2281,14 +2281,14 @@ func TestAReplicaWaitsForTheLeaderToCreateTheDatabases(t *testing.T) {
 		t.Errorf("the replica's stop is not apply.ErrDatabasesWait: %v", err)
 	}
 	var wait *apply.DatabasesWaitError
-	if !errors.As(err, &wait) || wait.Site != "home-a" || wait.Leader != "home-b" || !slices.Equal(wait.Missing, []string{"account", "digest", "talk", "wiki"}) {
+	if !errors.As(err, &wait) || wait.Site != "home-a" || wait.Leader != "home-b" || !slices.Equal(wait.Missing, []string{"account", "digest", "talk", "wiki", "digest_reader"}) {
 		t.Errorf("the replica's stop does not name the leader: %#v", wait)
 	}
 	if errors.Is(err, apply.ErrFoundingWait) {
 		t.Errorf("the replica's stop is taken for the founding stop: %v", err)
 	}
 	q := problemOf(t, err)
-	if q.Hint != "home-a is waiting on home-b to create databases account, digest, talk, wiki" {
+	if q.Hint != "home-a is waiting on home-b to create databases account, digest, talk, wiki, digest_reader" {
 		t.Errorf("hint: %q", q.Hint)
 	}
 	for _, want := range []string{"Patroni here is a replica", "no app stack was started", "Apply home-b, then apply this site again"} {
@@ -2313,7 +2313,7 @@ func TestAReplicaWaitsForTheLeaderToCreateTheDatabases(t *testing.T) {
 		}
 	}
 
-	host.replicaHas = []string{"account", "auth", "digest", "talk", "wiki"}
+	host.replicaHas = []string{"account", "auth", "digest", "digest_reader", "talk", "wiki"}
 	if err := apply.Execute(bootstrapPlan(t, host), host); err != nil {
 		t.Fatal(err)
 	}

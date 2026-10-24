@@ -31,6 +31,10 @@ type Bootstrap struct {
 	// Patroni is this site's Patroni REST API, host:port, on the mesh.
 	Patroni   string
 	Databases []Database
+	// Readers are the engagement apps' read only roles on their source's
+	// database. They are created with the app roles; their grants run after
+	// the app stacks. See runSourceGrants.
+	Readers []Reader
 	// ClusterSites is cluster.sites. A leader is one of these or it is not a
 	// member this deployment declared.
 	ClusterSites []string
@@ -95,8 +99,61 @@ func Databases(cfg *config.Config, secrets *config.Secrets, site string) (*Boots
 		}
 		out.Databases = append(out.Databases, Database{App: name, Role: id, Name: id, password: password})
 	}
-	if len(out.Databases) == 0 {
+	readers, err := sourceReaders(cfg, secrets, out.Databases)
+	if err != nil {
+		return nil, err
+	}
+	out.Readers = readers
+	if len(out.Databases) == 0 && len(out.Readers) == 0 {
 		return nil, nil
+	}
+	return out, nil
+}
+
+// sourceReaders is a read only role for each engagement app whose source,
+// the deployment's one Mbin app, is clustered: the role is created in the
+// cluster's Postgres, which holds no pinned app's database. validate refuses
+// any other source; a configuration that reached here without it plans no
+// reader rather than one for a database the cluster does not hold.
+func sourceReaders(cfg *config.Config, secrets *config.Secrets, databases []Database) ([]Reader, error) {
+	source, ok := cfg.EngagementSource()
+	if !ok {
+		return nil, nil
+	}
+	var database string
+	for _, db := range databases {
+		if db.App == source {
+			database = db.Name
+		}
+	}
+	if database == "" {
+		return nil, nil
+	}
+	var out []Reader
+	for _, name := range cfg.AppNames() {
+		if cfg.Apps[name].Blueprint != config.BlueprintEngagement {
+			continue
+		}
+		role := render.ReaderRole(name)
+		if !identifier.MatchString(role) || len(role) > 63 {
+			return nil, fmt.Errorf("apps.%s: its read only role on %s would be named %q, and a role is created only from lowercase letters, digits and underscores, starting with a letter, at most 63 characters. Rename the app", name, source, role)
+		}
+		// Every app role is named for its app, so an app named like the
+		// reader would have the reader's password and its read only default
+		// set on its own role.
+		for _, db := range databases {
+			if db.Role == role {
+				return nil, fmt.Errorf("apps.%s: its read only role on %s would be %q, which is apps.%s's own role. Rename one of the apps", name, source, role, db.App)
+			}
+		}
+		password, _ := secrets.Apps[name]["source_database_password"].(string)
+		if password == "" {
+			return nil, fmt.Errorf("secrets apps.%s.source_database_password: required to create the app's read only role on %s. Run `%s init` to generate it", name, source, progname.Cmd())
+		}
+		if strings.ContainsRune(password, 0) {
+			return nil, fmt.Errorf("secrets apps.%s.source_database_password: contains a NUL byte, which Postgres cannot store", name)
+		}
+		out = append(out, Reader{App: name, Role: role, Database: database, password: password})
 	}
 	return out, nil
 }
@@ -243,6 +300,10 @@ const NoStatementLog = "SET log_statement = 'none';\n" +
 //   - its password is set every time, so rotating apps.<name>.database_password
 //     and applying is the whole rotation
 //   - the database is created only when missing, owned by the role
+//   - an engagement app's reader is created and its password set the same
+//     way, with no database of its own, and every transaction it opens is
+//     read only. It is granted nothing here: its source's tables do not
+//     exist before that app's first start. See runSourceGrants.
 //
 // CREATE DATABASE cannot run inside a transaction block, and so not inside a
 // DO block either; `\gexec` runs a generated statement as its own top level
@@ -260,6 +321,13 @@ func bootstrapSQL(b *Bootstrap) string {
 		fmt.Fprintf(&sql, "ALTER ROLE %s WITH LOGIN PASSWORD %s;\n", role, QuoteLiteral(db.password))
 		fmt.Fprintf(&sql, "SELECT 'CREATE DATABASE %s OWNER %s' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = %s)\\gexec\n",
 			QuoteIdent(db.Name), role, QuoteLiteral(db.Name))
+	}
+	for _, r := range b.Readers {
+		role := QuoteIdent(r.Role)
+		fmt.Fprintf(&sql, "-- %s, reading %s\n", r.App, r.Database)
+		fmt.Fprintf(&sql, "SELECT 'CREATE ROLE %s LOGIN' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %s)\\gexec\n", role, QuoteLiteral(r.Role))
+		fmt.Fprintf(&sql, "ALTER ROLE %s WITH LOGIN PASSWORD %s;\n", role, QuoteLiteral(r.password))
+		fmt.Fprintf(&sql, "ALTER ROLE %s SET default_transaction_read_only = on;\n", role)
 	}
 	return sql.String()
 }
@@ -339,9 +407,10 @@ func runBootstrap(plan *Plan, t Transport) error {
 		}
 		return err
 	}
+	plan.primary = true
 	// Nothing to create means no step to report: a title naming no database
 	// would only be noise.
-	if len(plan.Bootstrap.Databases) == 0 {
+	if len(plan.Bootstrap.Databases) == 0 && len(plan.Bootstrap.Readers) == 0 {
 		return nil
 	}
 	// The title stays short however many databases there are, since the
@@ -354,6 +423,9 @@ func runBootstrap(plan *Plan, t Transport) error {
 	for _, db := range plan.Bootstrap.Databases {
 		done.Detail("role %s owns database %s, for %s", db.Role, db.Name, db.App)
 	}
+	for _, r := range plan.Bootstrap.Readers {
+		done.Detail("role %s reads database %s, for %s", r.Role, r.Database, r.App)
+	}
 	out, err := t.RunInput(Psql(plan.Deployment), bootstrapSQL(plan.Bootstrap))
 	finish(done, err)
 	if err != nil {
@@ -363,10 +435,17 @@ func runBootstrap(plan *Plan, t Transport) error {
 			out = strings.ReplaceAll(out, QuoteLiteral(db.password), "'[redacted]'")
 			out = strings.ReplaceAll(out, db.password, "[redacted]")
 		}
+		for _, r := range plan.Bootstrap.Readers {
+			out = strings.ReplaceAll(out, QuoteLiteral(r.password), "'[redacted]'")
+			out = strings.ReplaceAll(out, r.password, "[redacted]")
+		}
 		return fmt.Errorf("%s: creating app roles and databases failed, so no app stack was started:\n%s", plan.Site, out)
 	}
 	for _, db := range plan.Bootstrap.Databases {
 		plan.say("ensured role and database %s for %s", db.Name, db.App)
+	}
+	for _, r := range plan.Bootstrap.Readers {
+		plan.say("ensured read only role %s for %s", r.Role, r.App)
 	}
 	return nil
 }
@@ -380,7 +459,7 @@ func runBootstrap(plan *Plan, t Transport) error {
 // polled like the wait for a primary.
 func replicaDatabases(plan *Plan, t Transport, leader string) error {
 	plan.say("Patroni here is a replica, and %s holds the leader and creates app roles and databases", leader)
-	if len(plan.Bootstrap.Databases) == 0 {
+	if len(plan.Bootstrap.Databases) == 0 && len(plan.Bootstrap.Readers) == 0 {
 		return nil
 	}
 	done := plan.step("check replica databases")
@@ -417,6 +496,13 @@ func replicaDatabases(plan *Plan, t Transport, leader string) error {
 			missing = append(missing, db.Name)
 		}
 	}
+	for _, r := range plan.Bootstrap.Readers {
+		if present[r.Role] {
+			done.Detail("role %s exists, for %s", r.Role, r.App)
+		} else {
+			missing = append(missing, r.Role)
+		}
+	}
 	if len(missing) == 0 {
 		done.Done("")
 		return nil
@@ -432,14 +518,28 @@ func replicaDatabases(plan *Plan, t Transport, leader string) error {
 }
 
 // replicaSQL lists, one per line, each app database that exists and whose
-// role does too. It names databases and roles and nothing else: no password
-// is read or sent.
+// role does too, then each reader role that exists. A reader never shares a
+// name with an app role (sourceReaders refuses it), and an app's database is
+// named as its role, so the two lists cannot be mistaken for each other. It
+// names databases and roles and nothing else: no password is read or sent.
 func replicaSQL(b *Bootstrap) string {
-	var want []string
-	for _, db := range b.Databases {
-		want = append(want, fmt.Sprintf("(%s, %s)", QuoteLiteral(db.Role), QuoteLiteral(db.Name)))
+	var sql strings.Builder
+	if len(b.Databases) > 0 {
+		var want []string
+		for _, db := range b.Databases {
+			want = append(want, fmt.Sprintf("(%s, %s)", QuoteLiteral(db.Role), QuoteLiteral(db.Name)))
+		}
+		sql.WriteString("SELECT want.name FROM (VALUES " + strings.Join(want, ", ") + ") AS want(role, name)" +
+			" WHERE EXISTS (SELECT FROM pg_database WHERE datname = want.name)" +
+			" AND EXISTS (SELECT FROM pg_roles WHERE rolname = want.role);\n")
 	}
-	return "SELECT want.name FROM (VALUES " + strings.Join(want, ", ") + ") AS want(role, name)" +
-		" WHERE EXISTS (SELECT FROM pg_database WHERE datname = want.name)" +
-		" AND EXISTS (SELECT FROM pg_roles WHERE rolname = want.role);\n"
+	if len(b.Readers) > 0 {
+		var want []string
+		for _, r := range b.Readers {
+			want = append(want, fmt.Sprintf("(%s)", QuoteLiteral(r.Role)))
+		}
+		sql.WriteString("SELECT want.role FROM (VALUES " + strings.Join(want, ", ") + ") AS want(role)" +
+			" WHERE EXISTS (SELECT FROM pg_roles WHERE rolname = want.role);\n")
+	}
+	return sql.String()
 }

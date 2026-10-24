@@ -219,6 +219,10 @@ type Plan struct {
 	LeaderMoved *LeaderMove
 	// ledBefore is whether this site's Patroni led just before that action.
 	ledBefore bool
+	// primary is set once the bootstrap finds this site's Patroni is the
+	// leader and runs the primary's script. Only then does runSourceGrants
+	// grant: a replica is read only.
+	primary bool
 	// GatewayReload is set when this site serves the public entry point and a
 	// routing file changed. It is the narrower of the two: a new image is
 	// picked up by the recreate, not by a reload.
@@ -1565,6 +1569,12 @@ func execute(plan *Plan, t Transport) error {
 		if err := runBootstrap(plan, t); err != nil {
 			return err
 		}
+	}
+	// A reader's grant names its source's tables, which exist only once that
+	// app's stack has started, so it waits for every app stack to be
+	// healthy. Before the manifest, so a failed grant leaves the apply owing.
+	if err := runSourceGrants(plan, t); err != nil {
+		return err
 	}
 
 	if err := writeManifest(plan, t); err != nil {
