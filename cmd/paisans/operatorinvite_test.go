@@ -346,3 +346,24 @@ func TestInviteRootFromSystemCopy(t *testing.T) {
 		t.Fatalf("the empty folder holds %v", entries)
 	}
 }
+
+// Who the inviter is comes from the system copy's paisans-stack.yaml: a
+// draft that lists the signing key under no operator names alice still.
+func TestInviterFromSystemCopy(t *testing.T) {
+	l, _, pub := inviteWorkstation(t)
+	body, err := os.ReadFile(l.config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, other := testKey(t)
+	if err := os.WriteFile(l.config(), []byte(strings.Replace(string(body), pub, other, 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := runOperatorInvite(inviteArgs(l, "carol", "--key", newPub(t)), &out); err != nil {
+		t.Fatal(problemText(err))
+	}
+	if inv, err := operatorinvite.ParseInvite(out.Bytes(), pub); err != nil || inv.Inviter.Name != "alice" {
+		t.Fatalf("got %+v, %v", inv, err)
+	}
+}

@@ -390,8 +390,9 @@ func signingKeyFor(l configstore.Local, local *config.Config) (string, error) {
 	return "", &ui.Problem{Hint: "your ssh-agent holds more than one operator key", Explain: "Which one signs is recorded and used from then on, so it is not guessed. Remove all but one from the agent for this publish (ssh-add -d)."}
 }
 
-// recordedKey is the signing key l records, and "" when none is. A recorded key the agent does not hold (held is the agent's key
-// lines) is refused, and otherwise ends what the refusal says to do.
+// recordedKey is the signing key l records, and "" when none is. A
+// recorded key the agent does not hold (held is the agent's key lines) is
+// refused, and otherwise ends what the refusal says to do.
 func recordedKey(l configstore.Local, held []string, otherwise string) (string, error) {
 	recorded, err := l.SigningKey()
 	if err != nil || recorded == "" {

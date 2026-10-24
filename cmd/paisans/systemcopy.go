@@ -220,3 +220,20 @@ func readConfig(sys configstore.Local, d draft.Draft) (*config.Config, string, e
 	cfg, err := config.Load(path)
 	return cfg, path, err
 }
+
+// systemConfig is the system copy's paisans-stack.yaml: its head's, as its
+// store holds it, or, before it records a head, its files'.
+func systemConfig(sys configstore.Local) (*config.Config, error) {
+	head, err := sys.Head()
+	if err != nil {
+		return nil, err
+	}
+	if head == "" {
+		return config.Load(filepath.Join(sys.Dir, config.FileName))
+	}
+	_, f, err := systemHead(sys)
+	if err != nil {
+		return nil, err
+	}
+	return config.LoadBytes(f.Paisans)
+}

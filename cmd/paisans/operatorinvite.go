@@ -72,7 +72,7 @@ func runOperatorInvite(args []string, stdout io.Writer) error {
 	fields := strings.Fields(lines[0])
 	key := fields[0] + " " + fields[1]
 
-	signing, inviter, err := inviterOf(sys, cfg)
+	signing, inviter, err := inviterOf(sys)
 	if err != nil {
 		return err
 	}
@@ -107,8 +107,10 @@ func runOperatorInvite(args []string, stdout io.Writer) error {
 }
 
 // inviterOf is the key the invite is signed with, the one the system copy
-// sys records and the agent holds, and the operator cfg lists it under.
-func inviterOf(sys configstore.Local, cfg *config.Config) (string, operatorinvite.Inviter, error) {
+// sys records and the agent holds, and the operator the system copy's
+// paisans-stack.yaml lists it under: who the inviter is is a trust answer,
+// so a draft's edit of operators does not change it.
+func inviterOf(sys configstore.Local) (string, operatorinvite.Inviter, error) {
 	noKey := &ui.Problem{Hint: "this workstation records no signing key", Explain: "An invite is signed with the key of an operator the deployment lists, which " + progname.Cmd() + " operator register records. Run it first."}
 	recorded, err := sys.SigningKey()
 	if err != nil {
@@ -121,6 +123,10 @@ func inviterOf(sys configstore.Local, cfg *config.Config) (string, operatorinvit
 	if err != nil {
 		return "", operatorinvite.Inviter{}, err
 	}
+	cfg, err := systemConfig(sys)
+	if err != nil {
+		return "", operatorinvite.Inviter{}, err
+	}
 	k, _, _ := config.ParseKeyLine(line)
 	for _, id := range slices.Sorted(maps.Keys(cfg.Operators)) {
 		for _, al := range cfg.Operators[id].KeyLines() {
@@ -129,7 +135,7 @@ func inviterOf(sys configstore.Local, cfg *config.Config) (string, operatorinvit
 			}
 		}
 	}
-	return "", operatorinvite.Inviter{}, &ui.Problem{Hint: "no operator lists the signing key", Explain: fmt.Sprintf("%s is the signing key the system copy in %s records, but %s lists it under no operator. Run %s operator register with a key an operator lists.", k.Fingerprint, sys.Dir, config.FileName, progname.Cmd())}
+	return "", operatorinvite.Inviter{}, &ui.Problem{Hint: "no operator lists the signing key", Explain: fmt.Sprintf("%s is the signing key the system copy in %s records, but its %s lists it under no operator. Run %s operator register with a key an operator lists.", k.Fingerprint, sys.Dir, config.FileName, progname.Cmd())}
 }
 
 // trustedRoot is the root this workstation trusts: the system copy's pin,

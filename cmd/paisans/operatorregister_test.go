@@ -221,7 +221,8 @@ func TestRegisterAttestsFromSystemCopy(t *testing.T) {
 // A draft of a deployment with no system copy here is refused, naming the
 // recovery, unless --root pins the root: a pinned root anchors alone, so
 // register --root makes the system copy, from the sites' version the pin
-// leads to. A dry run leaves none, and the draft is never touched.
+// leads to, whose operators choose the key: here the draft lists the key
+// under no operator. A dry run leaves none, and the draft is never touched.
 func TestRegisterRootCreatesTheSystemCopy(t *testing.T) {
 	shas, answer, files, key, pub := storedHistoryKey(t, 1, 0)
 	var runs []string
@@ -230,7 +231,10 @@ func TestRegisterRootCreatesTheSystemCopy(t *testing.T) {
 	agentHolding(t, pub)
 	withDataDir(t)
 	dir := t.TempDir()
-	if err := configstore.WriteFilesTo(dir, files[0]); err != nil {
+	_, other := testKey(t)
+	edited := files[0]
+	edited.Paisans = []byte(strings.Replace(string(edited.Paisans), pub, other, 1))
+	if err := configstore.WriteFilesTo(dir, edited); err != nil {
 		t.Fatal(err)
 	}
 	cfgPath := filepath.Join(dir, "paisans-stack.yaml")
@@ -318,5 +322,107 @@ func TestRegisterRefusesALockedSystemCopy(t *testing.T) {
 	}
 	if k, _ := l.sys.SigningKey(); k != "" || pushed(runs) {
 		t.Fatalf("key %q recorded, pushed %v", k, pushed(runs))
+	}
+}
+
+// Making a system copy holds the lock from before it looks for one: while
+// another writer holds it, building the copy, register --root is refused,
+// dry run or not, and the other's directory is left as it is.
+func TestRegisterRootRefusesWhileAnotherBuildsTheCopy(t *testing.T) {
+	shas, answer, files, _, pub := storedHistoryKey(t, 1, 0)
+	recoverHosts(t, answer)
+	allSitesUp(answer, nil)
+	agentHolding(t, pub)
+	withDataDir(t)
+	dir := t.TempDir()
+	if err := configstore.WriteFilesTo(dir, files[0]); err != nil {
+		t.Fatal(err)
+	}
+	st, err := openStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := st.Lock(fixtureDeploymentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	theirs, err := st.Local(fixtureDeploymentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(theirs.Dir, "in-progress"), []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before := tree(t, theirs.Dir)
+	for _, extra := range [][]string{nil, {"--execute"}} {
+		args := append([]string{"register", "--root", shas[0], "--config", filepath.Join(dir, "paisans-stack.yaml")}, extra...)
+		err := runOperator(args, noTerminalStdin(), &bytes.Buffer{})
+		var locked *localstore.LockedError
+		if !errors.As(err, &locked) {
+			t.Fatalf("%v: got %v", extra, err)
+		}
+		if after := tree(t, theirs.Dir); len(after) != len(before) {
+			t.Fatalf("%v: the other writer's directory changed: %v", extra, after)
+		}
+	}
+}
+
+// A deployment directory that holds only a record is no system copy: a dry
+// run of register --root leaves it as it was, and makes no copy of it;
+// --execute makes the copy there, keeping the record.
+func TestRegisterRootKeepsADirectoryWithARecord(t *testing.T) {
+	shas, answer, files, key, pub := storedHistoryKey(t, 1, 0)
+	recoverHosts(t, answer)
+	allSitesUp(answer, nil)
+	agentHolding(t, pub)
+	withDataDir(t)
+	dir := t.TempDir()
+	if err := configstore.WriteFilesTo(dir, files[0]); err != nil {
+		t.Fatal(err)
+	}
+	st, err := openStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Record(localstore.Saved{ID: fixtureDeploymentID, Domain: "example.org", SHA: shas[0], Revision: 1, Status: localstore.Verified, Source: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	copyDir := filepath.Join(dataDir(t), "deployments", fixtureDeploymentID)
+	before := tree(t, copyDir)
+	cfgPath := filepath.Join(dir, "paisans-stack.yaml")
+	if err := runOperator([]string{"register", "--root", shas[0], "--config", cfgPath}, noTerminalStdin(), &bytes.Buffer{}); err != nil {
+		t.Fatal(problemText(err))
+	}
+	after := tree(t, copyDir)
+	if len(after) != len(before) {
+		t.Fatalf("a dry run changed %s: %v", copyDir, after)
+	}
+	for p, v := range before {
+		if after[p] != v {
+			t.Fatalf("a dry run changed %s", p)
+		}
+	}
+	if _, ok, _ := st.Held(fixtureDeploymentID); ok {
+		t.Fatal("a dry run made a system copy")
+	}
+	if entries, _ := os.ReadDir(dataDir(t)); len(entries) != 2 {
+		t.Errorf("the data directory holds %v", entries)
+	}
+	savedSign := configSignWith
+	configSignWith = func(string) string { return key }
+	t.Cleanup(func() { configSignWith = savedSign })
+	if err := runOperator([]string{"register", "--root", shas[0], "--config", cfgPath, "--execute"}, noTerminalStdin(), &bytes.Buffer{}); err != nil {
+		t.Fatal(problemText(err))
+	}
+	sys, ok, err := st.Held(fixtureDeploymentID)
+	if err != nil || !ok {
+		t.Fatalf("no system copy: %v", err)
+	}
+	if k, _ := sys.SigningKey(); k != pub {
+		t.Fatalf("key %q", k)
+	}
+	if saved, ok, err := st.Load(fixtureDeploymentID); err != nil || !ok || saved.ID != fixtureDeploymentID {
+		t.Fatalf("the record is gone: %+v, %v", saved, err)
 	}
 }

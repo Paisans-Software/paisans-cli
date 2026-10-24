@@ -51,7 +51,7 @@ func runOperator(args []string, stdin io.Reader, stdout io.Writer) error {
 	return &ui.Problem{Hint: fmt.Sprintf("operator has no subcommand %q", args[0]), Explain: "Use add, register, age-key, invite, magic-link or grants."}
 }
 
-func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error {
+func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) (err error) {
 	fs := newFlagSet("operator register", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, configHelp)
@@ -108,87 +108,150 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 			return joinInvite(reporter(), l, invite, *execute, ans, stdin, stdout)
 		}
 	}
-	sys, cfg, done, err := registerSystem(*configPath, *id, d, *root, *execute)
+	r := reporter()
+	sys, sites, done, err := registerSystem(r, *configPath, *id, d, *root, *execute)
 	if err != nil {
 		return err
 	}
-	defer done()
+	defer func() {
+		if derr := done(); err == nil {
+			err = derr
+		}
+	}()
 	a, err := anchorFor(sys, *root)
 	if err != nil {
 		return err
 	}
 	pin := a.Root
-	if cfg == nil {
-		if cfg, err = registerConfig(sys, pin); err != nil {
+	if sites != nil {
+		// A system copy this run makes holds nothing yet: the version the
+		// pin leads to is gathered first, from the sites the draft names,
+		// and the operators and the key are read from it.
+		r.Section("find the version " + shortSHA(pin) + " leads to")
+		m := gatherMode{answers: ans, noAnchor: "Pin the first version you trust with --root <sha>; an operator who has one can read its hash from " + progname.Cmd() + " deployment log."}
+		if _, err := gatherAt(r, sys, configTransports(sites), sites.ID, configstore.Anchor{Root: pin}, m, stdin, stdout); err != nil {
 			return err
 		}
+	}
+	cfg, err := registerConfig(sys, pin)
+	if err != nil {
+		return err
 	}
 	key, err := registerKey(sys, cfg, *keyPath, stdout)
 	if err != nil {
 		return err
 	}
 	k, _, _ := config.ParseKeyLine(key)
-	r := reporter()
 	r.Section("register " + k.Fingerprint + " for " + *configPath)
 	return attest(r, sys, cfg, key, pin, *execute, ans, stdin, stdout)
 }
 
-// registerSystem is the system copy register attests from, locked with
-// execute, and done, which releases the lock. A draft of a deployment with
-// no system copy here is refused, as systemFor refuses it, unless root pins
-// the root: a pinned root anchors alone, so register makes the system copy,
-// reading the sites from the draft (cfg), and takes it away again when the
-// run records no head in it, as a dry run does not.
-func registerSystem(configPath, id string, d draft.Draft, root string, execute bool) (sys configstore.Local, cfg *config.Config, done func(), err error) {
-	done = func() {}
-	var deploymentID string
-	created := false
-	if root != "" && d.Has() {
-		// A draft that does not load, or names no deployment, is left to
-		// systemFor to report.
-		if c, err := config.Load(filepath.Join(d.Dir, config.FileName)); err == nil && deployment.ValidID(c.ID) && (id == "" || id == c.ID) {
-			st, err := openStore()
+// registerSystem is the system copy register attests from, and done, which
+// ends the run's hold on it. A draft of a deployment with no system copy
+// here is refused, as systemFor refuses it, unless root pins the root: a
+// pinned root anchors alone, so register makes the system copy, and sites is
+// the draft's configuration, which names the sites to gather from. Making
+// it holds the lock from before the system copy is looked for until done,
+// dry run or not, and works in a directory of its own under the data
+// directory; done puts that in place as the system copy only when the run
+// recorded a head there, as a dry run does not, and removes it. Otherwise
+// --execute holds the lock until done.
+func registerSystem(r ui.Reporter, configPath, id string, d draft.Draft, root string, execute bool) (sys configstore.Local, sites *config.Config, done func() error, err error) {
+	done = func() error { return nil }
+	st, err := openStore()
+	if err != nil {
+		return sys, nil, done, err
+	}
+	release, locked := func() {}, false
+	if c := createdFrom(d, id, root); c != nil {
+		if release, err = st.Lock(c.ID); err != nil {
+			return sys, nil, done, err
+		}
+		locked = true
+		_, ok, err := st.Held(c.ID)
+		if err != nil {
+			release()
+			return sys, nil, done, err
+		}
+		if !ok {
+			// The run works in a directory of its own, outside deployments/,
+			// so nothing it gathers is a system copy until it records a head.
+			staging, err := os.MkdirTemp(st.Base, "register-"+c.ID+"-")
 			if err != nil {
+				release()
 				return sys, nil, done, err
 			}
-			_, ok, err := st.Held(c.ID)
-			if err != nil {
-				return sys, nil, done, err
-			}
-			if !ok {
-				if sys, err = st.Local(c.ID); err != nil {
-					return sys, nil, done, err
+			sys = configstore.Local{Dir: staging}
+			return sys, c, func() error {
+				defer release()
+				var settled error
+				if head, err := sys.Head(); err == nil && head != "" {
+					if settled = settle(staging, filepath.Join(st.Base, "deployments", c.ID)); settled != nil {
+						return &ui.Problem{Hint: "the new system copy could not be put in place", Explain: "The attestation was pushed and is recorded in " + staging + ". Move that directory's contents into " + filepath.Join(st.Base, "deployments", c.ID) + ": " + errLine(settled) + ".", Cause: settled}
+					}
 				}
-				cfg, deploymentID, created = c, c.ID, true
-			}
+				if err := os.RemoveAll(staging); err != nil {
+					r.Warn("the directory the run worked in is left in "+staging, errLine(err)+". It holds no system copy; remove it.")
+				}
+				return nil
+			}, nil
+		}
+		if !execute {
+			release()
+			release, locked = func() {}, false
 		}
 	}
-	if !created {
-		if sys, _, deploymentID, err = systemFor(configPath, id); err != nil {
+	sys, _, deploymentID, err := systemFor(configPath, id)
+	if err != nil {
+		release()
+		return sys, nil, done, err
+	}
+	if execute && !locked {
+		if release, err = st.Lock(deploymentID); err != nil {
 			return sys, nil, done, err
 		}
 	}
-	release := func() {}
-	done = func() {
-		if created {
-			if head, err := sys.Head(); err != nil || head == "" {
-				os.RemoveAll(sys.Dir)
-			}
-		}
-		release()
+	return sys, nil, func() error { release(); return nil }, nil
+}
+
+// settle puts the system copy made in staging at dest: the directory
+// itself when dest is not there, else each of its entries in place of
+// dest's, which holds no system copy.
+func settle(staging, dest string) error {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
+		return err
 	}
-	if execute {
-		st, err := openStore()
-		if err == nil {
-			release, err = st.Lock(deploymentID)
+	if _, err := os.Lstat(dest); errors.Is(err, os.ErrNotExist) {
+		return os.Rename(staging, dest)
+	}
+	entries, err := os.ReadDir(staging)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if err := os.RemoveAll(filepath.Join(dest, e.Name())); err != nil {
+			return err
 		}
-		if err != nil {
-			release = func() {}
-			done()
-			return sys, nil, func() {}, err
+		if err := os.Rename(filepath.Join(staging, e.Name()), filepath.Join(dest, e.Name())); err != nil {
+			return err
 		}
 	}
-	return sys, cfg, done, nil
+	return nil
+}
+
+// createdFrom is the draft's configuration when register may make its
+// deployment's system copy: root pins a root and d is a draft that loads,
+// of the deployment id names when id is given. A draft that does not load,
+// or names no deployment, is left to systemFor to report.
+func createdFrom(d draft.Draft, id, root string) *config.Config {
+	if root == "" || !d.Has() {
+		return nil
+	}
+	c, err := config.Load(filepath.Join(d.Dir, config.FileName))
+	if err != nil || !deployment.ValidID(c.ID) || (id != "" && id != c.ID) {
+		return nil
+	}
+	return c
 }
 
 // attest signs, with execute, an attestation of the sites' newest version

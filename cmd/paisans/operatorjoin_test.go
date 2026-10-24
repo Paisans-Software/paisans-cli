@@ -639,12 +639,33 @@ func TestRegisterWithRootSkipsPendingInvites(t *testing.T) {
 			t.Fatalf("got %s", text)
 		}
 	}
+	pending := filepath.Join(dataDir(t), "invites", fixtureDeploymentID)
+	before := tree(t, pending)
 	plain(t)
 	if err := recordPending("11111111-2222-4333-8444-555555555555", []byte("an invite\n"), f.carolPub); err != nil {
 		t.Fatal(err)
 	}
 	plain(t)
 	f.wroteNothing(t)
+	// No join ran: the pending invite is as the answer left it.
+	after := tree(t, pending)
+	if len(after) != len(before) {
+		t.Fatalf("the pending invite changed: %v", after)
+	}
+	for p, v := range before {
+		if after[p] != v {
+			t.Fatalf("%s changed", p)
+		}
+	}
+	if ok, err := pendingFor(fixtureDeploymentID); err != nil || !ok {
+		t.Fatalf("the pending invite is gone: %v", err)
+	}
+}
+
+// pendingFor reports whether an invite to deployment id is pending.
+func pendingFor(id string) (bool, error) {
+	_, _, ok, err := readPending(id)
+	return ok, err
 }
 
 // A pending invite is used only for the deployment whose directory holds
