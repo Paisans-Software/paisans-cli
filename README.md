@@ -838,6 +838,9 @@ Mbin. The design is in `docs/specs/2026-10-24-engagement-digest.md`.
   hour, so every deployment has one schedule. A recipient is a local Mbin
   account with a verified address; banned, deleted, unverified, bot and
   remote accounts get nothing, and neither does an address that unsubscribed.
+  On a deployment with several apps sites the service runs on each of them,
+  and each member is mailed once: every copy claims a member's week in the
+  service's own database before sending, so only one sends it.
 * **How it reads Mbin.** Through a read only Postgres role, `<app>_reader`
   (`digest_reader` for an app named `digest`), which `deployment apply` creates
   beside the app's own role. The role has `SELECT` on named columns of named
@@ -852,9 +855,12 @@ Mbin. The design is in `docs/specs/2026-10-24-engagement-digest.md`.
   at the first apply, so the grant is reported as owed, nothing is granted, and
   the next `deployment apply` of the site that leads Patroni grants it.
   Until then the digest cannot read Mbin, and the first digest follows that
-  second apply. A column the list names and Mbin lacks fails the apply, so a
-  Mbin release that changes its schema is noticed here and not in a
-  digest that silently misses a week.
+  second apply. Every apply of the leader's site grants again, even one with
+  nothing else to do, because a Mbin upgrade changes no file on a leader's
+  site that holds no apps. A column the list names and Mbin lacks fails that
+  apply, so a Mbin release that changes its schema is noticed here and not in
+  a digest that silently misses a week; the failure says to remove the
+  engagement app or hold Mbin on its previous release until the list matches.
 * **What the gateway forwards.** `/u/*`, the unsubscribe links, and
   `GET /healthz`, which answers ok or 503, for the monitor's public check;
   everything else on the hostname answers 404. The route has no Pocket ID
@@ -2151,9 +2157,9 @@ The toolkit names no image itself. Every image a deployment runs by default is
 named by the **core catalog**, Paisans-Software/paisans-blueprints: an app's
 in its blueprint, and the toolkit's own (etcd, Spilo, HAProxy, Garage, the
 gateway's Caddy, the heartbeat, Pocket ID and its operator reconciler, the gate,
-the account service, the digest and the monitor) in its `foundation.yaml`. Each is a
-**track**: a repository and a tag pattern in which each `*` matches one run of
-digits.
+the account service, the digest and the monitor) in its `foundation.yaml`. Each
+is a **track**: a repository and a tag pattern in which each `*` matches one
+run of digits.
 
 ```yaml
 pocket-id: "ghcr.io/pocket-id/pocket-id:v2.*.*"
@@ -2267,7 +2273,7 @@ The kinds do not share a format, so a key means something different per kind:
 
 | Format | Kinds | File | A key means |
 |---|---|---|---|
-| env | mbin, wikijs, pocket-id, oauth2-proxy, uptime, account | `.env` | the variable name |
+| env | mbin, wikijs, pocket-id, oauth2-proxy, uptime, account, engagement | `.env` | the variable name |
 | ini | writefreely | `config.ini` | `section.key`, exactly one dot |
 | yaml | synapse | `homeserver.yaml` | a nested path, any depth |
 | json | element | `config.json` | a nested path, any depth |
@@ -2976,18 +2982,19 @@ no `username`, such as a test deployment's Mailpit under `security: none`, is
 sent to without logging in, so it takes no password: none is asked for, and
 `secrets rotate --all` leaves out one that is set.
 
-Five blueprints read it (`blueprints.SendsMail`): the engagement digest, which takes it as `ENGAGEMENT_SMTP_*` in its `.env` for the weekly email; the account service, which takes it as
-`ACCOUNT_SMTP_*` in its `.env` for its notices to community admins and applicants; the
-uptime monitor, which puts it in its seed file; Pocket ID, which takes it as
-`SMTP_HOST`, `SMTP_PORT`, `SMTP_TLS`, `SMTP_USER`, `SMTP_PASSWORD` and
-`SMTP_FROM` in its `.env` (see *Pocket ID's configuration is rendered from
-paisans-stack.yaml*); and Mbin, which takes it as `MAILER_DSN` and its sender address
-(see *Mbin sends little mail, and says where from*). The password goes into
-that `.env` beside the other credentials it already carries, written 0600 like
-every rendered file that holds a secret, and quoted so that a `$` or a `#` a
-mail provider issued arrives as issued. An `smtp:` block on any other kind is
-refused, `smtp-on-a-kind-without-mail`, because an override nothing reads is
-ignored without a word.
+Five blueprints read it (`blueprints.SendsMail`): the engagement digest, which
+takes it as `ENGAGEMENT_SMTP_*` in its `.env` for the weekly email; the account
+service, which takes it as `ACCOUNT_SMTP_*` in its `.env` for its notices to
+community admins and applicants; the uptime monitor, which puts it in its seed
+file; Pocket ID, which takes it as `SMTP_HOST`, `SMTP_PORT`, `SMTP_TLS`,
+`SMTP_USER`, `SMTP_PASSWORD` and `SMTP_FROM` in its `.env` (see *Pocket ID's
+configuration is rendered from paisans-stack.yaml*); and Mbin, which takes it as
+`MAILER_DSN` and its sender address (see *Mbin sends little mail, and says where
+from*). The password goes into that `.env` beside the other credentials it
+already carries, written 0600 like every rendered file that holds a secret, and
+quoted so that a `$` or a `#` a mail provider issued arrives as issued. An
+`smtp:` block on any other kind is refused, `smtp-on-a-kind-without-mail`,
+because an override nothing reads is ignored without a word.
 
 Two fields mean slightly less to Pocket ID than to the monitor, because of
 what Pocket ID can express (Mbin's own differences are in its section):
@@ -3262,8 +3269,8 @@ each app the leftovers belong to, which is the command that takes them off
 #### A blueprint can come from a catalog
 
 The blueprints built into the toolkit are the reserved five (`pocket-id`, the
-gate, `account`, `uptime`, `engagement`). The first party ones, `mbin`, `wikijs` and the
-rest, are the **core catalog**'s, which the toolkit fetches at its newest
+gate, `account`, `uptime`, `engagement`). The first party ones, `mbin`,
+`wikijs` and the rest, are the **core catalog**'s, which the toolkit fetches at its newest
 release this toolkit reads (see *Images follow tracks*). Any other comes from a **catalog**: a git repository of blueprints the deployment
 declares and pins to a commit, and an app names it qualified:
 
