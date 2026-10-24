@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Added
+
+- `operator add` declares an operator in `paisans-stack.yaml` and names them in the chosen sites' `ssh.keys`, asking at a terminal and taking `--name`, `--email`, `--key` and `--site` without one.
+
 ## [0.3.0-rc.8] - 2026-10-23
 
 ### Fixed

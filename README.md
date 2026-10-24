@@ -543,6 +543,17 @@ that Pocket ID agrees with the `operators:` section (see *The operator
 reconciler checks Pocket ID against the operators*).
 `docs/specs/2026-10-14-operators-and-management.md` is the approved design.
 
+**`paisans operator add` declares one more operator.** It writes their entry
+under `operators` and their name in the `ssh.keys` of the sites they may log
+in to, and leaves every other line of `paisans-stack.yaml` as it was. At a
+terminal it asks `create`'s questions for whatever its flags did not give;
+without one it takes `--name`, `--email`, `--key` and `--site` or
+`--all-sites` and asks nothing. It reaches no host: the next `deployment apply
+--execute` gives them their sites and their Pocket ID account, and their age
+public key goes into `.sops.yaml` by hand, followed by `sops updatekeys
+secrets.enc.yaml`. See *`paisans operator add`* in
+[docs/commands.md](docs/commands.md).
+
 ### Who manages accounts: `management`
 
 Signup, bans and a member's way back in after a lost link are managed in one

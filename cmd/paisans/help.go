@@ -50,7 +50,7 @@ var groupSummary = map[string]string{
 	"failover":    "Switch the database primary to another site and back.",
 	"dns":         "Create the DNS records the configuration implies, or prune them.",
 	"deployment":  "Apply, list, check out, fetch, publish, pull and recover.",
-	"operator":    "Sign the sites' configuration, or give an operator a sign-in link.",
+	"operator":    "Add an operator, sign the configuration, or give a sign-in link.",
 	"secrets":     "List, set, prune and rotate secrets.",
 	"app":         "Take a removed app off hosts.",
 	"oidc":        "Create an app's sign-in client at Pocket ID.",
@@ -398,6 +398,15 @@ var helpCommands = []helpCommand{
 		detail: "Read, through sudo, the registry of the host --ssh names and, for each deployment in it, every version of its configuration the host keeps, and save the newest trusted one with the saved deployments (see deployment list). " +
 			"A deployment this workstation saved before is judged from the key that signed it, as deployment pull judges; one it never saved has nothing to trust from, so its newest versions are put in .paisans/incoming/<sha>/ and listed as unverified, " +
 			"for deployment recover --root <sha> to pin once the hash is checked with another operator. Needs no " + config.FileName + "; changes nothing on the host.\n\n" + sshAliasTopic,
+	},
+	{
+		name:    "operator add",
+		summary: "Declare one more operator in " + config.FileName + ".",
+		usage:   []string{"paisans operator add [<username>] [--name <first last>] [--email <address>]\n                     [--key <path.pub or key line>]... [--site <name>]... [--all-sites]\n                     [--config " + config.FileName + "]"},
+		detail: "Write the operator's entry under operators, after the last one, and name them in the ssh.keys of each site --site gives, or of every site with --all-sites, leaving every other line of the file as it was. " +
+			"At a terminal it asks, with create's questions, for whatever the flags did not give or give in a form the file would refuse, and which sites the operator may log in to. Without a terminal it asks nothing: the username, --name, --email, at least one --key and the sites must all be given, or nothing is written. " +
+			"A --key is a .pub file, every line of which but blank lines and comments is a key, or one key line itself. " +
+			"Writes the file only when validate refuses nothing the addition introduced. Reaches no host: the next deployment apply --execute gives the operator their sites, publishes the change and makes their Pocket ID account. Their age key, to read the secrets, is added to .sops.yaml by hand.",
 	},
 	{
 		name:    "operator magic-link",

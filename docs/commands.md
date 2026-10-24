@@ -738,6 +738,45 @@ paisans deployment fetch --ssh admin@203.0.113.9
 
 See *This workstation keeps every deployment it applies* in `README.md`.
 
+### `paisans operator add`
+
+Declares one more operator in `paisans-stack.yaml`: their entry under
+`operators`, after the last one, and their name in the `ssh.keys` of each site
+they may log in to. Every other line of the file stays as it was.
+
+```sh
+paisans operator add                     # asks for each answer at a terminal
+paisans operator add carol --name 'Carol Example' --email carol@example.org \
+  --key carol.pub --all-sites            # asks nothing
+```
+
+* **Alone:** always: the whole apply never declares an operator.
+* **Flags:** `--config`, `--name <first last>`, `--email <address>`,
+  `--key <path.pub or key line>` (repeatable: a `.pub` file, every line of which
+  but blank lines and comments is a key, or one key line itself),
+  `--site <name>` (repeatable) or `--all-sites`. The username is its one
+  argument.
+* **At a terminal:** asks, with `create`'s questions, for every answer the
+  flags did not give and for one they gave that the question would refuse,
+  saying why; then, with no `--site` or `--all-sites`, whether the operator may
+  log in to every site, and if not, to which.
+* **Without a terminal:** asks nothing. The username, `--name`, `--email`, at
+  least one `--key`, and `--site` or `--all-sites` must all be given; a missing
+  one is refused by its flag, and so is one the question would refuse.
+* **Refuses:** a username already declared, a key another operator lists, a
+  site not declared, and a layout it cannot edit in place (a flow mapping
+  under `operators`, a site with no `ssh.keys` list, or one written as a flow
+  list over several lines), naming it so it can be added by hand. It writes the
+  file only when `validate` refuses nothing the addition introduced. Nothing is
+  written after a refusal.
+* **Hosts:** none. The next `deployment apply --execute` reviews the new keys,
+  writes them to each site's authorized keys, publishes the change and makes
+  the operator's Pocket ID account. Reading the secrets needs their age public
+  key in `.sops.yaml` and `sops updatekeys secrets.enc.yaml`, by hand. Then
+  they run `operator register` on their own workstation.
+
+See *Operators and community admins* in `README.md`.
+
 ### `paisans operator register`
 
 Gives an operator an anchor of their own: the point on their workstation from which
