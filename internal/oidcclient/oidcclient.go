@@ -261,7 +261,7 @@ func Build(d Desired, rec Recorded, s State) (*Plan, error) {
 		if client.LaunchURL != nil && *client.LaunchURL != "" {
 			current := *client.LaunchURL
 			if d.setByToolkit(current) {
-				p.Steps = append(p.Steps, Step{Kind: ClearLaunchURL, Title: "clear launch URL for " + d.App, Detail: fmt.Sprintf("clear launch URL for client %s: PUT /api/oidc/clients/%s with launchURL %q and every other field sent back as it is now", d.App, client.ID, "")})
+				p.Steps = append(p.Steps, Step{Kind: ClearLaunchURL, Title: "clear launch URL for " + d.App, Detail: fmt.Sprintf("clear launch URL for client %s: PUT /api/oidc/clients/%s with launchURL null and every other field sent back as it is now", d.App, client.ID)})
 			} else {
 				p.Present = append(p.Present, fmt.Sprintf("client %s launch URL %s, which this blueprint does not use; left as it is, since it may have been set deliberately", d.App, current))
 			}
