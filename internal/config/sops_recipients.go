@@ -12,15 +12,15 @@ import (
 )
 
 // AddSOPSRecipient is the .sops.yaml in dir with recipient appended to the
-// age field of every creation rule, comma-separated, and given an age field
-// in a rule that has none: what adding an operator's age key to the
-// recipients is. Every other rule, key and comment is kept. A file whose
-// every rule already names recipient is returned unchanged, byte for byte.
-// Nothing is written: the caller writes the result once everything else it
-// changes is ready.
+// age field of every creation rule, comma-separated: what adding an
+// operator's age key to the recipients is. Every other rule, key and comment
+// is kept. A file whose every rule already names recipient is returned
+// unchanged, byte for byte. Nothing is written: the caller writes the result
+// once everything else it changes is ready.
 //
 // A missing file is refused, and so is one with no creation rule, since the
-// recipient would then be named nowhere.
+// recipient would then be named nowhere, and one with a rule that uses
+// key_groups or names no age recipient, which is left to the operator.
 func AddSOPSRecipient(dir, recipient string) ([]byte, error) {
 	path := filepath.Join(dir, SOPSConfigName)
 	data, err := os.ReadFile(path)
@@ -36,17 +36,19 @@ func AddSOPSRecipient(dir, recipient string) ([]byte, error) {
 		return nil, fmt.Errorf("%s %w", path, err)
 	}
 	changed := false
-	for _, rule := range rules {
+	for n, rule := range rules {
+		// A rule that splits the data key between key groups, or names no
+		// age recipient at all, is one this toolkit does not write: an age
+		// field added beside it would change what it means.
+		if mappingValue(rule, "key_groups") != nil {
+			return nil, fmt.Errorf("%s: creation rule %d uses key_groups. Add %s to it by hand", path, n+1, recipient)
+		}
 		age := mappingValue(rule, "age")
 		if age == nil {
-			rule.Content = append(rule.Content,
-				&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "age"},
-				&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: recipient})
-			changed = true
-			continue
+			return nil, fmt.Errorf("%s: creation rule %d names no age recipient. Add %s to it by hand", path, n+1, recipient)
 		}
 		if age.Kind != yaml.ScalarNode {
-			return nil, fmt.Errorf("%s has a creation rule whose age is not a comma-separated list of recipients", path)
+			return nil, fmt.Errorf("%s: creation rule %d has an age that is not a comma-separated list of recipients", path, n+1)
 		}
 		if namesRecipient(age.Value, recipient) {
 			continue

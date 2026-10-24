@@ -79,13 +79,17 @@ func TestAddSOPSRecipientAlreadyPresent(t *testing.T) {
 	}
 }
 
-func TestAddSOPSRecipientAddsToARuleWithoutAge(t *testing.T) {
-	got, err := config.AddSOPSRecipient(sopsDir(t, "creation_rules:\n  - age: age1one\n  - path_regex: other$\n"), "age1two")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Count(string(got), "age1two") != 2 {
-		t.Fatalf("not added to both rules:\n%s", got)
+func TestAddSOPSRecipientRefusesRulesItDoesNotWrite(t *testing.T) {
+	for name, tc := range map[string]struct{ body, rule string }{
+		"no age":     {"creation_rules:\n  - age: age1one\n  - path_regex: other$\n    pgp: 0123456789ABCDEF\n", "rule 2"},
+		"key_groups": {"creation_rules:\n  - key_groups:\n      - age:\n          - age1one\n", "rule 1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := config.AddSOPSRecipient(sopsDir(t, tc.body), "age1two")
+			if err == nil || !strings.Contains(err.Error(), "by hand") || !strings.Contains(err.Error(), tc.rule) {
+				t.Fatalf("got %v", err)
+			}
+		})
 	}
 }
 

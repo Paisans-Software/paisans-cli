@@ -411,7 +411,7 @@ var helpCommands = []helpCommand{
 			"A --key is a .pub file, every line of which but blank lines and comments is a key, or one key line itself. " +
 			"Writes the file only when validate refuses nothing the addition introduced. Reaches no host: the next deployment apply --execute gives the operator their sites, publishes the change and makes their Pocket ID account. Their age key, to read the secrets, is added to .sops.yaml by hand.\n\n" +
 			"With --request, accept the signed request a new operator's operator register --invite wrote, on any operator's workstation: the request must be signed by the key its invite names, and the invite by a key an operator of this deployment lists, for this deployment and the root this workstation trusts. " +
-			"It declares the operator with the request's username, name, email and key, asking only for the sites, adds their age key to .sops.yaml and re-encrypts secrets.enc.yaml to every recipient there, decrypting with your own age key. " +
+			"It declares the operator with the request's username, name, email and key, asking only for the sites, adds their age key to .sops.yaml and re-encrypts secrets.enc.yaml to every recipient there, its contents unchanged, decrypting with your own age key. An operator declared already keeps their sites, so --site and --all-sites are refused for them. " +
 			"Every check is made before the first file is written, and a write that fails puts back the files written before it. The username, --name, --email and --key are refused beside --request. " +
 			"Accepting the same request again adds the age key or re-encrypts if either is missing, and otherwise changes nothing.",
 	},

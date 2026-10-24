@@ -9,8 +9,16 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"filippo.io/age"
+	"github.com/getsops/sops/v3"
+	"github.com/getsops/sops/v3/aes"
+	sopsage "github.com/getsops/sops/v3/age"
+	"github.com/getsops/sops/v3/decrypt"
+	"github.com/getsops/sops/v3/keys"
+	sopsyaml "github.com/getsops/sops/v3/stores/yaml"
+	"github.com/getsops/sops/v3/version"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
@@ -492,7 +500,7 @@ func TestOperatorAddRequestTwiceIsNoOp(t *testing.T) {
 		t.Fatalf("%v\n%s", problemText(err), out)
 	}
 	before := d.files(t)
-	out, err := d.add(t, req, "--all-sites")
+	out, err := d.add(t, req)
 	if err != nil {
 		t.Fatalf("%v\n%s", problemText(err), out)
 	}
@@ -625,4 +633,127 @@ func TestOperatorAddRequestRestoresOnFailure(t *testing.T) {
 
 func sameFiles(a, b [3][]byte) bool {
 	return bytes.Equal(a[0], b[0]) && bytes.Equal(a[1], b[1]) && bytes.Equal(a[2], b[2])
+}
+
+// encryptPlain is plain encrypted to recipient with the sops library, byte
+// for byte as given: a secrets file this toolkit's Secrets would not write.
+func encryptPlain(t *testing.T, plain []byte, recipient string) []byte {
+	t.Helper()
+	store := &sopsyaml.Store{}
+	branches, err := store.LoadPlainFile(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	masterKeys, err := sopsage.MasterKeysFromRecipients(recipient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var group sops.KeyGroup
+	for _, key := range masterKeys {
+		group = append(group, keys.MasterKey(key))
+	}
+	tree := sops.Tree{Branches: branches, Metadata: sops.Metadata{KeyGroups: []sops.KeyGroup{group}, Version: version.Version, LastModified: time.Unix(0, 0).UTC()}}
+	dataKey, errs := tree.GenerateDataKey()
+	if len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	cipher := aes.NewCipher()
+	mac, err := tree.Encrypt(dataKey, cipher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tree.Metadata.MessageAuthenticationCode, err = cipher.Encrypt(mac, dataKey, tree.Metadata.LastModified.Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+	out, err := store.EmitEncryptedFile(tree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// plaintextWith is the secrets file at path decrypted by identity alone, as
+// sops itself decrypts it.
+func plaintextWith(t *testing.T, path string, identity *age.X25519Identity) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SOPS_AGE_KEY", identity.String())
+	defer os.Unsetenv("SOPS_AGE_KEY")
+	plain, err := decrypt.Data(data, "yaml")
+	if err != nil {
+		t.Fatalf("decrypting with %s: %v", identity.Recipient(), err)
+	}
+	return plain
+}
+
+// The secrets are re-encrypted as sops updatekeys would: a key Secrets does
+// not model, an older version and a missing id all survive, byte for byte.
+func TestOperatorAddRequestKeepsThePlaintext(t *testing.T) {
+	d := newRequestDeployment(t)
+	fixture, err := os.ReadFile(fixtureSecretsPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kept []string
+	for _, line := range strings.Split(string(fixture), "\n") {
+		if !strings.HasPrefix(line, "id:") && !strings.HasPrefix(line, "version:") {
+			kept = append(kept, line)
+		}
+	}
+	plain := "version: 1\n" + strings.Join(kept, "\n") + "\nunmodelled:\n  kept: as it was\n"
+	if err := os.WriteFile(d.secretsPath(), encryptPlain(t, []byte(plain), d.alice.Recipient().String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before := plaintextWith(t, d.secretsPath(), d.alice)
+	if !strings.Contains(string(before), "unmodelled") {
+		t.Fatalf("the fixture lost its key:\n%s", before)
+	}
+	if out, err := d.add(t, d.request(t, d.invite, d.alicePriv), "--all-sites"); err != nil {
+		t.Fatalf("%v\n%s", problemText(err), out)
+	}
+	for who, id := range map[string]*age.X25519Identity{"alice": d.alice, "carol": d.carol} {
+		if after := plaintextWith(t, d.secretsPath(), id); !bytes.Equal(after, before) {
+			t.Errorf("%s's plaintext changed:\n%s\nwas:\n%s", who, after, before)
+		}
+	}
+}
+
+// An operator declared already keeps their sites: --site and --all-sites
+// cannot change them, so they are refused.
+func TestOperatorAddRequestRefusesSitesForDeclared(t *testing.T) {
+	d := newRequestDeployment(t)
+	req := d.request(t, d.invite, d.alicePriv)
+	if out, err := d.add(t, req, "--all-sites"); err != nil {
+		t.Fatalf("%v\n%s", problemText(err), out)
+	}
+	d.refused(t, req, "--all-sites", "--all-sites")
+	d.refused(t, req, "--site", "--site", d.cfg.SiteNames()[0])
+}
+
+// At a terminal only the sites are asked: the rest is the request's.
+func TestOperatorAddRequestAtATerminalAsksOnlySites(t *testing.T) {
+	d := newRequestDeployment(t)
+	req := d.request(t, d.invite, d.alicePriv)
+	in := answersFile(t, "")
+	var out bytes.Buffer
+	if err := runOperatorAdd([]string{"--request", req, "--config", d.configPath}, in, &out); err != nil {
+		t.Fatalf("%v\n%s", problemText(err), out.String())
+	}
+	for _, asked := range []string{"Username", "Full name", "Email", "SSH public keys"} {
+		if strings.Contains(out.String(), asked) {
+			t.Errorf("asked for %s:\n%s", asked, out.String())
+		}
+	}
+	cfg := loadOperators(t, d.configPath)
+	if cfg.Operators["carol"].Keys != bare(d.carolKey)+"\n" {
+		t.Errorf("operators.carol = %+v", cfg.Operators["carol"])
+	}
+	for name, site := range cfg.Sites {
+		if !siteNames(site, "carol") {
+			t.Errorf("sites.%s.ssh.keys does not name carol", name)
+		}
+	}
 }

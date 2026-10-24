@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -313,6 +314,13 @@ func runOperatorAddRequest(r ui.Reporter, configPath, requestPath string, sites 
 	if already && !sameKeys(existing.KeyLines(), inv.Key) {
 		return &ui.Problem{Hint: inv.Username + " is declared with another key", Explain: fmt.Sprintf("%s lists %s with keys other than %s, the key the invite names. A username belongs to one operator: invite them under another, or remove the entry first. Nothing was written.", config.FileName, inv.Username, key)}
 	}
+	if already && (allSites || len(sites) > 0) {
+		flag := "--site"
+		if allSites {
+			flag = "--all-sites"
+		}
+		return &ui.Problem{Hint: flag + " cannot change the sites of " + inv.Username + ", who is declared already", Explain: "Accepting the request again only adds their age key and re-encrypts the secrets. Edit their sites in " + config.FileName + ", or run it again without " + flag + ". Nothing was written."}
+	}
 	op := create.NewOperator{ID: inv.Username, Name: q.Name, Email: q.Email, Keys: []string{inv.Key}, Sites: sites}
 	if allSites {
 		op.Sites = slices.Clone(declared.Sites)
@@ -345,18 +353,24 @@ func runOperatorAddRequest(r ui.Reporter, configPath, requestPath string, sites 
 	if err != nil {
 		return &ui.Problem{Hint: "the secrets file cannot be read", Explain: errLine(err) + ". Nothing was written.", Cause: err}
 	}
-	reencrypt := !slices.Contains(config.FileRecipients(oldSecrets), q.Age)
-	var secrets *config.Secrets
-	if reencrypt {
-		step := r.Step("open the secrets")
-		if secrets, err = config.LoadDeploymentSecrets(secretsPath, cfg.ID); err != nil {
+	var newSecrets []byte
+	if !slices.Contains(config.FileRecipients(oldSecrets), q.Age) {
+		// Re-encrypted to every recipient the new .sops.yaml names, the
+		// plaintext as it is, before anything is asked or written.
+		step := r.Step("re-encrypt the secrets in memory")
+		recipients, err := sopsRecipients(newSOPS)
+		if err != nil {
+			step.Fail(err)
+			return err
+		}
+		if newSecrets, err = config.ReencryptSecretsBytes(secretsPath, oldSecrets, cfg.ID, recipients); err != nil {
 			step.Fail(err)
 			return &ui.Problem{Hint: "this workstation cannot open the secrets", Explain: "Re-encrypting " + ui.ShortPath(secretsPath) + " to " + inv.Username + "'s age key takes opening it with yours. Nothing was written.", Cause: err}
 		}
-		step.Done("with your age key")
+		step.Done("with your age key, to " + strconv.Itoa(len(recipients)) + " recipients")
 	}
 
-	if already && !reencrypt && bytes.Equal(newSOPS, oldSOPS) {
+	if already && newSecrets == nil && bytes.Equal(newSOPS, oldSOPS) {
 		r.Result("%s is declared with this key, %s names their age key and the secrets are encrypted to it: nothing to change.", inv.Username, config.SOPSConfigName)
 		operatorAddRequestNext(stdout, inv.Username)
 		return nil
@@ -371,6 +385,11 @@ func runOperatorAddRequest(r ui.Reporter, configPath, requestPath string, sites 
 					return &ui.Problem{Hint: "input ended before every question was answered", Explain: "Nothing was written."}
 				}
 				return flagProblem(err)
+			}
+			// Only the sites are the approver's to answer: the rest is the
+			// request's, and the key above all.
+			if op.ID != inv.Username || op.Name != q.Name || op.Email != q.Email || !slices.Equal(op.Keys, []string{inv.Key}) {
+				return &ui.Problem{Hint: "the answers changed what the request gives", Explain: "The username, name, email and key are the request's, and only the sites are asked. Nothing was written."}
 			}
 		} else {
 			if len(op.Sites) == 0 {
@@ -405,18 +424,8 @@ func runOperatorAddRequest(r ui.Reporter, configPath, requestPath string, sites 
 		}
 	}
 
-	// The secrets, encrypted to every recipient the new .sops.yaml names,
-	// into a temporary file beside them, renamed over them once the rest is
-	// ready.
-	var staged string
-	if reencrypt {
-		if staged, err = stageSecrets(dir, newSOPS, secretsPath, secrets); err != nil {
-			return err
-		}
-		defer os.Remove(staged)
-	}
-
-	// The writes. A failure puts back what was written before it.
+	// The writes, each through a file beside its target renamed over it. A
+	// failure puts back what was written before it.
 	var undo []func() error
 	fail := func(s ui.Step, err error) error {
 		s.Fail(err)
@@ -429,18 +438,18 @@ func runOperatorAddRequest(r ui.Reporter, configPath, requestPath string, sites 
 	}
 	if !bytes.Equal(newSOPS, oldSOPS) {
 		s := r.Step("add " + inv.Username + "'s age key to " + config.SOPSConfigName)
-		if err := replaceKeepingMode(sopsPath, newSOPS); err != nil {
+		if err := config.ReplaceFile(sopsPath, newSOPS); err != nil {
 			return fail(s, err)
 		}
-		undo = append(undo, func() error { return replaceKeepingMode(sopsPath, oldSOPS) })
+		undo = append(undo, func() error { return config.ReplaceFile(sopsPath, oldSOPS) })
 		s.Done(q.Age)
 	}
-	if reencrypt {
+	if newSecrets != nil {
 		s := r.Step("re-encrypt secrets.enc.yaml")
-		if err := os.Rename(staged, secretsPath); err != nil {
+		if err := config.WriteSecretsFile(secretsPath, newSecrets); err != nil {
 			return fail(s, err)
 		}
-		undo = append(undo, func() error { return replaceKeepingMode(secretsPath, oldSecrets) })
+		undo = append(undo, func() error { return config.WriteSecretsFile(secretsPath, oldSecrets) })
 		s.Done("to " + inv.Username + " as well")
 	}
 	if newDecl != nil {
@@ -521,6 +530,9 @@ func requestProblem(err error) error {
 	if !errors.As(err, &fe) {
 		return err
 	}
+	if strings.HasPrefix(fe.Flag, "--site") {
+		return flagProblem(err)
+	}
 	field := strings.TrimPrefix(strings.Fields(fe.Flag + " ")[0], "--")
 	if fe.Flag == "the username" {
 		field = "username"
@@ -528,60 +540,17 @@ func requestProblem(err error) error {
 	return &ui.Problem{Hint: "the request's " + field + " is refused", Explain: fe.Err.Error() + ". Nothing was written."}
 }
 
-// stageSecrets writes s, encrypted to every recipient sops (the new
-// .sops.yaml) names, to a temporary file in dir beside secretsPath, and
-// returns its path.
-func stageSecrets(dir string, sops []byte, secretsPath string, s *config.Secrets) (string, error) {
+// sopsRecipients is the recipients a .sops.yaml of data names, as
+// config.Recipients reads them, read from a scratch copy so that nothing
+// beside the deployment changes.
+func sopsRecipients(data []byte) ([]string, error) {
 	scratch, err := os.MkdirTemp("", "paisans-request-")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer os.RemoveAll(scratch)
-	if err := os.WriteFile(filepath.Join(scratch, config.SOPSConfigName), sops, 0o600); err != nil {
-		return "", err
+	if err := os.WriteFile(filepath.Join(scratch, config.SOPSConfigName), data, 0o600); err != nil {
+		return nil, err
 	}
-	recipients, err := config.Recipients(scratch)
-	if err != nil {
-		return "", err
-	}
-	tmp, err := os.CreateTemp(dir, "."+filepath.Base(secretsPath)+".request-")
-	if err != nil {
-		return "", err
-	}
-	tmp.Close()
-	if _, err := config.WriteSecretsBytes(tmp.Name(), s, recipients); err != nil {
-		os.Remove(tmp.Name())
-		return "", &ui.Problem{Hint: "the secrets cannot be re-encrypted", Explain: errLine(err) + ". Nothing was written.", Cause: err}
-	}
-	return tmp.Name(), nil
-}
-
-// replaceKeepingMode writes data over the file at path through a temporary
-// file beside it, renamed over it, with the file's permissions.
-func replaceKeepingMode(path string, data []byte) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(info.Mode().Perm()); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return config.Recipients(scratch)
 }
