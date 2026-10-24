@@ -792,26 +792,51 @@ func TestConfigPublishDryRunChecksTheSigner(t *testing.T) {
 }
 
 // Typing rollback lowers the seen record only once the command commits: a
-// pull that is refused the word leaves it as it was.
-func TestConfigRollbackRefusedLeavesSeen(t *testing.T) {
+// pull that is given the word and then stops at local edits leaves it as it
+// was.
+func TestConfigRollbackThenRefusedPullLeavesSeen(t *testing.T) {
 	shas, answer, files := storedHistory(t, 2, 0)
-	l := pullWorkstation(t, answer, shas[0], shas[0], files[0])
-	recoverHosts(t, answer) // home-a alone answers: one of four sites
+	edited := files[0]
+	edited.Paisans = append(append([]byte{}, edited.Paisans...), "# local edit\n"...)
+	l := pullWorkstation(t, answer, shas[0], shas[0], edited)
 	seenPath := filepath.Join(l.Dir, ".paisans", "config-seen")
 	seen := "9 " + strings.Repeat("b", 40) + "\n"
 	if err := os.WriteFile(seenPath, []byte(seen), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	err := runDeployment([]string{"pull", "--config", filepath.Join(l.Dir, "paisans-stack.yaml"), "--execute"}, answering(t, "no\n"), &out)
-	if err == nil || !strings.Contains(out.String(), "Type 'rollback'") {
-		t.Fatalf("got %v\n%s", err, out.String())
+	err := runDeployment([]string{"pull", "--config", filepath.Join(l.Dir, "paisans-stack.yaml"), "--execute"}, answering(t, "rollback\n"), &out)
+	if err == nil || !strings.Contains(problemText(err), "edits") || !strings.Contains(out.String(), "Type 'rollback'") {
+		t.Fatalf("got %v\n%s", problemText(err), out.String())
 	}
 	if b, _ := os.ReadFile(seenPath); string(b) != seen {
 		t.Fatalf("seen changed to %q by a pull that stopped", b)
 	}
 	if h, _ := l.Head(); h != shas[0] {
 		t.Fatalf("head moved to %s", h)
+	}
+}
+
+// A pull --execute --root that refuses records neither the root nor a newer
+// revision seen.
+func TestConfigRefusedPullWithRootRecordsNothing(t *testing.T) {
+	shas, answer, files := storedHistory(t, 2, 0)
+	recoverHosts(t, answer) // home-a alone answers: one of four sites
+	l := configstore.Local{Dir: t.TempDir()}
+	edited := files[0]
+	edited.Paisans = append(append([]byte{}, edited.Paisans...), "# local edit\n"...)
+	l.WriteFiles(edited)
+	l.SetHead(shas[0])
+	var out bytes.Buffer
+	err := runDeployment([]string{"pull", "--root", shas[0], "--config", filepath.Join(l.Dir, "paisans-stack.yaml"), "--execute"}, noTerminalStdin(), &out)
+	if err == nil || !strings.Contains(problemText(err), "edits") {
+		t.Fatalf("got %v", problemText(err))
+	}
+	if rev, _, _ := l.Seen(); rev != 0 {
+		t.Fatalf("seen raised to %d", rev)
+	}
+	if r, _ := l.Root(); r != "" {
+		t.Fatalf("root %s recorded", r)
 	}
 }
 
@@ -839,6 +864,10 @@ func TestConfigDryRunsRecordNothingSeen(t *testing.T) {
 func TestPublishFirstVersionFromOneSiteAsksNothing(t *testing.T) {
 	key, pub := testKey(t)
 	recoverHosts(t, "__PAISANS_EMPTY__\n") // home-a alone answers, holding nothing
+	var runs []string
+	configSiteTransport = func(name string, _ config.Site) apply.Transport {
+		return &storeHost{name: name, answer: "__PAISANS_EMPTY__\n", down: name != "home-a", runs: &runs}
+	}
 	saved, savedSign := agentKeys, configSignWith
 	agentKeys = func() []string { return []string{pub} }
 	configSignWith = func(string) string { return key }
@@ -862,5 +891,14 @@ func TestPublishFirstVersionFromOneSiteAsksNothing(t *testing.T) {
 	}
 	if h, _ := l.Head(); h == "" {
 		t.Fatal("no head after publishing")
+	}
+	took := false
+	for _, r := range runs {
+		if strings.HasPrefix(r, "home-a: ") && strings.Contains(r, "bundle verify") {
+			took = true
+		}
+	}
+	if !took {
+		t.Fatalf("the version did not reach home-a: %q", runs)
 	}
 }
