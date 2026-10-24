@@ -575,3 +575,19 @@ func TestItalic(t *testing.T) {
 		t.Errorf("a writer that is not a terminal: %q", got)
 	}
 }
+
+// Verbatim keeps each line as written on a narrow terminal: a blank line
+// and a long one's indentation survive, nothing wraps, and a secret and a
+// terminal escape are still taken out.
+func TestVerbatimKeepsLinesAsWritten(t *testing.T) {
+	ui.Secret("verbatim-secret-91")
+	var b strings.Builder
+	const indent = "       "
+	r := ui.NewForTestSize(&b, false, 40, 24, time.Now)
+	long := "+    image: ghcr.io/example-org/a-rather-long-image-name:v1.2.3"
+	r.Verbatim([]string{"@@ -1,3 +1,3 @@", " ", long, "-x verbatim-secret-91 \x1b[2K"})
+	want := indent + "@@ -1,3 +1,3 @@\n" + indent + " \n" + indent + long + "\n" + indent + `-x [redacted] \x1b[2K` + "\n"
+	if got := b.String(); got != want {
+		t.Errorf("got\n%q\nwant\n%q", got, want)
+	}
+}

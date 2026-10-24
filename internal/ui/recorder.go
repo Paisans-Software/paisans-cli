@@ -39,6 +39,13 @@ func (r *Recorder) Trace(label, output string) { r.add("trace", label, output) }
 func (r *Recorder) Result(f string, a ...any)  { r.add("result", fmt.Sprintf(f, a...), "") }
 func (r *Recorder) Verbose() bool              { return r.Verbose_ }
 
+// Verbatim keeps each line as an event of its own.
+func (r *Recorder) Verbatim(lines []string) {
+	for _, line := range lines {
+		r.add("verbatim", line, "")
+	}
+}
+
 func (r *Recorder) Step(title string) Step {
 	r.add("step", title, "")
 	return &recStep{r, title}
