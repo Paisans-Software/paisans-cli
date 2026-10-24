@@ -7,6 +7,8 @@ import (
 	"net/mail"
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/paisans-software/paisans-cli/internal/progname"
 )
@@ -30,6 +32,13 @@ const requestHeader = "# A request to become an operator of a paisans deployment
 	"# Accept it beside the deployment's files with:\n" +
 	"#   " + progname.Default + " operator add --request <this file>\n"
 
+// The longest name and email a request may hold: a name in characters, and
+// an address in bytes, the most a mail path carries.
+const (
+	MaxNameRunes   = 128
+	MaxEmailLength = 254
+)
+
 // ageRecipient is an age public key: bech32, under the age1 prefix.
 var ageRecipient = regexp.MustCompile(`^age1[0-9a-z]+$`)
 
@@ -49,10 +58,25 @@ func (q Request) Check() []string {
 	if q.Invite == "" {
 		add("invite: missing")
 	}
-	if first, last, _ := strings.Cut(q.Name, " "); first == "" || strings.TrimSpace(last) == "" {
+	// The name and email come from the person invited, are shown to the
+	// operator accepting them and are written into paisans-stack.yaml, so a
+	// control character, which could rewrite what that operator sees, is
+	// refused, and so is a value longer than a person's name or an address.
+	first, last, _ := strings.Cut(q.Name, " ")
+	switch {
+	case strings.IndexFunc(q.Name, unicode.IsControl) >= 0:
+		add("name: %q holds a control character", q.Name)
+	case utf8.RuneCountInString(q.Name) > MaxNameRunes:
+		add("name: %d characters, and a name is at most %d", utf8.RuneCountInString(q.Name), MaxNameRunes)
+	case first == "" || strings.TrimSpace(last) == "":
 		add("name: %q is not a first and a last name, separated by a space", q.Name)
 	}
-	if addr, err := mail.ParseAddress(q.Email); err != nil || addr.Address != q.Email {
+	switch addr, err := mail.ParseAddress(q.Email); {
+	case strings.IndexFunc(q.Email, unicode.IsControl) >= 0:
+		add("email: %q holds a control character", q.Email)
+	case len(q.Email) > MaxEmailLength:
+		add("email: %d characters, and an email address is at most %d", len(q.Email), MaxEmailLength)
+	case err != nil || addr.Address != q.Email:
 		add("email: %q is not an email address alone, Eg: alice@example.org", q.Email)
 	}
 	if !ageRecipient.MatchString(q.Age) {

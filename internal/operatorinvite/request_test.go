@@ -160,3 +160,30 @@ func TestRequestRefusesInviteThatIsNotOne(t *testing.T) {
 	_, _, err := operatorinvite.ParseRequest(signedRequest(t, q, justin))
 	refused(t, err, "invite")
 }
+
+// The name and email come from the person invited and are shown to the
+// operator who accepts them, so nothing in them may move the cursor, clear
+// a line or start a new one.
+func TestRequestRefusesControlCharacters(t *testing.T) {
+	alice, justin := newKey(t), newKey(t)
+	invite := signedInvite(t, testInvite(alice, justin), alice)
+	for _, c := range []struct{ field, name, email string }{
+		{"name: ", "\x1b[2K\rAlice Smith", "justin@example.org"},
+		{"name: ", "Mallory\nOperator: x y", "justin@example.org"},
+		{"name: ", "Justin Case\u0085", "justin@example.org"},
+		{"name: ", "Justin " + strings.Repeat("a", 128), "justin@example.org"},
+		{"email: ", "Justin Case", "justin@example.org\x1b[2K"},
+		{"email: ", "Justin Case", strings.Repeat("a", 250) + "@example.org"},
+	} {
+		q := testRequest(invite)
+		q.Name, q.Email = c.name, c.email
+		refused(t, joined(q.Check()), c.field)
+		_, _, err := operatorinvite.ParseRequest(signedRequest(t, q, justin))
+		refused(t, err, c.field)
+	}
+	q := testRequest(invite)
+	q.Name = "Justin " + strings.Repeat("a", 121)
+	if p := q.Check(); len(p) > 0 {
+		t.Fatalf("a name of 128 runes is refused: %q", p)
+	}
+}

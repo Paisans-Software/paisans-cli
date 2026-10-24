@@ -65,15 +65,23 @@ var Sign = func(keyLine, namespace string, data []byte) ([]byte, error) {
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("ssh-keygen -Y sign with %s from the ssh-agent: %v: %s", fingerprint(key), err, strings.TrimSpace(stderr.String()))
 	}
-	return out.Bytes(), nil
+	sig := out.Bytes()
+	if body, _, err := split(sig); err != nil || len(body) > 0 || !bytes.HasSuffix(sig, []byte("\n")) {
+		return nil, fmt.Errorf("ssh-keygen -Y sign with %s printed something other than one SSH signature block", fingerprint(key))
+	}
+	return sig, nil
 }
 
-// Signed is the signed file: body, then the armored signature block. body
-// ends with a newline, as EncodeInvite and EncodeRequest write it, so the
-// block starts on a line of its own.
+// Signed is the signed file: body, then the armored signature block on a
+// line of its own. body ends with a newline, as EncodeInvite and
+// EncodeRequest write it; one is added to a body that does not.
 func Signed(body, sig []byte) []byte {
-	out := make([]byte, 0, len(body)+len(sig))
-	return append(append(out, body...), sig...)
+	out := make([]byte, 0, len(body)+1+len(sig))
+	out = append(out, body...)
+	if len(body) > 0 && body[len(body)-1] != '\n' {
+		out = append(out, '\n')
+	}
+	return append(out, sig...)
 }
 
 // Verify checks that sig is a signature of body by the key keyLine under

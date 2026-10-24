@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 
@@ -333,8 +334,18 @@ func shape(m *yaml.Node, path, what string, fields map[string][]string) []string
 }
 
 // quote is s as a YAML double-quoted scalar. JSON's string form is one:
-// every escape it writes, \u00XX included, means the same in YAML.
+// every escape it writes, \u00XX included, means the same in YAML. JSON
+// leaves the C1 controls as they are, and YAML reads U+0085 as a line break,
+// so those are escaped too, and the value reads back as it was written.
 func quote(s string) string {
 	out, _ := json.Marshal(s)
-	return string(out)
+	var b strings.Builder
+	for _, r := range string(out) {
+		if r >= 0x80 && unicode.IsControl(r) {
+			fmt.Fprintf(&b, "\\u%04x", r)
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }

@@ -171,3 +171,32 @@ func TestVerifyMatchesSSHKeygen(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestSignedEndsTheBodyWithANewline(t *testing.T) {
+	k := newKey(t)
+	sig := sign(t, k, operatorinvite.InviteNamespace, []byte("version: 1\n"))
+	if got := operatorinvite.Signed([]byte("version: 1"), sig); !bytes.HasPrefix(got, []byte("version: 1\n-----BEGIN SSH SIGNATURE-----\n")) {
+		t.Fatalf("Signed does not start the block on a line of its own:\n%s", got)
+	}
+}
+
+// Sign returns only what is one armored signature block, whatever the
+// ssh-keygen on PATH printed.
+func TestSignRefusesOutputThatIsNotOneBlock(t *testing.T) {
+	k := newKey(t)
+	block := string(sign(t, k, operatorinvite.InviteNamespace, []byte("x\n")))
+	for _, out := range []string{"", "Signing data\n" + block, block + "more\n", strings.TrimSuffix(block, "\n"), "-----BEGIN SSH SIGNATURE-----\n"} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "out"), []byte(out), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		script := "#!/bin/sh\ncat >/dev/null\ncat " + filepath.Join(dir, "out") + "\n"
+		if err := os.WriteFile(filepath.Join(dir, "ssh-keygen"), []byte(script), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		if sig, err := operatorinvite.Sign(k.pub, operatorinvite.InviteNamespace, []byte("x\n")); err == nil {
+			t.Errorf("ssh-keygen printed %q and Sign returned %q", out, sig)
+		}
+	}
+}
