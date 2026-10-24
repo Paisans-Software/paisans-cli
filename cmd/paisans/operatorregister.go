@@ -56,11 +56,27 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 	root := fs.String("root", "", "pin this version as the root, the version trust starts from")
 	execute := fs.Bool("execute", false, "sign the attestation, push it to the sites, and record the key")
 	answers := yesFlag(fs)
+	invite := fs.String("invite", "", "answer this invite file with a signed request on stdout, instead of registering")
+	inviterKey := fs.String("inviter-key", "", "with --invite: the inviting operator's public key, a .pub file or the key line")
+	name := fs.String("name", "", "with --invite: your full name, first and last; asked for at a terminal when not given")
+	email := fs.String("email", "", "with --invite: your email address; asked for at a terminal when not given")
+	ageFile := fs.String("age-private-key-file", "", "with --invite: keep a new age key in this file, outside the configuration's directory, rather than the keystore; an existing file is read")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
 		return &ui.Problem{Hint: "operator register takes no argument", Explain: "Got " + strings.Join(fs.Args(), " ") + "."}
+	}
+	if *invite != "" {
+		if *keyPath != "" || *root != "" || *execute {
+			return &ui.Problem{Hint: "--invite answers an invite and registers nothing", Explain: "--key, --root and --execute belong to registering, which comes after the invite is accepted."}
+		}
+		return registerInvite(*invite, *inviterKey, *name, *email, *ageFile, *configPath, stdin, stdout)
+	}
+	for flagName, v := range map[string]string{"--inviter-key": *inviterKey, "--name": *name, "--email": *email, "--age-private-key-file": *ageFile} {
+		if v != "" {
+			return &ui.Problem{Hint: flagName + " needs --invite", Explain: "It answers an invite: " + progname.Cmd() + " operator register --invite <file> --inviter-key <key>."}
+		}
 	}
 	ans, err := answers()
 	if err != nil {

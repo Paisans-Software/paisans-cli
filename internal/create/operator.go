@@ -63,10 +63,10 @@ func CheckNewOperator(op NewOperator, d Declared) error {
 	if err := notIn(ids, "operator", checkOperatorID)(op.ID); err != nil {
 		return &FlagError{"the username", err}
 	}
-	if err := checkFullName(op.Name); err != nil {
+	if err := CheckFullName(op.Name); err != nil {
 		return &FlagError{"--name", err}
 	}
-	if err := checkEmail(op.Email); err != nil {
+	if err := CheckEmail(op.Email); err != nil {
 		return &FlagError{"--email", err}
 	}
 	if len(op.Keys) == 0 {
@@ -108,10 +108,10 @@ func AskNewOperator(p *Prompter, op NewOperator, d Declared) (NewOperator, error
 	if op.ID, err = ask(p, "Username", op.ID, notIn(ids, "operator", checkOperatorID)); err != nil {
 		return op, err
 	}
-	if op.Name, err = ask(p, "Full name (first and last)", op.Name, checkFullName); err != nil {
+	if op.Name, err = ask(p, "Full name (first and last)", op.Name, CheckFullName); err != nil {
 		return op, err
 	}
-	if op.Email, err = ask(p, "Email", op.Email, checkEmail); err != nil {
+	if op.Email, err = ask(p, "Email", op.Email, CheckEmail); err != nil {
 		return op, err
 	}
 	check := keyCheck(keys)

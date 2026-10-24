@@ -43,7 +43,7 @@ func runOperatorAgeKey(args []string, stdout io.Writer) error {
 		*id = cfg.ID
 	}
 	r := reporter()
-	k, err := operatorAgeKey(r, *id, *configPath, *keyFile)
+	k, err := operatorAgeKey(r, "operator age-key", *id, *configPath, *keyFile)
 	if err != nil {
 		return err
 	}
@@ -52,17 +52,17 @@ func runOperatorAgeKey(args []string, stdout io.Writer) error {
 	return err
 }
 
-// operatorAgeKey finds the operator's age key for the deployment id, or
+// operatorAgeKey, for command, finds the operator's age key for the deployment id, or
 // makes it, and returns its public key. The sources are taken in this order,
 // and the first present wins: a SOPS_AGE_* variable, which must hold exactly
 // one key and which nothing is kept for; the keystore item for id, used as
 // it is; keyFile, read when it exists and made when it does not; and last a
 // new keystore item. It never writes .sops.yaml, and never replaces a
 // keystore item or a key file. The private key is never shown.
-func operatorAgeKey(r ui.Reporter, id, configPath, keyFile string) (ageKey, error) {
+func operatorAgeKey(r ui.Reporter, command, id, configPath, keyFile string) (ageKey, error) {
 	if variables := config.AgeVariablesSet(); len(variables) > 0 {
 		step := r.Step("age key")
-		key, err := config.ReadVariableKeyFor("operator age-key")
+		key, err := config.ReadVariableKeyFor(command)
 		if err != nil {
 			step.Fail(err)
 			return ageKey{}, err
@@ -115,7 +115,7 @@ func operatorAgeKey(r ui.Reporter, id, configPath, keyFile string) (ageKey, erro
 		}
 	}
 
-	k, export, err := makeAgeKey(r, "operator age-key", id, configPath, keyFile, nil)
+	k, export, err := makeAgeKey(r, command, id, configPath, keyFile, nil)
 	if err != nil {
 		return ageKey{}, err
 	}
