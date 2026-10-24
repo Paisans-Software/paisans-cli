@@ -922,23 +922,25 @@ func publishFiles(l Local, g Gathered, f Files, sites map[string]apply.Transport
 		if sha, err = cache.Commit(f, parents, rev, o.signWith, o.now); err != nil {
 			return "", nil, fmt.Errorf("sign the version: %w", err)
 		}
+		// From here a failure returns the version committed with it, so
+		// the caller can take it back (Local.Mark).
 		if err := l.raiseSeen(rev, sha); err != nil {
-			return "", nil, err
+			return sha, nil, err
 		}
 	}
 	if err := l.SetHead(sha); err != nil {
-		return "", nil, err
+		return sha, nil, err
 	}
 	if len(parents) == 0 {
 		if err := l.SetRoot(sha); err != nil {
-			return "", nil, err
+			return sha, nil, err
 		}
 	}
 	if own, err := l.SigningKey(); err != nil {
-		return "", nil, err
+		return sha, nil, err
 	} else if own == "" {
 		if err := l.SetSigningKey(o.keyLine); err != nil {
-			return "", nil, err
+			return sha, nil, err
 		}
 	}
 
@@ -989,11 +991,13 @@ func publishNext(l Local, g Gathered, parent string, revision int, f Files, site
 		if sha, err = cache.Commit(f, []string{parent}, rev, o.signWith, o.now); err != nil {
 			return "", nil, fmt.Errorf("sign the version: %w", err)
 		}
+		// From here a failure returns the version committed with it, so
+		// the caller can take it back (Local.Mark).
 		if err := l.raiseSeen(rev, sha); err != nil {
-			return "", nil, err
+			return sha, nil, err
 		}
 		if err := l.SetHead(sha); err != nil {
-			return "", nil, err
+			return sha, nil, err
 		}
 	}
 	pushed, err := pushVersion(cache, g, sites, local.ID, sha, push)
@@ -1258,7 +1262,9 @@ func (l Local) Remember(rev int, sha string) error { return l.raiseSeen(rev, sha
 // given the version the publish committed, "" for none, and drops it from
 // the store unless the store named it at the mark; a version another
 // gather brought in meanwhile is left. The objects a dropped version left
-// in the store are unnamed, and no version. A push whose error is
+// in the store are unnamed, and no version. Given "" while the store
+// gained a version since the mark, undo drops nothing and says so in its
+// error. A push whose error is
 // ambiguous, a site having taken the bytes and the answer lost, drops the
 // version here too; the next gather brings it back from that site.
 func (l Local) Mark() (undo func(committed string) error, err error) {
@@ -1296,7 +1302,16 @@ func (l Local) Mark() (undo func(committed string) error, err error) {
 				errs = append(errs, err)
 			}
 		}
-		if committed == "" || slices.Contains(named, committed) {
+		if committed == "" {
+			// Nothing to drop, and a version the store gained since the
+			// mark is not known to be this publish's: it is said, not
+			// guessed at.
+			if added := addedSince(l, named); len(added) > 0 {
+				errs = append(errs, fmt.Errorf("the store names %s, added since the publish began and not known to be its version, so it was left; if this workstation signed it and no site holds it, the next publish pushes it beside its own", strings.Join(added, ", ")))
+			}
+			return errors.Join(errs...)
+		}
+		if slices.Contains(named, committed) {
 			return errors.Join(errs...)
 		}
 		if checkSHA(committed) != nil {
@@ -1311,4 +1326,24 @@ func (l Local) Mark() (undo func(committed string) error, err error) {
 		}
 		return errors.Join(errs...)
 	}, nil
+}
+
+// addedSince is each version l's store names that named, what it named
+// before, lacks.
+func addedSince(l Local, named []string) []string {
+	cache, ok, err := l.HeldStore()
+	if err != nil || !ok {
+		return nil
+	}
+	now, err := cache.versionRefs()
+	if err != nil {
+		return nil
+	}
+	var added []string
+	for _, sha := range now {
+		if !slices.Contains(named, sha) {
+			added = append(added, sha)
+		}
+	}
+	return added
 }

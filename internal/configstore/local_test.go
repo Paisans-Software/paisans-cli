@@ -1330,3 +1330,75 @@ func TestMarkDropsOnlyTheCommittedVersion(t *testing.T) {
 		t.Errorf("the store names %v, want only %s", shas, other)
 	}
 }
+
+// A publish whose record fails after it committed returns the version with
+// its error, so undo drops exactly it: the store names no orphan, head and
+// seen are as they were, and the next publish is the one version on the
+// sites, no fork. Given "", undo drops nothing and names what the store
+// gained.
+func TestMarkDropsAVersionCommittedBeforeAFailure(t *testing.T) {
+	needTools(t, "git", "ssh-keygen")
+	alice := newOperator(t)
+	sites := storeSites(t, "home-a")
+	all := reach(sites, "home-a")
+	first := edit(testFiles(), "1", map[string]string{"alice": alice.pub})
+	l := workstation(t, first)
+	g, err := gather(l, all, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	undo, err := l.Mark()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The root cannot be written over a directory of its name: the first
+	// version's SetRoot fails after its commit.
+	if err := os.MkdirAll(filepath.Join(l.Dir, ".paisans", "config-root"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	o := publishOpts{keyLine: alice.pub, signWith: alice.key, now: testNow}
+	sha, _, err := publishFiles(l, g, first, all, o, fakePush)
+	if err == nil || sha == "" {
+		t.Fatalf("got %q, %v", sha, err)
+	}
+	if err := undo(sha); err != nil {
+		t.Fatal(err)
+	}
+	cache, _ := l.Cache()
+	if shas, _ := cache.versionRefs(); len(shas) != 0 {
+		t.Errorf("the store names %v", shas)
+	}
+	if head, _ := l.Head(); head != "" {
+		t.Errorf("head %s", head)
+	}
+	if rev, _, _ := l.Seen(); rev != 0 {
+		t.Errorf("seen %d", rev)
+	}
+	again := edit(testFiles(), "2", map[string]string{"alice": alice.pub})
+	v, _, err := publishFiles(l, g, again, all, o, fakePush)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shas, _ := cache.versionRefs(); !slices.Equal(shas, []string{v}) {
+		t.Errorf("the store names %v, want only %s", shas, v)
+	}
+	if held, _ := sites["home-a"].repo.versionRefs(); !slices.Equal(held, []string{v}) {
+		t.Errorf("home-a holds %v, want only %s", held, v)
+	}
+
+	// undo("") leaves what the store gained, and says so.
+	undo, err = l.Mark()
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := cache.Commit(edit(testFiles(), "other", map[string]string{"alice": alice.pub}), []string{v}, 2, alice.key, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := undo(""); err == nil || !strings.Contains(err.Error(), other) {
+		t.Errorf("undo(\"\") = %v", err)
+	}
+	if shas, _ := cache.versionRefs(); !slices.Contains(shas, other) {
+		t.Errorf("dropped %s", other)
+	}
+}

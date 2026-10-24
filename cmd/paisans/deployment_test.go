@@ -1027,3 +1027,35 @@ func TestPublishDeploysDraft(t *testing.T) {
 	}
 	noFolderState(t, f.dir)
 }
+
+// What fails once a site took the version publish pushed is a warning and
+// takes nothing back: a record that cannot be written leaves the system
+// copy holding the version, its head, seen and files, and the draft's line
+// naming it.
+func TestPublishAfterThePushWarnsAndKeepsTheVersion(t *testing.T) {
+	f := newApplyStore(t, 1)
+	f.based(t)
+	edited := f.editDraft(t, "# next\n")
+	// saved.json cannot be replaced by a directory of that name.
+	if err := os.MkdirAll(filepath.Join(f.sys.Dir, "saved.json", "x"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var rep, out bytes.Buffer
+	saved := reporterOverride
+	reporterOverride = ui.NewPlain(&rep, false)
+	t.Cleanup(func() { reporterOverride = saved })
+	if err := runDeployment([]string{"publish", "--config", f.cfgPath, "--execute"}, noTerminalStdin(), &out); err != nil {
+		t.Fatal(problemText(err))
+	}
+	if !strings.Contains(rep.String(), "the system copy's record was not written") {
+		t.Errorf("no warning:\n%s", rep.String())
+	}
+	head, _ := f.sys.Head()
+	rev, seen, _ := f.sys.Seen()
+	cache, _ := f.sys.Cache()
+	got, _ := f.sys.Files()
+	m, ok := draft.ReadMarker(f.draftBody(t))
+	if head == f.shas[0] || rev != 2 || seen != head || cache.Revision(head) != 2 || !bytes.Equal(got.Paisans, edited.Paisans) || !ok || m.SHA != head || !f.pushed() {
+		t.Errorf("head %s, seen %d %s, marker %+v %v, pushed %v\n%s", head, rev, seen, m, ok, f.pushed(), rep.String())
+	}
+}
