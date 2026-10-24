@@ -2288,7 +2288,7 @@ func TestAReplicaWaitsForTheLeaderToCreateTheDatabases(t *testing.T) {
 		t.Errorf("the replica's stop is taken for the founding stop: %v", err)
 	}
 	q := problemOf(t, err)
-	if q.Hint != "home-a is waiting on home-b to create databases account, digest, talk, wiki, digest_reader" {
+	if q.Hint != "home-a is waiting on home-b to create databases account, digest, talk, wiki and role digest_reader" {
 		t.Errorf("hint: %q", q.Hint)
 	}
 	for _, want := range []string{"Patroni here is a replica", "no app stack was started", "Apply home-b, then apply this site again"} {
@@ -2418,15 +2418,40 @@ func TestAnAppCannotTakeAClusterRole(t *testing.T) {
 	}
 }
 
-// A second apply of the same thing runs nothing, database work included.
+// A second apply of the same thing creates nothing, database work included.
+// A deployment with a reader still runs its grant (see
+// TestAQuietApplyOfTheLeaderGrants); one without plans no database work.
 func TestANoopApplyBootstrapsNothing(t *testing.T) {
 	noWait(t)
 	host := newHost()
 	if err := apply.Execute(bootstrapPlan(t, host), host); err != nil {
 		t.Fatal(err)
 	}
-	if p := bootstrapPlan(t, host); p.Bootstrap != nil {
-		t.Error("an apply with nothing to do still plans database work")
+	host.inputs = nil
+	p := bootstrapPlan(t, host)
+	if p.Bootstrap != nil && !p.GrantsOnly() {
+		t.Error("an apply with nothing to do plans the whole bootstrap")
+	}
+	if err := apply.Execute(p, host); err != nil {
+		t.Fatal(err)
+	}
+	if host.created() {
+		t.Errorf("an apply with nothing to do created roles: %v", host.inputs)
+	}
+
+	cfg, secrets := fixture(t)
+	b, err := apply.Databases(cfg, secrets, "home-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.Readers = nil
+	quiet, err := apply.Build("home-a", plan(t), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	quiet.WithDatabases(b)
+	if quiet.Bootstrap != nil {
+		t.Error("an apply with nothing to do and no reader still plans database work")
 	}
 }
 

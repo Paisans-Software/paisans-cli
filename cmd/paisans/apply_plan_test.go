@@ -263,3 +263,41 @@ func TestExecuteFailureShowsFailedStepAndFullError(t *testing.T) {
 		t.Fatalf("last ended step is not the failed one:\n%s", rec.Lines())
 	}
 }
+
+// A plan with no action still grants the digest's reader where Patroni
+// leads, so its dry run lists the leader check and the grant and nothing
+// that creates a role or a database.
+func TestAQuietPlanListsTheGrant(t *testing.T) {
+	plan := &apply.Plan{}
+	plan.WithDatabases(&apply.Bootstrap{Patroni: "10.44.0.1:8008", Readers: []apply.Reader{{App: "digest", Source: "talk", Role: "digest_reader", Database: "talk"}}})
+	if !plan.GrantsOnly() {
+		t.Fatal("a quiet plan with a reader is not a grants only plan")
+	}
+	rec := &ui.Recorder{Verbose_: true}
+	listPlan(rec, plan)
+	for _, want := range []string{"wait for Patroni primary", "grant digest_reader"} {
+		if !rec.Has("pending", want) {
+			t.Errorf("the plan does not show %q:\n%s", want, rec.Lines())
+		}
+	}
+	if rec.Has("pending", "bootstrap") {
+		t.Errorf("a quiet plan lists the bootstrap:\n%s", rec.Lines())
+	}
+}
+
+// A dry run with nothing to change on a site that will still grant does not
+// say there is nothing to apply.
+func TestAQuietDryRunSaysTheGrantRuns(t *testing.T) {
+	for _, c := range []struct {
+		owed, readers []string
+		want          string
+	}{
+		{nil, []string{"digest_reader"}, "--execute grants digest_reader its reads again if Patroni here leads."},
+		{[]string{"digest_reader"}, []string{"digest_reader"}, "digest_reader's grant is owed; --execute runs it if Patroni here leads."},
+		{nil, nil, ""},
+	} {
+		if got := grantsNote(c.owed, c.readers); got != c.want {
+			t.Errorf("owed %v, readers %v: %q, want %q", c.owed, c.readers, got, c.want)
+		}
+	}
+}

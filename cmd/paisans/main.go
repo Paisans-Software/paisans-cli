@@ -916,6 +916,8 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 		// where the run would stop, not work it would do.
 		dryRunFound(summary, apply.Refusal(plan))
 		switch {
+		case changes == 0 && len(plan.Sweep) == 0 && pending == 0 && grantsDue(plan) != "":
+			r.Result("%s has nothing to change. %s", *site, grantsDue(plan))
 		case changes == 0 && len(plan.Sweep) == 0 && pending == 0:
 			r.Result("%s is up to date. Nothing to apply.", *site)
 		case changes == 0 && len(plan.Sweep) == 0:

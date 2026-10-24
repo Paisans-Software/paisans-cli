@@ -10,6 +10,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // The toolkit's copy of the allowlist is the grant, and the service's copy is
@@ -216,7 +217,10 @@ func TestGrantsRunAfterAppStacks(t *testing.T) {
 		t.Fatalf("no grant ran: %v", host.commands)
 	}
 	for _, action := range p.Actions {
-		if i := host.indexOf("/srv/paisans/f2a9/" + action.Stack + "/compose.yaml up -d"); i > grant {
+		switch i := host.indexOf("/srv/paisans/f2a9/" + action.Stack + "/compose.yaml up -d"); {
+		case i < 0:
+			t.Errorf("%s never started", action.Stack)
+		case i > grant:
 			t.Errorf("%s was started after the grant", action.Stack)
 		}
 	}
@@ -250,14 +254,22 @@ func TestAFailedGrantFailsTheApply(t *testing.T) {
 	if err == nil {
 		t.Fatal("a failed grant passed")
 	}
-	if !strings.Contains(err.Error(), "is_verified") {
-		t.Errorf("the failure does not say what failed: %v", err)
+	for _, want := range []string{"is_verified", "remove the engagement app", "apps.talk.images.app", "then apply again"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the failure does not say %q: %v", want, err)
+		}
 	}
 	if _, owed := host.files["/srv/paisans/f2a9/.paisans-pending.json"]; !owed {
 		t.Error("a failed grant leaves the apply owing nothing, so the next apply does not come back to it")
 	}
-	if strings.Contains(err.Error(), "fixture-not-a-secret") {
-		t.Errorf("the failure carries a password: %v", err)
+}
+
+// A reader is named for its app, and a name the cluster reserves would have
+// the reader's password set on a role Postgres or Patroni owns.
+func TestAReaderCannotTakeAReservedRole(t *testing.T) {
+	cfg, secrets := fixture(t)
+	if _, err := apply.SourceReaders(cfg, secrets, "pg_digest", "talk"); err == nil || !strings.Contains(err.Error(), "reserves") {
+		t.Errorf("a reader named pg_digest_reader was planned: %v", err)
 	}
 }
 
@@ -339,8 +351,117 @@ func TestAGrantWaitingForMbinsTablesIsOwed(t *testing.T) {
 
 	host.commands = nil
 	third := bootstrapPlan(t, host.fakeHost)
-	if third.Bootstrap != nil || len(third.Actions) != 0 {
-		t.Errorf("an apply owing nothing still plans work: bootstrap %v, actions %+v", third.Bootstrap != nil, third.Actions)
+	if len(third.Actions) != 0 || len(third.OwedGrants()) != 0 {
+		t.Errorf("an apply owing nothing still plans work: owed %v, actions %+v", third.OwedGrants(), third.Actions)
+	}
+}
+
+// A Mbin upgrade changes no file on a leader's site that holds no apps, so a
+// grant that ran only with an action would never meet Mbin's new schema.
+// Every apply of the leading site grants again, with the leader check and the
+// grant alone: the roles and databases already exist.
+func TestAQuietApplyOfTheLeaderGrants(t *testing.T) {
+	noWait(t)
+	host := &orderedHost{fakeHost: newHost()}
+	if err := apply.Execute(bootstrapPlan(t, host.fakeHost), host); err != nil {
+		t.Fatal(err)
+	}
+	host.commands, host.inputs = nil, nil
+	again := bootstrapPlan(t, host.fakeHost)
+	if len(again.Actions) != 0 {
+		t.Fatalf("the second apply has actions, so it does not test a quiet apply: %+v", again.Actions)
+	}
+	if again.Bootstrap == nil {
+		t.Fatal("a quiet apply of a deployment with a reader attaches no bootstrap, so the grant never reruns")
+	}
+	said := &ui.Recorder{}
+	again.Report = said
+	if err := apply.Execute(again, host); err != nil {
+		t.Fatal(err)
+	}
+	if !host.ran(`stdin: \connect "talk"`) {
+		t.Fatalf("a quiet apply of the leader did not grant: %v", host.commands)
+	}
+	if host.created() {
+		t.Errorf("a quiet apply ran the bootstrap: %v", host.inputs)
+	}
+	for _, step := range []string{"wait for Patroni primary", "grant digest_reader"} {
+		if !said.Has("step", step) {
+			t.Errorf("no %q step:\n%s", step, said.Lines())
+		}
+	}
+	if _, owed := host.files["/srv/paisans/f2a9/.paisans-pending.json"]; owed {
+		t.Error("a quiet apply whose grant succeeded owes something")
+	}
+}
+
+// A quiet apply of a replica that owes no grant asks who leads and runs no
+// SQL: the leader's own apply grants.
+func TestAQuietApplyOfAReplicaGrantsNothing(t *testing.T) {
+	noWait(t)
+	host := &orderedHost{fakeHost: newHost()}
+	host.leader = "home-b"
+	host.replicaHas = []string{"account", "auth", "digest", "digest_reader", "talk", "wiki"}
+	if err := apply.Execute(bootstrapPlan(t, host.fakeHost), host); err != nil {
+		t.Fatal(err)
+	}
+	host.commands, host.inputs = nil, nil
+	again := bootstrapPlan(t, host.fakeHost)
+	if len(again.Actions) != 0 {
+		t.Fatalf("the second apply has actions, so it does not test a quiet apply: %+v", again.Actions)
+	}
+	if err := apply.Execute(again, host); err != nil {
+		t.Fatal(err)
+	}
+	if len(host.inputs) != 0 {
+		t.Errorf("a quiet apply of a replica ran SQL: %v", host.inputs)
+	}
+	if _, owed := host.files["/srv/paisans/f2a9/.paisans-pending.json"]; owed {
+		t.Error("a quiet apply of a replica owes something")
+	}
+}
+
+// A site that owed a grant and is now a replica keeps the record, since the
+// grant is not known to have run, and says the site that does lead grants it
+// on its next apply.
+func TestAReplicaOwingAGrantNamesTheLeader(t *testing.T) {
+	noWait(t)
+	host := &orderedHost{fakeHost: newHost(), tablesMissing: true}
+	if err := apply.Execute(bootstrapPlan(t, host.fakeHost), host); err != nil {
+		t.Fatal(err)
+	}
+	host.tablesMissing = false
+	host.leader = "home-b"
+	host.replicaHas = []string{"account", "auth", "digest", "digest_reader", "talk", "wiki"}
+	p := bootstrapPlan(t, host.fakeHost)
+	said := &ui.Recorder{}
+	p.Report = said
+	if err := apply.Execute(p, host); err != nil {
+		t.Fatal(err)
+	}
+	if !said.Has("detail", "home-b leads Patroni, and its next apply grants it") {
+		t.Errorf("the owed grant's note does not name the leader:\n%s", said.Lines())
+	}
+}
+
+// A replica keeps an owed grant only for a reader the deployment still
+// plans: once the engagement app is gone there is nothing left to grant.
+func TestAReplicaDropsAGrantForAReaderNoLongerPlanned(t *testing.T) {
+	noWait(t)
+	host := &orderedHost{fakeHost: newHost(), tablesMissing: true}
+	if err := apply.Execute(bootstrapPlan(t, host.fakeHost), host); err != nil {
+		t.Fatal(err)
+	}
+	host.tablesMissing = false
+	host.leader = "home-b"
+	host.replicaHas = []string{"account", "auth", "digest", "digest_reader", "talk", "wiki"}
+	p := bootstrapPlan(t, host.fakeHost)
+	p.Bootstrap.Readers = nil
+	if err := apply.Execute(p, host); err != nil {
+		t.Fatal(err)
+	}
+	if record := host.files["/srv/paisans/f2a9/.paisans-pending.json"]; strings.Contains(record, "digest_reader") {
+		t.Errorf("a replica kept a grant for a reader no longer planned: %q", record)
 	}
 }
 

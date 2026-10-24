@@ -41,8 +41,10 @@ var mbinAllowlist = map[string][]string{
 // from runSourceGrants, since the tables it names exist only once the source
 // app has started.
 type Reader struct {
-	// App is the engagement app the role is for.
+	// App is the engagement app the role is for, and Source the Mbin app
+	// whose database it reads.
 	App      string
+	Source   string
 	Role     string
 	Database string
 	// password is never printed and never placed on a command line.
@@ -62,6 +64,15 @@ const mbinTablesPending = "has not created its tables yet"
 // next apply grants. Once `entry` exists, a table or column the list names
 // and Mbin lacks is an error, which fails the apply loudly: a Mbin release
 // that changed its schema needs the list changed on purpose.
+//
+// It grants and never revokes. What the reader keeps from PUBLIC is CONNECT
+// and TEMP on the database and EXECUTE on functions in schema public, and
+// none of those writes Mbin's tables: a temporary table lives in the
+// session's own schema, and a function runs with its caller's rights unless
+// it is SECURITY DEFINER, and Mbin's migrations create no function at all
+// (read at v1.16.4). CONNECT is granted all
+// the same, so the reader still connects after an operator revokes it from
+// PUBLIC.
 //
 // Every statement is idempotent, so it runs on every apply. Identifiers are
 // quoted here, by QuoteIdent, rather than by format('%I') in the block:
@@ -91,24 +102,35 @@ func grantSQL(r Reader) string {
 }
 
 // runSourceGrants grants each reader its reads, once every app stack is
-// healthy, Mbin's among them. It runs only where the bootstrap ran the
-// primary's script: a replica is read only, and the grant streams to it.
+// healthy, Mbin's among them. It runs only on the site whose Patroni leads: a
+// replica is read only, and the grant streams to it. A plan with no action
+// asks Patroni here first, since it ran no bootstrap to find out.
 //
-// A grant that finds Mbin's tables missing is owed, and the record of owed
-// work keeps it, so the next apply of this site runs it even with nothing
-// else to do. Without that, a leader's site applied before Mbin's first
-// start, which is the order on a deployment whose leader holds no apps,
-// would never grant: Mbin creating its tables changes no file of this site.
-// A grant owed on a site that is now a replica stays owed until an apply of
-// this site finds it leading.
+// It runs on every apply of the leader's site, action or none, so a Mbin
+// release that changed a column the allowlist names fails the next apply of
+// that site loudly. A grant that finds Mbin's tables missing is owed, and the
+// record of owed work keeps it until a grant succeeds.
+//
+// A grant owed on a site that is now a replica stays in its record: whether
+// the site that leads has granted since is not known here. That site's next
+// apply grants, and the note says so.
 func runSourceGrants(plan *Plan, t Transport) error {
 	if plan.Bootstrap == nil {
 		return nil
 	}
+	if plan.grantsOnly && len(plan.Bootstrap.EtcdUnstarted) == 0 {
+		if err := checkLeader(plan, t); err != nil {
+			return err
+		}
+	}
 	if !plan.primary {
-		plan.grantsOwed = plan.owedGrants
-		if len(plan.grantsOwed) > 0 {
-			plan.say("the grant of %s is still owed, and runs on an apply of %s while its Patroni leads", strings.Join(plan.grantsOwed, ", "), plan.Site)
+		plan.grantsOwed = plannedGrants(plan.owedGrants, plan.Bootstrap.Readers)
+		switch {
+		case len(plan.grantsOwed) == 0:
+		case plan.leader != "":
+			plan.say("the grant of %s is owed here, but %s leads Patroni, and its next apply grants it", strings.Join(plan.grantsOwed, ", "), plan.leader)
+		default:
+			plan.say("the grant of %s is still owed, and runs on an apply of %s once its Patroni leads", strings.Join(plan.grantsOwed, ", "), plan.Site)
 		}
 		return nil
 	}
@@ -118,12 +140,10 @@ func runSourceGrants(plan *Plan, t Transport) error {
 		out, err := t.RunInput(Psql(plan.Deployment), grantSQL(r))
 		if err != nil {
 			done.Fail(err)
-			// The script carries no password, but psql quotes back what it
-			// was sent, and redacting costs nothing.
-			out = strings.ReplaceAll(out, QuoteLiteral(r.password), "'[redacted]'")
-			out = strings.ReplaceAll(out, r.password, "[redacted]")
-			return fmt.Errorf("%s: granting %s its reads on database %s failed. Every app stack is up, but %s cannot read Mbin until this succeeds. A table or column that does not exist means Mbin's schema changed from what the digest reads:\n%s",
-				plan.Site, r.Role, r.Database, r.App, out)
+			// The script carries no password, so what psql quotes back of it
+			// needs no redacting.
+			return fmt.Errorf("%s: granting %s its reads on database %s failed. Every app stack is up, but %s cannot read Mbin until this succeeds. A table or column that does not exist means Mbin's schema changed from what the digest reads: until the toolkit's allowlist matches the new schema, remove the engagement app or hold Mbin on its previous release with apps.%s.images.app, then apply again:\n%s",
+				plan.Site, r.Role, r.Database, r.App, r.Source, out)
 		}
 		if strings.Contains(out, mbinTablesPending) {
 			done.Done("owed, waiting for Mbin's tables")
@@ -134,4 +154,41 @@ func runSourceGrants(plan *Plan, t Transport) error {
 		done.Done("")
 	}
 	return nil
+}
+
+// OwedGrants are the reader roles whose grant the record of owed work holds,
+// which this apply runs if its site leads Patroni.
+func (p *Plan) OwedGrants() []string { return p.owedGrants }
+
+// checkLeader is a quiet apply's part of the bootstrap: whether this site's
+// Patroni leads, and so whether it grants. There is nothing to create, so it
+// is the wait for a primary and no more.
+func checkLeader(plan *Plan, t Transport) error {
+	done := plan.step("wait for Patroni primary")
+	err := waitForPrimary(plan, t)
+	if replica, ok := err.(errReplica); ok {
+		done.Done("")
+		plan.leader = replica.leader
+		plan.say("Patroni here is a replica, and %s holds the leader and grants the readers their reads", replica.leader)
+		return nil
+	}
+	finish(done, err)
+	if err != nil {
+		return fmt.Errorf("no reader was granted its reads: %w", err)
+	}
+	plan.primary = true
+	return nil
+}
+
+// plannedGrants is owed less any role no reader of this plan has: an owed
+// grant for an engagement app that has since been removed has nothing left
+// to grant.
+func plannedGrants(owed []string, readers []Reader) []string {
+	var out []string
+	for _, role := range owed {
+		if slices.ContainsFunc(readers, func(r Reader) bool { return r.Role == role }) {
+			out = append(out, role)
+		}
+	}
+	return out
 }

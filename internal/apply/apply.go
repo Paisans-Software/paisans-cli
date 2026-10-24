@@ -219,10 +219,18 @@ type Plan struct {
 	LeaderMoved *LeaderMove
 	// ledBefore is whether this site's Patroni led just before that action.
 	ledBefore bool
-	// primary is set once the bootstrap finds this site's Patroni is the
-	// leader and runs the primary's script. Only then does runSourceGrants
-	// grant: a replica is read only.
+	// primary is set once the bootstrap, or a quiet apply's leader check,
+	// finds this site's Patroni is the leader. Only then does
+	// runSourceGrants grant: a replica is read only.
 	primary bool
+	// leader is the site whose Patroni leads, when the check found this one
+	// a replica.
+	leader string
+	// grantsOnly is set on a plan with no action whose deployment has a
+	// reader or owes a grant. Its bootstrap runs the leader check and the
+	// grants and nothing else: with no action there is no role or database
+	// to create. See WithDatabases.
+	grantsOnly bool
 	// GatewayReload is set when this site serves the public entry point and a
 	// routing file changed. It is the narrower of the two: a new image is
 	// picked up by the recreate, not by a reload.
@@ -1508,7 +1516,7 @@ func execute(plan *Plan, t Transport) error {
 	// App stacks start only after their databases exist. An app started
 	// first connects, fails to authenticate as a role nobody created, and is
 	// restarted in a loop by Docker while the apply reports success.
-	bootstrapped := plan.Bootstrap == nil
+	bootstrapped := plan.Bootstrap == nil || plan.grantsOnly
 	for i, action := range plan.Actions {
 		if action.Stack != infraStack && !bootstrapped {
 			if err := runBootstrap(plan, t); err != nil {

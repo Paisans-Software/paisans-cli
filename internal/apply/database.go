@@ -138,6 +138,9 @@ func sourceReaders(cfg *config.Config, secrets *config.Secrets, databases []Data
 		if !identifier.MatchString(role) || len(role) > 63 {
 			return nil, fmt.Errorf("apps.%s: its read only role on %s would be named %q, and a role is created only from lowercase letters, digits and underscores, starting with a letter, at most 63 characters. Rename the app", name, source, role)
 		}
+		if reservedRoles[role] || strings.HasPrefix(role, "pg_") {
+			return nil, fmt.Errorf("apps.%s: its read only role on %s would be %q, which is a role the cluster itself uses or reserves. Setting the reader's password on it would hand the digest that role. Rename the app", name, source, role)
+		}
 		// Every app role is named for its app, so an app named like the
 		// reader would have the reader's password and its read only default
 		// set on its own role.
@@ -153,24 +156,37 @@ func sourceReaders(cfg *config.Config, secrets *config.Secrets, databases []Data
 		if strings.ContainsRune(password, 0) {
 			return nil, fmt.Errorf("secrets apps.%s.source_database_password: contains a NUL byte, which Postgres cannot store", name)
 		}
-		out = append(out, Reader{App: name, Role: role, Database: database, password: password})
+		out = append(out, Reader{App: name, Source: source, Role: role, Database: database, password: password})
 	}
 	return out, nil
 }
 
-// WithDatabases attaches the bootstrap to a plan that acts on any stack, or
-// that owes a reader's grant. An apply with nothing to act on and nothing
-// owed stays one that runs nothing, which is what makes re-running apply a
-// habit rather than a risk. A rotated password changes the app's rendered
-// environment, so it always arrives with an action. A grant that found its
-// source's tables missing arrives with none, since the tables appear without
-// any file of this site changing.
+// WithDatabases attaches the bootstrap to a plan that acts on any stack. An
+// apply with nothing to act on stays one that creates nothing and starts
+// nothing, which is what makes re-running apply a habit rather than a risk.
+// A rotated password changes the app's rendered environment, so it always
+// arrives with an action.
+//
+// A plan with no action still takes the bootstrap, for its leader check and
+// grants alone, when the deployment has a reader or this site owes a grant.
+// Mbin's tables appear, and a Mbin upgrade changes them, without any file of
+// the leader's site changing when that site holds no apps, so a grant that
+// ran only with an action would neither run after Mbin's first start nor
+// meet a schema that no longer matches the allowlist.
 func (p *Plan) WithDatabases(b *Bootstrap) {
-	if b == nil || (len(p.Actions) == 0 && len(p.owedGrants) == 0) {
-		return
+	switch {
+	case b == nil:
+	case len(p.Actions) > 0:
+		p.Bootstrap = b
+	case len(b.Readers) > 0 || len(p.owedGrants) > 0:
+		p.Bootstrap = b
+		p.grantsOnly = true
 	}
-	p.Bootstrap = b
 }
+
+// GrantsOnly is whether the plan's bootstrap is a quiet apply's leader check
+// and grants, with nothing to create. See WithDatabases.
+func (p *Plan) GrantsOnly() bool { return p.grantsOnly }
 
 // How long to wait for a primary, and how often to ask. The first start of a
 // fresh Spilo runs initdb before Patroni takes the leader key, which on a
@@ -409,6 +425,7 @@ func runBootstrap(plan *Plan, t Transport) error {
 	}
 	if err != nil {
 		if replica, ok := err.(errReplica); ok {
+			plan.leader = replica.leader
 			plan.leaderMoved(replica.leader)
 			return replicaDatabases(plan, t, replica.leader)
 		}
@@ -495,28 +512,41 @@ func replicaDatabases(plan *Plan, t Transport, leader string) error {
 	for _, line := range strings.Split(out, "\n") {
 		present[strings.TrimSpace(line)] = true
 	}
-	var missing []string
+	var databases, roles []string
 	for _, db := range plan.Bootstrap.Databases {
 		if present[db.Name] {
 			done.Detail("database %s and role %s exist, for %s", db.Name, db.Role, db.App)
 		} else {
-			missing = append(missing, db.Name)
+			databases = append(databases, db.Name)
 		}
 	}
 	for _, r := range plan.Bootstrap.Readers {
 		if present[r.Role] {
 			done.Detail("role %s exists, for %s", r.Role, r.App)
 		} else {
-			missing = append(missing, r.Role)
+			roles = append(roles, r.Role)
 		}
 	}
+	missing := append(append([]string(nil), databases...), roles...)
 	if len(missing) == 0 {
 		done.Done("")
 		return nil
 	}
 	done.Done("missing " + strings.Join(missing, ", "))
+	// A reader is a role with no database of its own, so it is named as one.
+	var want []string
+	if len(databases) > 0 {
+		want = append(want, "databases "+strings.Join(databases, ", "))
+	}
+	switch len(roles) {
+	case 0:
+	case 1:
+		want = append(want, "role "+roles[0])
+	default:
+		want = append(want, "roles "+strings.Join(roles, ", "))
+	}
 	return &ui.Problem{
-		Hint: fmt.Sprintf("%s is waiting on %s to create databases %s", plan.Site, leader, strings.Join(missing, ", ")),
+		Hint: fmt.Sprintf("%s is waiting on %s to create %s", plan.Site, leader, strings.Join(want, " and ")),
 		Explain: fmt.Sprintf(
 			"The infrastructure stack is up. Patroni here is a replica, and the primary, on %s, creates the app roles and databases, so no app stack was started. Apply %s, then apply this site again: it resumes here.",
 			leader, leader),
