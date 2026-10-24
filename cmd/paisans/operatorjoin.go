@@ -12,6 +12,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/operatorinvite"
 	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -24,7 +25,8 @@ import (
 // root and sites, then signs their attestation with the invite's key.
 
 // pendingInvite is deployment id's pending invite, checked again against
-// the inviter's key recorded beside it. ok is false when none is pending.
+// the inviter's key recorded beside it and against id, the directory it was
+// found in. ok is false when none is pending.
 func pendingInvite(id string) (_ operatorinvite.Invite, ok bool, err error) {
 	signed, inviterKey, ok, err := readPending(id)
 	if err != nil || !ok {
@@ -39,6 +41,13 @@ func pendingInvite(id string) (_ operatorinvite.Invite, ok bool, err error) {
 			Cause:   err,
 		}
 	}
+	if inv.Deployment != id {
+		dir, _ := pendingDir(id)
+		return inv, false, &ui.Problem{
+			Hint:    "the invite pending for deployment " + id + " is an invite to " + inv.Deployment,
+			Explain: "An invite is pending only in the directory of its own deployment, so this one is not used. Remove " + ui.ShortPath(dir) + ", which abandons it, and answer the invite again with " + progname.Cmd() + " operator register --invite <file> --inviter-key <key>. Nothing was written.",
+		}
+	}
 	return inv, true, nil
 }
 
@@ -47,6 +56,9 @@ func pendingInvite(id string) (_ operatorinvite.Invite, ok bool, err error) {
 // false when none is pending and no id is given. Which of several is never
 // guessed.
 func selectPending(id string) (_ operatorinvite.Invite, ok bool, err error) {
+	if id != "" && !deployment.ValidID(id) {
+		return operatorinvite.Invite{}, false, &ui.Problem{Hint: fmt.Sprintf("--id %q is not a deployment id", id), Explain: "A deployment id is a UUID, Eg: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01, as the invite names it and " + progname.Cmd() + " deployment list prints it. Nothing was written."}
+	}
 	ids, err := pendingInvites()
 	if err != nil {
 		return operatorinvite.Invite{}, false, err
@@ -56,7 +68,7 @@ func selectPending(id string) (_ operatorinvite.Invite, ok bool, err error) {
 		if err == nil && !ok {
 			pending := "None is pending."
 			if len(ids) > 0 {
-				pending = "Invites to " + andList(ids) + " are pending."
+				pending = "These are pending:\n" + pendingList(ids) + "\nRemoving one's directory abandons that invite."
 			}
 			err = &ui.Problem{Hint: "no invite to deployment " + id + " is pending", Explain: pending + " An invite is pending once " + progname.Cmd() + " operator register --invite has answered it. Nothing was written."}
 		}
@@ -70,8 +82,19 @@ func selectPending(id string) (_ operatorinvite.Invite, ok bool, err error) {
 	}
 	return operatorinvite.Invite{}, false, &ui.Problem{
 		Hint:    fmt.Sprintf("invites to %d deployments are pending", len(ids)),
-		Explain: "Which one to join here is not guessed: " + strings.Join(ids, ", ") + ". Name it with --id <deployment-id>. Nothing was written.",
+		Explain: "Which one to join here is not guessed:\n" + pendingList(ids) + "\nName it with --id <deployment-id>. Removing one's directory abandons that invite. Nothing was written.",
 	}
+}
+
+// pendingList is a line for each pending invite in ids: its deployment id
+// and its directory.
+func pendingList(ids []string) string {
+	lines := make([]string, len(ids))
+	for i, id := range ids {
+		dir, _ := pendingDir(id)
+		lines[i] = "- " + id + ", in " + ui.ShortPath(dir)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // joinInvite recovers the deployment invite names into l, from the invite's
@@ -128,7 +151,8 @@ func joinInvite(r ui.Reporter, l configstore.Local, invite operatorinvite.Invite
 		return nil
 	}
 	if err := removePending(invite.Deployment); err != nil {
-		return err
+		dir, _ := pendingDir(invite.Deployment)
+		r.Warn("the invite is still pending in "+ui.ShortPath(dir), fmt.Sprintf("Removing it failed: %v. The files are written, so register here no longer needs it; remove the directory by hand.", err))
 	}
 	path := filepath.Join(l.Dir, config.FileName)
 	checkJoinSecrets(r, l.Dir, invite.Deployment)

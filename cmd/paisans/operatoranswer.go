@@ -314,8 +314,12 @@ func removePending(id string) error {
 	if err != nil {
 		return err
 	}
-	return os.RemoveAll(dir)
+	return removePendingDir(dir)
 }
+
+// removePendingDir removes a pending invite's directory; a test points it
+// at a failure.
+var removePendingDir = os.RemoveAll
 
 // readAgeBinding is the age public key bound to deployment id, and where the
 // answer that bound it found the key. ok is false when none is bound.

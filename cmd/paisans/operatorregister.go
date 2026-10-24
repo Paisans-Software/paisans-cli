@@ -88,11 +88,13 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 		return err
 	}
 	// Where the files are not there and an answer left an invite pending,
-	// register joins: the invite names the root and the key.
+	// register joins: the invite names the root and the key. --key or --root
+	// without --id is a plain register, which a pending invite does not
+	// take over.
 	if l.HasFiles() && *id != "" {
 		return &ui.Problem{Hint: "--id selects a pending invite to join, and " + ui.ShortPath(l.Dir) + " holds the files", Explain: "A join writes the files into a directory without them. Here register registers, and reads the deployment from " + config.FileName + "; run it without --id."}
 	}
-	if !l.HasFiles() {
+	if !l.HasFiles() && (*id != "" || (*keyPath == "" && *root == "")) {
 		invite, ok, err := selectPending(*id)
 		if err != nil {
 			return err

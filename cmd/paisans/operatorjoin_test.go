@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/keystore"
 	"github.com/paisans-software/paisans-cli/internal/operatorinvite"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // joinFixture is carol's workstation after she answered alice's invite: the
@@ -434,7 +436,7 @@ func TestJoinDryRunWritesNothing(t *testing.T) {
 func TestJoinRefusesRootAndKey(t *testing.T) {
 	f := newJoinFixture(t, true, true)
 	for _, flag := range []string{"--root", "--key"} {
-		_, err := f.register(t, flag, "x")
+		_, err := f.register(t, "--id", fixtureDeploymentID, flag, "x")
 		if err == nil || !strings.Contains(problemText(err), "join") {
 			t.Fatalf("%s: %v", flag, problemText(err))
 		}
@@ -578,9 +580,20 @@ func TestJoinSelectsAPendingInvite(t *testing.T) {
 	if err == nil || !strings.Contains(text, fixtureDeploymentID) || !strings.Contains(text, otherID) || !strings.Contains(text, "--id") {
 		t.Fatalf("got %s", text)
 	}
+	invites := filepath.Join(dataDir(t), "invites")
+	for _, id := range []string{fixtureDeploymentID, otherID} {
+		if !strings.Contains(text, ui.ShortPath(filepath.Join(invites, id))) {
+			t.Errorf("does not name the pending directory of %s: %s", id, text)
+		}
+	}
+	if !strings.Contains(text, "abandons") {
+		t.Errorf("does not say removing one abandons it: %s", text)
+	}
 	f.wroteNothing(t)
-	if _, err := f.register(t, "--id", "22222222-2222-4333-8444-555555555555"); err == nil || !strings.Contains(problemText(err), "22222222-2222-4333-8444-555555555555") {
-		t.Fatalf("an id with no pending invite: %v", problemText(err))
+	_, err = f.register(t, "--id", "22222222-2222-4333-8444-555555555555")
+	text = problemText(err)
+	if err == nil || !strings.Contains(text, "22222222-2222-4333-8444-555555555555") || !strings.Contains(text, ui.ShortPath(filepath.Join(invites, otherID))) || !strings.Contains(text, "abandons") {
+		t.Fatalf("an id with no pending invite: %v", text)
 	}
 	out, err := f.register(t, "--id", fixtureDeploymentID)
 	if err != nil {
@@ -600,5 +613,75 @@ func TestRegisterRefusesIDBesideFiles(t *testing.T) {
 	}
 	if _, err := f.register(t, "--id", fixtureDeploymentID); err == nil || !strings.Contains(problemText(err), "--id") {
 		t.Fatalf("got %v", problemText(err))
+	}
+}
+
+// --key or --root without --id registers plainly, whatever is pending: a
+// pinned root in an empty folder reads the sites from this workstation's
+// store, which holds nothing here.
+func TestRegisterWithRootSkipsPendingInvites(t *testing.T) {
+	f := newJoinFixture(t, true, true)
+	plain := func(t *testing.T) {
+		t.Helper()
+		_, err := f.register(t, "--root", f.root)
+		text := problemText(err)
+		if err == nil || !strings.Contains(text, "pinned root is not in this workstation's store") || strings.Contains(text, "join") || strings.Contains(text, "pending") {
+			t.Fatalf("got %s", text)
+		}
+	}
+	plain(t)
+	if err := recordPending("11111111-2222-4333-8444-555555555555", []byte("an invite\n"), f.carolPub); err != nil {
+		t.Fatal(err)
+	}
+	plain(t)
+	f.wroteNothing(t)
+}
+
+// A pending invite is used only for the deployment whose directory holds
+// it.
+func TestJoinRefusesAnInviteInAnotherDeploymentsDirectory(t *testing.T) {
+	f := newJoinFixture(t, true, true)
+	invite, inviter, ok, err := readPending(fixtureDeploymentID)
+	if err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	const otherID = "11111111-2222-4333-8444-555555555555"
+	if err := recordPending(otherID, invite, inviter); err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.register(t, "--id", otherID)
+	if text := problemText(err); err == nil || !strings.Contains(text, otherID) || !strings.Contains(text, fixtureDeploymentID) {
+		t.Fatalf("got %s", text)
+	}
+	f.wroteNothing(t)
+}
+
+// An --id that is not a deployment id is refused as one.
+func TestJoinRefusesAnIDThatIsNotOne(t *testing.T) {
+	f := newJoinFixture(t, true, true)
+	_, err := f.register(t, "--id", "../x")
+	var p *ui.Problem
+	if !errors.As(err, &p) || !strings.Contains(p.Hint, "--id") {
+		t.Fatalf("got %v", err)
+	}
+	f.wroteNothing(t)
+}
+
+// A pending invite that cannot be removed once the files are written is
+// warned about, and the join goes on to sign.
+func TestJoinWarnsWhenThePendingInviteStays(t *testing.T) {
+	f := newJoinFixture(t, true, true)
+	saved := removePendingDir
+	removePendingDir = func(string) error { return os.ErrPermission }
+	t.Cleanup(func() { removePendingDir = saved })
+	out, err := f.register(t, "--execute")
+	if err != nil {
+		t.Fatal(problemText(err))
+	}
+	if !pushed(*f.runs) {
+		t.Fatal("no attestation pushed")
+	}
+	if !strings.Contains(out, ui.ShortPath(filepath.Join(dataDir(t), "invites", fixtureDeploymentID))) {
+		t.Errorf("the warning does not name the pending directory:\n%s", out)
 	}
 }
