@@ -198,7 +198,8 @@ const (
 	// that serves its own hostname, with its certificates and connections.
 	FloorCaddy = 128 * mib
 	// FloorGate is oauth2-proxy, the visibility gate, which runs on the
-	// gateway.
+	// gateway, and the session store beside it, which its compose.yaml caps
+	// at 16 MiB.
 	FloorGate = 64 * mib
 	// FloorUptime is the uptime monitor, a Node.js process.
 	FloorUptime = 256 * mib
