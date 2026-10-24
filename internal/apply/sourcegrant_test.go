@@ -84,9 +84,10 @@ func fixtureReaders(t *testing.T) *apply.Bootstrap {
 	return b
 }
 
-// The bootstrap creates the role and makes every transaction it opens read
-// only, so it cannot write to Mbin even through a grant it should not have.
-// It grants nothing: Mbin's tables do not exist before its first start.
+// The bootstrap creates the role, with read only transactions by default as
+// defence in depth (the role can turn that off; the boundary is the SELECT
+// only column grants). It grants nothing: Mbin's tables do not exist before
+// its first start.
 func TestBootstrapCreatesReadOnlyReader(t *testing.T) {
 	b := fixtureReaders(t)
 	if r := b.Readers[0]; r.Role != "digest_reader" || r.Database != "talk" {
@@ -177,6 +178,9 @@ func TestGrantSQLColumnGrants(t *testing.T) {
 type orderedHost struct {
 	*fakeHost
 	grantFails bool
+	// tablesMissing answers the grant as Postgres does before Mbin's first
+	// start: the guard's notice, and success.
+	tablesMissing bool
 }
 
 func (h *orderedHost) RunInput(command, stdin string) (string, error) {
@@ -184,6 +188,10 @@ func (h *orderedHost) RunInput(command, stdin string) (string, error) {
 	if h.grantFails && strings.Contains(stdin, `\connect`) {
 		h.inputs = append(h.inputs, stdin)
 		return "ERROR: column \"is_verified\" does not exist\n" + stdin, fmt.Errorf("exit status 3")
+	}
+	if h.tablesMissing && strings.Contains(stdin, `\connect`) {
+		h.inputs = append(h.inputs, stdin)
+		return "NOTICE:  Mbin has not created its tables yet in database talk, so digest_reader is granted nothing; the next apply grants it\n", nil
 	}
 	return h.fakeHost.RunInput(command, stdin)
 }
@@ -292,5 +300,84 @@ func TestAReplicaGrantsNothingAndWaitsForTheReader(t *testing.T) {
 	}
 	if host.ran(`\connect`) {
 		t.Error("a replica ran the grant")
+	}
+}
+
+// A grant that finds no Mbin tables yet is owed, not done: the next apply of
+// the site runs it even with nothing else to do, which is the only way it
+// runs where the leader's site applied before Mbin's first start. Once it
+// succeeds nothing is owed, and an apply with nothing to do runs nothing.
+func TestAGrantWaitingForMbinsTablesIsOwed(t *testing.T) {
+	noWait(t)
+	host := &orderedHost{fakeHost: newHost(), tablesMissing: true}
+	if err := apply.Execute(bootstrapPlan(t, host.fakeHost), host); err != nil {
+		t.Fatal(err)
+	}
+	record, owed := host.files["/srv/paisans/f2a9/.paisans-pending.json"]
+	if !owed || !strings.Contains(record, "digest_reader") {
+		t.Fatalf("a grant that waited for Mbin's tables is not owed: %q", record)
+	}
+
+	host.tablesMissing = false
+	host.commands = nil
+	again := bootstrapPlan(t, host.fakeHost)
+	if len(again.Actions) != 0 {
+		t.Fatalf("the second apply has actions, so it does not test a quiet apply: %+v", again.Actions)
+	}
+	if again.Bootstrap == nil {
+		t.Fatal("an apply owing a grant attaches no bootstrap, so the grant never runs")
+	}
+	if err := apply.Execute(again, host); err != nil {
+		t.Fatal(err)
+	}
+	if !host.ran(`stdin: \connect "talk"`) {
+		t.Fatalf("the owed grant did not run: %v", host.commands)
+	}
+	if _, owed := host.files["/srv/paisans/f2a9/.paisans-pending.json"]; owed {
+		t.Error("a grant that succeeded is still owed")
+	}
+
+	host.commands = nil
+	third := bootstrapPlan(t, host.fakeHost)
+	if third.Bootstrap != nil || len(third.Actions) != 0 {
+		t.Errorf("an apply owing nothing still plans work: bootstrap %v, actions %+v", third.Bootstrap != nil, third.Actions)
+	}
+}
+
+// A grant still waiting stays owed through an apply that also waits.
+func TestAGrantStillWaitingStaysOwed(t *testing.T) {
+	noWait(t)
+	host := &orderedHost{fakeHost: newHost(), tablesMissing: true}
+	if err := apply.Execute(bootstrapPlan(t, host.fakeHost), host); err != nil {
+		t.Fatal(err)
+	}
+	if err := apply.Execute(bootstrapPlan(t, host.fakeHost), host); err != nil {
+		t.Fatal(err)
+	}
+	if record := host.files["/srv/paisans/f2a9/.paisans-pending.json"]; !strings.Contains(record, "digest_reader") {
+		t.Errorf("a grant that waited twice is no longer owed: %q", record)
+	}
+}
+
+// A site owing a grant that has become a replica grants nothing, since a
+// replica is read only, and keeps owing it.
+func TestAReplicaKeepsAnOwedGrant(t *testing.T) {
+	noWait(t)
+	host := &orderedHost{fakeHost: newHost(), tablesMissing: true}
+	if err := apply.Execute(bootstrapPlan(t, host.fakeHost), host); err != nil {
+		t.Fatal(err)
+	}
+	host.tablesMissing = false
+	host.commands = nil
+	host.leader = "home-b"
+	host.replicaHas = []string{"account", "auth", "digest", "digest_reader", "talk", "wiki"}
+	if err := apply.Execute(bootstrapPlan(t, host.fakeHost), host); err != nil {
+		t.Fatal(err)
+	}
+	if host.ran(`\connect`) {
+		t.Error("a replica ran the grant")
+	}
+	if record := host.files["/srv/paisans/f2a9/.paisans-pending.json"]; !strings.Contains(record, "digest_reader") {
+		t.Errorf("a replica dropped an owed grant: %q", record)
 	}
 }

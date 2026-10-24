@@ -331,6 +331,14 @@ type Plan struct {
 	// holds back with Except. Execute keeps it there, so the apply that
 	// releases a held stack still force-recreates it.
 	heldOwed []pendingAction
+	// owedGrants are the reader roles whose grant the record of owed work
+	// holds: an earlier apply found its source's tables missing. They attach
+	// the bootstrap to a plan with no action, so the grant runs. See
+	// runSourceGrants.
+	owedGrants []string
+	// grantsOwed are the reader roles still owed a grant once this apply's
+	// grants ran, which the record keeps for the next apply.
+	grantsOwed []string
 	// HeldOverwrites are --overwrite paths in stacks this plan holds back
 	// with Except. They are not written, and the operator is told so.
 	HeldOverwrites []string
@@ -972,6 +980,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 	if err != nil {
 		return nil, err
 	}
+	out.owedGrants = resumed.Grants
 	// A stack the record still owes is force-recreated, whether or not its
 	// files changed again since. The record says its last action did not
 	// finish, and an `up -d` that stopped part way can leave a container
@@ -1307,7 +1316,7 @@ func execute(plan *Plan, t Transport) error {
 	// A reload is owed through GatewayChanging, which Build sets whenever it
 	// sets GatewayReload: a failed reload leaves the new routing written and
 	// recorded, and only this record brings the next apply back to it.
-	owes := len(plan.Actions) > 0 || plan.GatewayChanging
+	owes := len(plan.Actions) > 0 || plan.GatewayChanging || len(plan.owedGrants) > 0
 	if owes {
 		if err := writePending(plan, plan.Actions, t); err != nil {
 			return err
@@ -1580,11 +1589,12 @@ func execute(plan *Plan, t Transport) error {
 	if err := writeManifest(plan, t); err != nil {
 		return err
 	}
-	if owes {
-		if len(plan.heldOwed) > 0 {
-			// Everything this plan moved is done; what it held back is still
-			// owed, and nothing else is.
-			data, err := json.MarshalIndent(pending{Version: 1, Actions: plan.heldOwed}, "", "  ")
+	if owes || len(plan.grantsOwed) > 0 {
+		if len(plan.heldOwed) > 0 || len(plan.grantsOwed) > 0 {
+			// Everything this plan moved is done; what it held back, and a
+			// grant still waiting for its source's tables, are still owed,
+			// and nothing else is.
+			data, err := json.MarshalIndent(pending{Version: 1, Actions: plan.heldOwed, Grants: plan.grantsOwed}, "", "  ")
 			if err != nil {
 				return err
 			}
@@ -1614,6 +1624,9 @@ type pending struct {
 	Actions         []pendingAction `json:"actions"`
 	GatewayChanging bool            `json:"gateway_changing,omitempty"`
 	GatewayReload   bool            `json:"gateway_reload,omitempty"`
+	// Grants are the reader roles whose grant found its source's tables
+	// missing. See runSourceGrants.
+	Grants []string `json:"grants,omitempty"`
 }
 
 type pendingAction struct {
@@ -1658,6 +1671,7 @@ func writePending(plan *Plan, actions []Action, t Transport) error {
 		p.Actions = append(p.Actions, pendingAction{Stack: action.Stack, Recreate: action.Recreate, Up: action.Up})
 	}
 	p.Actions = append(p.Actions, plan.heldOwed...)
+	p.Grants = plan.owedGrants
 	data, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
 		return err

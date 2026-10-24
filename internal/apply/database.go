@@ -158,12 +158,15 @@ func sourceReaders(cfg *config.Config, secrets *config.Secrets, databases []Data
 	return out, nil
 }
 
-// WithDatabases attaches the bootstrap to a plan that acts on any stack. An
-// apply with nothing to act on stays one that runs nothing, which is what
-// makes re-running apply a habit rather than a risk. A rotated password
-// changes the app's rendered environment, so it always arrives with an action.
+// WithDatabases attaches the bootstrap to a plan that acts on any stack, or
+// that owes a reader's grant. An apply with nothing to act on and nothing
+// owed stays one that runs nothing, which is what makes re-running apply a
+// habit rather than a risk. A rotated password changes the app's rendered
+// environment, so it always arrives with an action. A grant that found its
+// source's tables missing arrives with none, since the tables appear without
+// any file of this site changing.
 func (p *Plan) WithDatabases(b *Bootstrap) {
-	if b == nil || len(p.Actions) == 0 {
+	if b == nil || (len(p.Actions) == 0 && len(p.owedGrants) == 0) {
 		return
 	}
 	p.Bootstrap = b
@@ -301,9 +304,13 @@ const NoStatementLog = "SET log_statement = 'none';\n" +
 //     and applying is the whole rotation
 //   - the database is created only when missing, owned by the role
 //   - an engagement app's reader is created and its password set the same
-//     way, with no database of its own, and every transaction it opens is
-//     read only. It is granted nothing here: its source's tables do not
-//     exist before that app's first start. See runSourceGrants.
+//     way, with no database of its own. It is granted nothing here: its
+//     source's tables do not exist before that app's first start. What
+//     keeps it from writing is that runSourceGrants grants it SELECT on
+//     columns and nothing else, and that PostgreSQL 15 and later withhold
+//     CREATE on schema public from PUBLIC (the catalog ships 16 to 18).
+//     Its default_transaction_read_only is defence in depth only: any role
+//     may SET it off or BEGIN READ WRITE.
 //
 // CREATE DATABASE cannot run inside a transaction block, and so not inside a
 // DO block either; `\gexec` runs a generated statement as its own top level

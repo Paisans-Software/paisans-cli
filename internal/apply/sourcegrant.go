@@ -93,8 +93,23 @@ func grantSQL(r Reader) string {
 // runSourceGrants grants each reader its reads, once every app stack is
 // healthy, Mbin's among them. It runs only where the bootstrap ran the
 // primary's script: a replica is read only, and the grant streams to it.
+//
+// A grant that finds Mbin's tables missing is owed, and the record of owed
+// work keeps it, so the next apply of this site runs it even with nothing
+// else to do. Without that, a leader's site applied before Mbin's first
+// start, which is the order on a deployment whose leader holds no apps,
+// would never grant: Mbin creating its tables changes no file of this site.
+// A grant owed on a site that is now a replica stays owed until an apply of
+// this site finds it leading.
 func runSourceGrants(plan *Plan, t Transport) error {
-	if plan.Bootstrap == nil || !plan.primary {
+	if plan.Bootstrap == nil {
+		return nil
+	}
+	if !plan.primary {
+		plan.grantsOwed = plan.owedGrants
+		if len(plan.grantsOwed) > 0 {
+			plan.say("the grant of %s is still owed, and runs on an apply of %s while its Patroni leads", strings.Join(plan.grantsOwed, ", "), plan.Site)
+		}
 		return nil
 	}
 	for _, r := range plan.Bootstrap.Readers {
@@ -111,8 +126,9 @@ func runSourceGrants(plan *Plan, t Transport) error {
 				plan.Site, r.Role, r.Database, r.App, out)
 		}
 		if strings.Contains(out, mbinTablesPending) {
-			done.Done("waiting for Mbin's tables")
-			plan.say("Mbin has not created its tables in %s yet, so %s is granted nothing; apply again once it has", r.Database, r.Role)
+			done.Done("owed, waiting for Mbin's tables")
+			plan.grantsOwed = append(plan.grantsOwed, r.Role)
+			plan.say("Mbin has not created its tables in %s yet, so %s is granted nothing. The grant is owed: apply %s again once Mbin has started, and it runs then", r.Database, r.Role, plan.Site)
 			continue
 		}
 		done.Done("")
