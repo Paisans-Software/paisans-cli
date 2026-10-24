@@ -102,13 +102,21 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 	k, _, _ := config.ParseKeyLine(key)
 	r := reporter()
 	r.Section("register " + k.Fingerprint + " for " + *configPath)
+	return attest(r, l, cfg, key, pin, *execute, ans, stdin, stdout)
+}
+
+// attest signs, with execute, an attestation of the sites' newest version
+// with key, once it equals the files l holds, pushes it to cfg's sites, and
+// records the key. Trust starts from pin and from any version key signed.
+func attest(r ui.Reporter, l configstore.Local, cfg *config.Config, key, pin string, execute bool, ans answerer, stdin io.Reader, stdout io.Writer) error {
+	k, _, _ := config.ParseKeyLine(key)
 
 	// Trust starts from the pin, and from any version this key signed
 	// before; with neither, the sites' history alone is never trusted.
 	anchor := configstore.Anchor{Root: pin, Signers: []string{k.Fingerprint}}
 	sites := configTransports(cfg)
 	m := gatherMode{
-		execute:  *execute,
+		execute:  execute,
 		answers:  ans,
 		noAnchor: "Pin the first version you trust with --root <sha>; an operator who has one can read its hash from " + progname.Cmd() + " deployment log.",
 	}
@@ -143,7 +151,7 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 	}
 	own := g.Versions[head].SignerFP == k.Fingerprint
 
-	if !*execute {
+	if !execute {
 		if own {
 			r.Step("attest "+describe(g, head)).End(ui.Pending, "your key signed it already")
 		} else {
