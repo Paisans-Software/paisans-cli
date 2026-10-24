@@ -134,7 +134,9 @@ func TestEngagementWithoutMbinRendersEmpty(t *testing.T) {
 	if !ok {
 		t.Fatalf("no %s in the plan", digestEnvA)
 	}
-	if got := envValue(env, "ENGAGEMENT_MBIN_URL"); got != "" {
-		t.Errorf("ENGAGEMENT_MBIN_URL=%s with no Mbin app, want empty", got)
+	for _, key := range []string{"ENGAGEMENT_MBIN_DATABASE_URL", "ENGAGEMENT_MBIN_URL", "ENGAGEMENT_INSTANCE_TITLE", "ENGAGEMENT_META_TITLE"} {
+		if got := envValue(env, key); got != "" {
+			t.Errorf("%s=%s with no Mbin app, want empty", key, got)
+		}
 	}
 }

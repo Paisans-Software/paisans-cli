@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -1126,5 +1127,21 @@ func TestNoEngagementAppNoEngagementRules(t *testing.T) {
 		if strings.HasPrefix(f.Rule, "engagement-") {
 			t.Fatalf("an engagement rule fired with no engagement app: %v", f)
 		}
+	}
+}
+
+// Each engagement app after the first is refused once, at its own key, so
+// the operator sees every app to remove and the first is the one kept.
+func TestEveryExtraEngagementAppIsRefused(t *testing.T) {
+	cfg := load(t, "engagement-one-per-deployment")
+	cfg.Apps["digest-three"] = cfg.Apps["digest-two"]
+	var keys []string
+	for _, f := range validate.Check(cfg).Findings {
+		if f.Rule == "engagement-one-per-deployment" {
+			keys = append(keys, f.Key)
+		}
+	}
+	if want := []string{"apps.digest-three", "apps.digest-two"}; !slices.Equal(keys, want) {
+		t.Errorf("refused at %v, want %v", keys, want)
 	}
 }

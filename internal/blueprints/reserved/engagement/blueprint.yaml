@@ -11,8 +11,8 @@ services:
   - {name: "app", foundation: "engagement", purpose: "the weekly digest"}
   - {name: "postgres", purpose: "its role and database on the cluster"}
 database: {engine: postgres}
-# Not the service's neighbours' ports: Mbin publishes 8080 and the account
-# service 8082, and clustered apps share every apps site's mesh address. The
+# 8083: Mbin publishes 8080 and the account service 8082, and clustered apps
+# share every apps site's mesh address, so each needs its own port. The
 # service reads its port from ENGAGEMENT_LISTEN_ADDR, which this toolkit
 # renders, and its image's health check probes the same variable.
 port: 8083

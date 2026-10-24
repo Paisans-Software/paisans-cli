@@ -39,6 +39,8 @@ func (p *planner) engagementValuesFor(planned plannedApp, host string, port int)
 	reader := planned
 	reader.DBUser, reader.DBName = ReaderRole(planned.Name), DBIdentifier(mbin)
 	instance, meta := mbinTitles(p.cfg, mbin)
+	// A missing source_database_password renders an empty one here, and
+	// never reaches a host: apply refuses it before any stack starts.
 	return engagementValues{
 		SourceDSN:     dsn(reader, p.appSecret(planned.Name, "source_database_password"), host, port),
 		SourceURL:     "https://" + p.cfg.Apps[mbin].Hostname,

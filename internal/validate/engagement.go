@@ -6,22 +6,12 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
-func (c *checker) engagementApps() []string {
-	var out []string
-	for _, name := range c.cfg.AppNames() {
-		if c.cfg.Apps[name].Blueprint == config.BlueprintEngagement {
-			out = append(out, name)
-		}
-	}
-	return out
-}
-
 // engagement checks the weekly digest app. Every rule is silent when the
 // deployment has no engagement app. The digest reads one Mbin's database
 // directly, so it needs exactly one Mbin to read; the service is its own
 // cluster-wide singleton, like the account service.
 func (c *checker) engagement() {
-	apps := c.engagementApps()
+	apps := c.cfg.EngagementApps()
 	if len(apps) == 0 {
 		return
 	}

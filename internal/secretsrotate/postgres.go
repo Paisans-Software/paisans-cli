@@ -502,17 +502,7 @@ func (r sourceReader) Accepts(e Env, next string) (bool, error) {
 // Users is every site running the engagement app, as render places it: the
 // one it is pinned to, or every apps site. These are the stacks whose
 // connection string holds the password.
-func (r sourceReader) Users(e Env) []Use {
-	app := e.Cfg.Apps[r.app]
-	if app.Placement.Mode == config.PlacementPinned {
-		return []Use{{Site: app.Placement.Site, Stacks: []string{r.app}}}
-	}
-	var out []Use
-	for _, site := range e.Cfg.AppsSites() {
-		out = append(out, Use{Site: site, Stacks: []string{r.app}})
-	}
-	return out
-}
+func (r sourceReader) Users(e Env) []Use { return appDatabase{app: r.app}.Users(e) }
 
 // alterSQL sets role's password, with statement logging off first.
 func alterSQL(role, password string) string {

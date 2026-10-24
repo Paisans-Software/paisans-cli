@@ -130,10 +130,7 @@ func sourceReaders(cfg *config.Config, secrets *config.Secrets, databases []Data
 		return nil, nil
 	}
 	var out []Reader
-	for _, name := range cfg.AppNames() {
-		if cfg.Apps[name].Blueprint != config.BlueprintEngagement {
-			continue
-		}
+	for _, name := range cfg.EngagementApps() {
 		role := render.ReaderRole(name)
 		if !identifier.MatchString(role) || len(role) > 63 {
 			return nil, fmt.Errorf("apps.%s: its read only role on %s would be named %q, and a role is created only from lowercase letters, digits and underscores, starting with a letter, at most 63 characters. Rename the app", name, source, role)

@@ -157,7 +157,7 @@ func (w *pgWorld) env() Env {
 					}
 					continue
 				}
-				if reader, ok := s.Get("apps." + stack + ".source_database_password"); ok && stack == "digest" {
+				if reader, ok := s.Get("apps." + stack + ".source_database_password"); ok && w.cfg.Apps[stack].Blueprint == config.BlueprintEngagement {
 					if w.readerApps[site+"/"+stack] != reader {
 						w.readerApps[site+"/"+stack] = reader
 						w.log = append(w.log, "apply "+site+" "+stack+" reader")

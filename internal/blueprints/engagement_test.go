@@ -34,10 +34,14 @@ func TestEngagementBlueprintParses(t *testing.T) {
 		t.Error("engagement keeps no database of its own")
 	}
 	var app Service
+	var found bool
 	for _, s := range Services(config.BlueprintEngagement) {
 		if s.Name == "app" {
-			app = s
+			app, found = s, true
 		}
+	}
+	if !found {
+		t.Fatal("engagement has no app service")
 	}
 	if app.Foundation != FoundationEngagement {
 		t.Errorf("the app service's foundation is %q, want %q", app.Foundation, FoundationEngagement)
@@ -52,7 +56,7 @@ func TestEngagementBlueprintParses(t *testing.T) {
 	if !ok {
 		t.Fatal("digest_signing_key has no spec")
 	}
-	if (key.Format != "" && key.Format != FormatPassword) || key.RotationCost != CostRestart || key.NeverRotate != "" {
+	if key.Format != FormatPassword || key.RotationCost != CostRestart || key.NeverRotate != "" {
 		t.Errorf("digest_signing_key %+v, want a password rotated at the cost of a restart", key)
 	}
 	if !slices.Contains(SelfRotated(config.BlueprintEngagement), "digest_signing_key") {

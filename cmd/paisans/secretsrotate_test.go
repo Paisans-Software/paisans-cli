@@ -1393,8 +1393,14 @@ func TestSecretsRotateTakesTheDigestsSourceDatabasePassword(t *testing.T) {
 	if r.Path() != "apps.digest.source_database_password" || !r.Cost().Reconnects {
 		t.Errorf("path %q cost %+v", r.Path(), r.Cost())
 	}
-	if want := secretsrotate.SourceReader("digest"); fmt.Sprintf("%T", r) != fmt.Sprintf("%T", want) {
-		t.Errorf("rotator %T, want %T", r, want)
+	// The stacks re-applied with the new password are the digest's on every
+	// apps site, never Mbin's: Mbin does not hold it.
+	var users []string
+	for _, u := range r.Users(secretsrotate.Env{Cfg: cfg}) {
+		users = append(users, u.Site+":"+strings.Join(u.Stacks, ","))
+	}
+	if want := []string{"home-a:digest", "home-b:digest"}; !slices.Equal(users, want) {
+		t.Errorf("users %v, want %v", users, want)
 	}
 	if _, err := rotatorFor("apps.wiki.source_database_password", rotateWiring{cfg: cfg}); err == nil {
 		t.Error("a blueprint with no reader was given a reader rotation")

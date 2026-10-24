@@ -1105,6 +1105,18 @@ func (c *Config) PocketIDApp() (string, bool) {
 // core catalog's, written unqualified.
 const engagementSourceBlueprint Blueprint = "mbin"
 
+// EngagementApps lists the apps whose blueprint is engagement, sorted.
+// validate refuses more than one.
+func (c *Config) EngagementApps() []string {
+	var out []string
+	for _, name := range c.AppNames() {
+		if c.Apps[name].Blueprint == BlueprintEngagement {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 // EngagementSources lists the apps the engagement digest could read, sorted:
 // the apps whose blueprint is mbin.
 func (c *Config) EngagementSources() []string {

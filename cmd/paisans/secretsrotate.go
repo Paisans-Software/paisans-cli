@@ -763,7 +763,7 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 	}
 	// The password of the read only role an engagement app reads its
 	// source's database as, altered in the same cluster.
-	for _, app := range appsOf(config.BlueprintEngagement) {
+	for _, app := range cfg.EngagementApps() {
 		if has("apps." + app + ".source_database_password") {
 			rs = append(rs, secretsrotate.SourceReader(app))
 		}

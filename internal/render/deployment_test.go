@@ -83,7 +83,7 @@ func TestEveryPathIsUnderTheDeploymentRoot(t *testing.T) {
 			// second part is its options.
 			mount, ok := strings.CutPrefix(strings.TrimSpace(line), "- /")
 			_, target, bind := strings.Cut(mount, ":")
-			if !ok || !bind || !strings.HasPrefix(target, "/") || strings.HasPrefix(mount, "dev/") || mount == hostTimeZoneMount[1:] {
+			if !ok || !bind || !strings.HasPrefix(target, "/") || strings.HasPrefix(mount, "dev/") || "/"+mount == hostTimeZoneMount {
 				continue
 			}
 			if !strings.HasPrefix(mount, "srv/paisans/f2a9/") {
