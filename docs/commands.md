@@ -879,12 +879,13 @@ age key, and writes a signed request to stdout.
 paisans operator register --invite carol.invite --inviter-key wash.pub > carol.request
 ```
 
-* **Alone:** once per invite, in an empty directory or one `--config` names.
+* **Alone:** once per invite, in any directory: it reads and writes nothing
+  there.
 * **Flags:** `--invite <file>`, `--inviter-key <path.pub or key line>` (the
   inviter's public key, as they gave it to you), `--name <first last>`,
   `--email <address>` (both asked for at a terminal when not given, and
   required without one), `--age-private-key-file <path>`, `--config`.
-  `--key`, `--root` and `--execute` are refused beside `--invite`.
+  `--key`, `--root`, `--id` and `--execute` are refused beside `--invite`.
 * **Checks:** the invite's shape, version and signature against
   `--inviter-key`, whose fingerprint must be the invite's `inviter`; and that
   the ssh-agent holds the key the invite names, which signs the request. A
@@ -893,31 +894,38 @@ paisans operator register --invite carol.invite --inviter-key wash.pub > carol.r
   which: a `SOPS_AGE_*` variable, which must hold one key and keeps nothing; the
   keystore item `paisans-age` for the invite's deployment id, used as it is;
   `--age-private-key-file`, read when it exists and made when it does not; and
-  otherwise a new keystore item. Answering the same invite twice never makes a
-  second key. A key is never printed, never replaced, and never written beside
+  otherwise a new keystore item. The first answer for a deployment binds the
+  key it names to the deployment; every later answer, from any directory,
+  searches all of those sources for the bound key and uses the one that holds
+  it, even where an earlier one holds another key, and with none holding it is
+  refused with no key made, naming the key and the binding file (remove that
+  file to start over with another key). A key is never printed, never replaced, and never written beside
   `paisans-stack.yaml`.
-* **Refuses:** a directory that holds a `paisans-stack.yaml`, or a recorded
-  invite that is another deployment's or a different invite, so a request that
-  may still be on its way is not orphaned; and an `--age-private-key-file` that
-  is a directory.
+* **Refuses:** an invite to a deployment whose pending invite is a different
+  one, naming the pending invite file, so a request that may still be on its
+  way is not orphaned (remove that file to abandon it; the identical invite is
+  answered again); and an `--age-private-key-file` that is a directory.
 * **Output:** the request on stdout, which holds nothing secret and travels over
   any channel, and on stderr what comes next: send it to the inviter, and once
-  they have accepted and applied it, run `operator register --execute` in the
-  same directory. The invite, the inviter's key and the age public key the
-  request names, with where it was found, are recorded under `.paisans/` for
-  the join. A key kept in a file is reached through `SOPS_AGE_KEY_FILE`, so the
+  they have accepted and applied it, run `operator register --execute` in an
+  empty directory. What the join needs is recorded in the workstation's data
+  directory, where `deployment list`'s saved deployments live, keyed by the
+  deployment id: the pending invite and the inviter's key in
+  `invites/<deployment-id>/`, and the bound age public key, with where it was
+  found, in `age/<deployment-id>.recipient`. A key kept in a file is reached through `SOPS_AGE_KEY_FILE`, so the
   answer prints the `export` line for it, whether it made the file or read it.
 * **Hosts:** none.
 
 #### `paisans operator register`, joining
 
-Run without `--invite` in the directory where `--invite` ran, before the
-deployment's files are there, `register` joins. Writing the files and signing
-take `--execute`.
+Run without `--invite` in a directory without the deployment's files, with an
+invite pending, `register` joins. Writing the files and signing take
+`--execute`.
 
 ```sh
 paisans operator register                # reads, and says what it would write
 paisans operator register --execute      # recovers, signs the attestation
+paisans operator register --id <deployment id> --execute   # one of several pending
 ```
 
 * **Alone:** after the inviter has run `operator add --request` and
@@ -925,20 +933,27 @@ paisans operator register --execute      # recovers, signs the attestation
   operator's key; the refusal says to ask the inviter whether they have applied,
   and, when a site refused the login, to check with them that the invite's
   hosts are the deployment's sites.
-* **Flags:** `--config`, `--execute`, `--yes`. `--key` and `--root` are refused:
-  the invite names the key and the root.
+* **Which invite:** the one pending, or the one `--id <deployment id>` names.
+  Several pending without `--id` are refused, listing their ids; with none
+  pending, `register` registers. `--id` is refused where the files are.
+* **Flags:** `--config`, `--id`, `--execute`, `--yes`. `--key` and `--root`
+  are refused: the invite names the key and the root.
 * **What it does:** recovers the deployment as `deployment recover --root <the
   invite's root> --from <each invite site>` would, trusting that root alone;
   refuses, before any configuration file is written, sites that hold a fork,
   and a newest version that does not list the invite's key under the invite's
-  username; writes the files and records the root and the signing key; and
-  signs the attestation `register` signs. A refusal after the gather says no
+  username; writes the files and records the root and the signing key, after
+  which the invite is no longer pending and its directory is removed, the age
+  binding kept; and signs the attestation `register` signs. A fork's refusal
+  says that an operator who holds the files resolves it with `deployment
+  publish --merge`, and to run the join again once they have. A refusal after the gather says no
   configuration file was written: the gather has filled the workstation's
   store.
 * **Secrets:** says whether the recovered `secrets.enc.yaml` opens with their
-  age key, as a failed check and not a refusal. Secrets encrypted to the age
-  key the answer recorded are this workstation's to open: the check names the
-  key and where the answer found it, and how sops is pointed at a key. Secrets
+  age key, as a failed check and not a refusal. Secrets encrypted to the bound
+  age key were accepted, and what stops them opening is on this workstation:
+  the check names the key, where the answer found it, and how sops is pointed
+  at a key. Secrets
   not encrypted to it mean the acceptance did not re-encrypt them: any operator
   runs `operator add --request` with the same request again and `deployment
   apply --execute`, and the new operator runs `deployment pull`.
@@ -948,7 +963,7 @@ paisans operator register --execute      # recovers, signs the attestation
 * **Hosts:** the invite's sites, as `deployment recover` reaches them. Without
   `--execute`, no configuration file is written and nothing is signed.
 
-Once the files are there, `register` with no flags behaves as above.
+Once the files are there, `register` behaves as above.
 
 ### `paisans operator invite`
 

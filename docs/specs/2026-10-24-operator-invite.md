@@ -59,8 +59,8 @@ the other's SSH public key.
    the request, declares the operator as `operator add` does, and makes the
    secrets readable to their age key.
 4. **Inviter:** `paisans deployment apply --execute`, as now.
-5. **New operator:** `paisans operator register`, in the directory step 2 ran
-   in. It recovers the deployment from the invite's root and sites, then signs
+5. **New operator:** `paisans operator register --execute`, in an empty
+   directory, any one. It recovers the deployment from the invite's root and sites, then signs
    the attestation `register` signs today.
 
 ## The invite
@@ -101,15 +101,20 @@ serves when the invite is written.
 ## `operator register --invite`: answering it
 
 `paisans operator register --invite <file> --inviter-key <file.pub | key line>`
-runs on the new operator's workstation, in an empty directory or one given with
-`--config`. It reaches no host.
+runs on the new operator's workstation, in any directory: it reads and writes
+nothing there. It reaches no host.
 
 1. **Checks the invite**: its shape, its version, and its signature against
    `--inviter-key`, whose fingerprint must be the invite's `inviter`
    fingerprint. A mismatch is refused with nothing written.
 2. **Checks the key it names**: the ssh-agent must hold the invite's `key`,
    since that key signs the request now and the attestation later.
-3. **Makes the age key** under the invite's deployment id, or finds the one
+3. **Refuses another pending invite**: when an invite to the same deployment
+   is pending (step 5) and differs from this one, it is refused, naming the
+   pending invite file, since the request that answered it may still be on its
+   way. Removing that file abandons it. The identical invite is answered
+   again.
+4. **Makes the age key** under the invite's deployment id, or finds the one
    already there. The sources are taken in this order, the first present
    wins, and the step says which it used:
    1. a `SOPS_AGE_*` variable, as `init` takes one: it must hold exactly one
@@ -120,12 +125,26 @@ runs on the new operator's workstation, in an empty directory or one given with
       and holds one age key, made by `init`'s rules when it does not;
    4. otherwise a new key in the keystore, by `init`'s rules.
 
-   So answering the same invite twice never makes a second key, whichever
-   source holds it.
-4. **Asks for the full name and email** at a terminal, with `create`'s
+   The first answer for a deployment binds the key it names to the
+   deployment. Every later answer for it, from any directory, searches every
+   one of the sources above for the bound key and uses the one that holds it,
+   even where an earlier source holds another key. When none holds it, the
+   answer is refused with no key made, naming the bound key and the binding
+   file; removing that file is how an operator starts over with another key.
+5. **Asks for the full name and email** at a terminal, with `create`'s
    checks, or takes `--name` and `--email`.
-5. **Writes the request** to stdout and records the invite and the inviter's
-   key under `.paisans/` in the directory, for step 5 of the flow.
+6. **Writes the request** to stdout and records what the join needs in the
+   workstation's data directory (where `deployment list`'s saved deployments
+   live: `$PAISANS_DATA_DIR`, else `~/Library/Application Support/Paisans` on
+   macOS and `$XDG_DATA_HOME/paisans` elsewhere), keyed by the deployment id:
+   * `invites/<deployment-id>/invite`, the invite verbatim, and
+     `invites/<deployment-id>/inviter.pub`, the inviter's key: the pending
+     invite. The invite is written last, and marks the record whole.
+   * `age/<deployment-id>.recipient`, the bound age public key and where the
+     answer found it, written by the first answer and kept after the join.
+
+   The directory is 0700 and each file 0600, written through a synced
+   temporary file and a rename.
 
 The request holds nothing secret:
 
@@ -175,8 +194,11 @@ nothing and says so. A declared username with any other key is refused as
 
 ## `operator register`, again: joining
 
-Run with no flags in the directory where `--invite` ran, and with no
-deployment files there yet, `register` reads the recorded invite and:
+Run in a directory with no deployment files, `register` takes the pending
+invite: the only one when one is pending, the one for `--id <deployment-id>`
+when given. Several pending without `--id` are refused, listing their ids.
+With none pending, `register` registers as it does without an invite. It
+then:
 
 1. **Recovers** as `deployment recover --root <invite root> --from <each
    invite site>` would, with the invite's deployment id. Reaching the sites
@@ -186,19 +208,25 @@ deployment files there yet, `register` reads the recorded invite and:
    invite's `username` in `operators`. A newest version that does not is
    refused before any file is written, with the same advice.
 3. **Writes the files** and records the root and the signing key, as recovery
-   does.
+   does. The invite is then no longer pending, and its directory is removed;
+   the age binding is kept. A fork among the sites is refused before this
+   step, saying that an operator who holds the files resolves it with
+   `deployment publish --merge`, and that the join runs again once they have.
 4. **Signs the attestation** as `register` does today.
 5. **Says** whether the recovered secrets open with their age key, as a
    failed check rather than a refusal, since the files are theirs either way.
-   A secrets file that does not open means the inviter's step 3 did not
-   re-encrypt, and the remedy is for any operator to run `operator add
+   Secrets encrypted to the bound age key that do not open were accepted, and
+   what stops them is on this workstation: the check names the key, where the
+   answer found it, and how sops is pointed at a key. Secrets not encrypted to
+   it mean the inviter's step 3 did not re-encrypt, and the remedy is for any operator to run `operator add
    --request` with the same request again, then `deployment apply
    --execute`, and for the new operator to `deployment pull`.
 
 `--execute` governs steps 3 and 4 as it governs recovery and registration now.
 Without it, the run reads and says what it would write.
 
-Once the files are there, `register` with no flags behaves as it does today.
+Once the files are there, `register` behaves as it does today, and takes no
+`--id`.
 
 ## No majority prompt
 
@@ -267,5 +295,4 @@ key.
   the signatures verify with `ssh-keygen -Y verify`.
 * The file layout of the signed files, so long as the signed bytes are exactly
   the YAML and the files are plain text that survives being pasted.
-* Where under `.paisans/` the recorded invite lives.
 * Names of internal packages and functions.
