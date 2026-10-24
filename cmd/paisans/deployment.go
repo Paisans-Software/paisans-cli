@@ -797,9 +797,8 @@ func unifiedDiff(a, b []byte, nameA, nameB string) (string, error) {
 
 // secretsKeyChanges names each key of the secrets file that is only on one
 // side, as s names the sides, or whose stored value differs, never a value.
-// The file is compared
-// as stored, encrypted, and sops's own metadata is left out; a re-encrypted
-// file differs at every key.
+// The file is compared as stored, encrypted, and sops's own metadata is left
+// out; a re-encrypted file differs at every key.
 func secretsKeyChanges(local, theirs []byte, s sides) []string {
 	a, errA := flatKeys(local)
 	b, errB := flatKeys(theirs)

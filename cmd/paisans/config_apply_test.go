@@ -925,7 +925,7 @@ func differenceShown(t *testing.T, rec *ui.Recorder) (ui.Event, []string, int) {
 	}
 	var lines []string
 	for _, e := range rec.Events[i+1:] {
-		if e.Kind != "explain" {
+		if e.Kind != "verbatim" {
 			break
 		}
 		lines = append(lines, e.Text)
@@ -1049,5 +1049,22 @@ func TestApplyWithYesShowsTheDifferenceBeforeTheReview(t *testing.T) {
 	review := rec.Index("pending", "review what paisans-stack.yaml grants")
 	if review < 0 || i > review || !strings.Contains(out.String(), "approved") {
 		t.Errorf("difference at %d, review at %d, printed %q\n%s", i, review, out.String(), rec.Lines())
+	}
+}
+
+// The difference is shown as git wrote it: a blank context line is kept,
+// so each hunk still holds the lines its header counts.
+func TestApplyShowsTheDifferenceAsWritten(t *testing.T) {
+	f := newApplyStore(t, 1)
+	f.based(t)
+	long := "# " + strings.Repeat("a long comment ", 12)
+	f.edit(t, false, "    replication: 2\n", "    replication: 2 "+long+"\n")
+	loggingSSH(t, "")
+	fakeGrants(t, grantedWith(t, f, nil))
+	rec := recordConverge(t)
+	_ = f.applySite(t, noTerminalStdin())
+	_, lines, _ := differenceShown(t, rec)
+	if !slices.Contains(lines, " ") || !slices.Contains(lines, "+    replication: 2 "+long) {
+		t.Errorf("not as written:\n%q", lines)
 	}
 }

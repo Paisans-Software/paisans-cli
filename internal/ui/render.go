@@ -378,6 +378,18 @@ func (r *writer) Explain(text string) {
 	r.explainLocked(text)
 }
 
+func (r *writer) Verbatim(lines []string) {
+	if len(lines) == 0 {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.interruptLocked()
+	for _, line := range lines {
+		fmt.Fprintf(r.w, "%s%s\n", explainIndent, Visible(Redact(line)))
+	}
+}
+
 func (r *writer) Refuse(hint, explanation string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

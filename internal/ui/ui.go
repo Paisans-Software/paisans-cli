@@ -33,6 +33,11 @@ type Reporter interface {
 	// Explain is what to do about the line just above it, a failed step's,
 	// indented under it and shown at every verbosity.
 	Explain(text string)
+	// Verbatim is lines shown as written under the line above it, indented
+	// as Explain's and at every verbosity: redacted and shown as Visible
+	// shows them, but never wrapped, and a blank or indented line kept, so
+	// text whose layout is its meaning, Eg: a diff, reads as it was made.
+	Verbatim(lines []string)
 	// Refuse shows hint and explanation always: a refusal stops the command,
 	// and the operator needs the reason to fix it.
 	Refuse(hint, explanation string)
@@ -220,6 +225,7 @@ func (discard) Detail(string, ...any) {}
 func (discard) Trace(string, string)  {}
 func (discard) Result(string, ...any) {}
 func (discard) Explain(string)        {}
+func (discard) Verbatim([]string)     {}
 func (discard) Verbose() bool         { return false }
 
 type discardStep struct{}

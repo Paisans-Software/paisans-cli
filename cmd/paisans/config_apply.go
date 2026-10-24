@@ -172,7 +172,7 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *confi
 // already, "" otherwise. A first version has nothing to differ from.
 func showChange(r ui.Reporter, l configstore.Local, g configstore.Gathered, parents []string, files configstore.Files) (string, error) {
 	s := r.Step("what changes in the configuration")
-	if len(parents) != 1 {
+	if len(parents) == 0 {
 		s.End(ui.OK, "the first version, nothing to compare it with")
 		return "", nil
 	}
@@ -202,9 +202,7 @@ func showChange(r ui.Reporter, l configstore.Local, g configstore.Gathered, pare
 		// Equal keys and values, stored differently: sops's metadata.
 		lines = []string{"secrets.enc.yaml differs only in sops's metadata"}
 	}
-	for _, line := range lines {
-		r.Explain(line)
-	}
+	r.Verbatim(lines)
 	return "", nil
 }
 
