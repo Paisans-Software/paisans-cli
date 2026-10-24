@@ -19,9 +19,8 @@ import (
 // apart.
 //
 // Both are read from the workstation alone, since nothing has reached a host
-// yet: the id from paisans-stack.yaml, the version from the head this
-// workstation last published or pulled, when the files on disk are still
-// that version. What the run cannot know yet shows as pending: an id init
+// yet: the id from paisans-stack.yaml, the version from the system copy's
+// head, when the draft is still that version's files. What the run cannot know yet shows as pending: an id init
 // has still to write, or files no version holds until the run publishes
 // them. A run that opened with either pending names both again once it ends,
 // finished or stopped, with what it learned on the way.
@@ -41,10 +40,12 @@ type runIdentity struct {
 // and reports them as the run's first section.
 func openIdentity(r ui.Reporter, configPath string) *runIdentity {
 	v := &runIdentity{id: declaredID(configPath)}
-	// A file that is not where a version is kept, or a store that cannot
-	// be read, leaves the version pending: the gather says why.
-	if l, err := workstationOf(configPath); err == nil {
-		v.sha, v.revision, _ = l.Current()
+	// A draft with no system copy, or files or a store that cannot be
+	// read, leaves the version pending: the gather says why.
+	if sys, d, _, err := systemFor(configPath, ""); err == nil && d.Has() {
+		if f, err := draftVersion(d); err == nil {
+			v.sha, v.revision, _ = sys.HeadIs(f)
+		}
 	}
 	v.pending = v.id == "" || v.sha == ""
 	v.report(r)

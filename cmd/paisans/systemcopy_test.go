@@ -259,3 +259,57 @@ func TestEnsureDraftLeavesExistingDraft(t *testing.T) {
 		t.Error("the partial draft was replaced")
 	}
 }
+
+// workstation is the fixture deployment's system copy and a draft of it in a
+// folder of its own.
+type workstation struct {
+	sys configstore.Local
+	dir string
+}
+
+// config is the draft's paisans-stack.yaml, what --config names.
+func (w workstation) config() string { return filepath.Join(w.dir, config.FileName) }
+
+// newWorkstation is a workstation whose system copy holds f, an empty store
+// and nothing recorded, and whose draft is f.
+func newWorkstation(t *testing.T, f configstore.Files) workstation {
+	t.Helper()
+	w := workstation{sys: withSystemCopy(t, fixtureDeploymentID), dir: t.TempDir()}
+	if err := w.sys.WriteFiles(f); err != nil {
+		t.Fatal(err)
+	}
+	if err := configstore.WriteFilesTo(w.dir, f); err != nil {
+		t.Fatal(err)
+	}
+	return w
+}
+
+// mirrorSystemCopy points the data directory at one of the test's own and
+// makes the fixture deployment's system copy there a copy of l: its files
+// and everything it records. It is for a test that runs a command reading
+// the system copy beside one that reads l.
+func mirrorSystemCopy(t *testing.T, l configstore.Local) configstore.Local {
+	t.Helper()
+	withDataDir(t)
+	st, err := openStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sys, err := st.Local(fixtureDeploymentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.CopyFS(sys.Dir, os.DirFS(l.Dir)); err != nil {
+		t.Fatal(err)
+	}
+	return sys
+}
+
+// noFolderState fails the test when dir holds a .paisans directory: a
+// folder holds a draft and nothing a trust decision reads.
+func noFolderState(t *testing.T, dir string) {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(dir, ".paisans")); !os.IsNotExist(err) {
+		t.Errorf("%s holds .paisans: %v", dir, err)
+	}
+}

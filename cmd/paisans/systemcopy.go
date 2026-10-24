@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -182,4 +183,40 @@ func ensureDraft(configPath, id string) (draft.Draft, error) {
 		return d, err
 	}
 	return d, startDraft(sys, d)
+}
+
+// draftVersion is the draft's files as a version holds them: its
+// "drafted from" line stripped and its blueprints snapshotted.
+func draftVersion(d draft.Draft) (configstore.Files, error) {
+	f, err := d.Files()
+	if err != nil {
+		return f, err
+	}
+	f.Paisans = draft.StripMarker(f.Paisans)
+	if configstore.SnapshotBlueprints != nil {
+		snap, err := configstore.SnapshotBlueprints(f.Paisans)
+		if err != nil {
+			return configstore.Files{}, err
+		}
+		if len(snap) > 0 {
+			f.Blueprints = snap
+		}
+	}
+	return f, nil
+}
+
+// readConfig is the paisans-stack.yaml a command that reads the deployment
+// reads, and its path: the draft's where the folder holds one, else the
+// system copy's.
+func readConfig(sys configstore.Local, d draft.Draft) (*config.Config, string, error) {
+	path := filepath.Join(d.Dir, config.FileName)
+	if !d.Has() {
+		path = filepath.Join(sys.Dir, config.FileName)
+		if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+			id := filepath.Base(sys.Dir)
+			return nil, path, &ui.Problem{Hint: "the system copy of " + id + " holds no version", Explain: "There is no draft in " + d.Dir + " and nothing in " + sys.Dir + " to read the deployment from. " + recoverHint(id)}
+		}
+	}
+	cfg, err := config.Load(path)
+	return cfg, path, err
 }

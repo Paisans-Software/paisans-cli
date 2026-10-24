@@ -46,6 +46,8 @@ func newAnswerFixture(t *testing.T) answerFixture {
 	if err := runOperatorInvite(inviteArgs(l, "carol", "--key", carolPub), &out); err != nil {
 		t.Fatal(err)
 	}
+	// carol answers on a workstation of her own.
+	withDataDir(t)
 	signFromFile(t, carolPriv)
 	saved := agentKeys
 	agentKeys = func() []string { return []string{carolPub} }

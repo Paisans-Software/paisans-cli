@@ -261,7 +261,8 @@ func runOperatorAddRequest(r ui.Reporter, configPath, requestPath string, sites 
 	if err != nil {
 		return err
 	}
-	l, err := workstationOf(configPath)
+	// The root the invite must name is the one the system copy trusts.
+	sys, _, _, err := systemFor(configPath, "")
 	if err != nil {
 		return err
 	}
@@ -292,7 +293,7 @@ func runOperatorAddRequest(r ui.Reporter, configPath, requestPath string, sites 
 		step.Fail(err)
 		return err
 	}
-	root, err := trustedRoot(l, cfg.ID)
+	root, err := trustedRoot(sys, cfg.ID)
 	if err != nil {
 		step.Fail(err)
 		return err

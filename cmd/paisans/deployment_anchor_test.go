@@ -136,6 +136,7 @@ func TestConfigRecoverWithoutKeyIgnoresTheAgent(t *testing.T) {
 // anchors and is never recorded; --key that differs from a recorded key is
 // refused, and a file that is no public key is refused.
 func TestConfigRecoverAnchorsOnKeyFile(t *testing.T) {
+	withDataDir(t)
 	shas, answer, _, _, pub := storedHistoryKey(t, 2, 0)
 	recoverHosts(t, answer)
 	allSitesUp(answer, nil)
@@ -155,6 +156,9 @@ func TestConfigRecoverAnchorsOnKeyFile(t *testing.T) {
 
 	_, mine := testKey(t)
 	if err := l.SetSigningKey(mine); err != nil {
+		t.Fatal(err)
+	}
+	if err := mirrorSystemCopy(t, l).SetSigningKey(mine); err != nil {
 		t.Fatal(err)
 	}
 	err := runDeployment([]string{"log", "--config", filepath.Join(dir, "paisans-stack.yaml"), "--key", path}, noTerminalStdin(), &out)
@@ -377,11 +381,9 @@ func TestConfigLogAnchorsOnTheNamedKey(t *testing.T) {
 	recoverHosts(t, answer)
 	allSitesUp(answer, nil)
 	agentHolding(t, pub)
-	l := configstore.Local{Dir: t.TempDir()}
-	if err := l.WriteFiles(files[0]); err != nil {
-		t.Fatal(err)
-	}
-	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
+	w := newWorkstation(t, files[0])
+	l := w.sys
+	cfgPath := w.config()
 	var out bytes.Buffer
 	wantAdvice(t, runDeployment([]string{"log", "--config", cfgPath}, noTerminalStdin(), &out))
 	var rep bytes.Buffer
@@ -399,6 +401,7 @@ func TestConfigLogAnchorsOnTheNamedKey(t *testing.T) {
 	if k, _ := l.SigningKey(); k != "" {
 		t.Fatalf("log recorded the signing key %q", k)
 	}
+	noFolderState(t, w.dir)
 }
 
 // publish, with no anchor, gives the advice pull gives, through pull, since
@@ -431,6 +434,7 @@ func TestConfigPublishWithoutAnchorAdvises(t *testing.T) {
 func TestConfigLogPrintsTheRootsFullHash(t *testing.T) {
 	shas, answer, files := storedHistory(t, 2, 0)
 	l := pullWorkstation(t, answer, shas[0], shas[0], files[0])
+	mirrorSystemCopy(t, l)
 	var out bytes.Buffer
 	if err := runDeployment([]string{"log", "--config", filepath.Join(l.Dir, "paisans-stack.yaml")}, noTerminalStdin(), &out); err != nil {
 		t.Fatal(problemText(err), err)

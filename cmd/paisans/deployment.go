@@ -91,6 +91,12 @@ func workstationOf(path string) (configstore.Local, error) {
 	return configstore.Local{Dir: dir}, nil
 }
 
+// statePath is where l records name: what a refusal naming a record says
+// to look at.
+func statePath(l configstore.Local, name string) string {
+	return filepath.Join(l.Dir, ".paisans", name)
+}
+
 // configTransports reaches every site cfg declares.
 func configTransports(cfg *config.Config) map[string]apply.Transport {
 	out := map[string]apply.Transport{}
@@ -113,10 +119,10 @@ func anchorFor(l configstore.Local, root string) (configstore.Anchor, error) {
 		return a, nil
 	}
 	if !shaShape(root) {
-		return a, &ui.Problem{Hint: fmt.Sprintf("--root %q is not a commit id", root), Explain: "Give the full hash of the root to pin, as " + progname.Cmd() + " deployment log prints it on a root's line, or as another operator's .paisans/config-root holds it."}
+		return a, &ui.Problem{Hint: fmt.Sprintf("--root %q is not a commit id", root), Explain: "Give the full hash of the root to pin, as " + progname.Cmd() + " deployment log prints it on a root's line."}
 	}
 	if a.Root != "" && a.Root != root {
-		return a, &ui.Problem{Hint: "--root differs from the pinned root", Explain: fmt.Sprintf("This workstation pinned %s in .paisans/config-root. Drop --root, or remove that file if the pin is wrong.", a.Root)}
+		return a, &ui.Problem{Hint: "--root differs from the pinned root", Explain: fmt.Sprintf("This workstation pinned %s in %s. Drop --root, or remove that file if the pin is wrong.", a.Root, statePath(l, "config-root"))}
 	}
 	a.Root = root
 	return a, nil
@@ -146,7 +152,7 @@ func namedAnchor(a configstore.Anchor, keyPath string) (_ configstore.Anchor, he
 	}
 	if len(a.Signers) > 0 {
 		if !slices.Contains(a.Signers, k.Fingerprint) {
-			return a, nil, false, &ui.Problem{Hint: "--key differs from the recorded signing key", Explain: fmt.Sprintf("This workstation signs with %s, recorded in .paisans/signing-key, and trust starts from it. Drop --key, or remove that file if the record is wrong.", a.Signers[0])}
+			return a, nil, false, &ui.Problem{Hint: "--key differs from the recorded signing key", Explain: fmt.Sprintf("This workstation signs with %s, its recorded signing key, and trust starts from it. Drop --key.", a.Signers[0])}
 		}
 		return a, nil, false, nil
 	}
@@ -277,7 +283,7 @@ func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transpo
 		s.Fail(err)
 		var ns *configstore.PinNotServedError
 		if errors.As(err, &ns) {
-			return g, &ui.Problem{Hint: "the sites serve none of the pinned root's history", Explain: ns.Error() + ". Either this workstation's pin is out of date, the deployment having been redeployed under the same id since it was pinned, or a site that answered holds a history it should not, such as a host that was never evicted. Check which sites answered, above. If the pin is out of date, get the current root from another operator, the full hash in their .paisans/config-root or on a root's line of their " + progname.Cmd() + " deployment log, and recover from it into an empty directory: " + progname.Cmd() + " deployment recover --from <user@host> --root <sha> --config <empty directory>/paisans-stack.yaml.", Cause: err}
+			return g, &ui.Problem{Hint: "the sites serve none of the pinned root's history", Explain: ns.Error() + ". Either this workstation's pin is out of date, the deployment having been redeployed under the same id since it was pinned, or a site that answered holds a history it should not, such as a host that was never evicted. Check which sites answered, above. If the pin is out of date, get the current root from another operator, the full hash on a root's line of their " + progname.Cmd() + " deployment log, and recover from it into an empty directory: " + progname.Cmd() + " deployment recover --from <user@host> --root <sha> --config <empty directory>/paisans-stack.yaml.", Cause: err}
 		}
 		if errors.Is(err, configstore.ErrNoAnchor) {
 			todo := m.noAnchor
@@ -384,8 +390,7 @@ func signingKeyFor(l configstore.Local, local *config.Config) (string, error) {
 	return "", &ui.Problem{Hint: "your ssh-agent holds more than one operator key", Explain: "Which one signs is recorded and used from then on, so it is not guessed. Remove all but one from the agent for this publish (ssh-add -d)."}
 }
 
-// recordedKey is the signing key .paisans/signing-key records, and "" when
-// none is. A recorded key the agent does not hold (held is the agent's key
+// recordedKey is the signing key l records, and "" when none is. A recorded key the agent does not hold (held is the agent's key
 // lines) is refused, and otherwise ends what the refusal says to do.
 func recordedKey(l configstore.Local, held []string, otherwise string) (string, error) {
 	recorded, err := l.SigningKey()
@@ -396,7 +401,7 @@ func recordedKey(l configstore.Local, held []string, otherwise string) (string, 
 	if agentHolds(held, k.Fingerprint) {
 		return recorded, nil
 	}
-	return "", &ui.Problem{Hint: "your ssh-agent does not hold your signing key", Explain: fmt.Sprintf("This workstation signs with %s, recorded in .paisans/signing-key. Load it with ssh-add and run this again%s.", k.Fingerprint, otherwise)}
+	return "", &ui.Problem{Hint: "your ssh-agent does not hold your signing key", Explain: fmt.Sprintf("This workstation signs with %s, recorded in %s. Load it with ssh-add and run this again%s.", k.Fingerprint, statePath(l, "signing-key"), otherwise)}
 }
 
 // agentHolds reports whether one of held, the agent's key lines, has the
@@ -844,15 +849,17 @@ func runDeploymentLog(args []string, stdin io.Reader, stdout io.Writer) error {
 	if fs.NArg() > 0 {
 		return &ui.Problem{Hint: "deployment log takes no argument", Explain: "Got " + strings.Join(fs.Args(), " ") + "."}
 	}
-	l, err := workstationOf(*configPath)
+	// log judges from the system copy, and the gather adds what the sites
+	// hold to its store; its files, head and records stay as they are.
+	sys, d, _, err := systemFor(*configPath, "")
 	if err != nil {
 		return err
 	}
-	cfg, err := config.Load(*configPath)
+	cfg, path, err := readConfig(sys, d)
 	if err != nil {
 		return err
 	}
-	a, err := anchorFor(l, *root)
+	a, err := anchorFor(sys, *root)
 	if err != nil {
 		return err
 	}
@@ -862,11 +869,11 @@ func runDeploymentLog(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	r := reporter()
-	r.Section("versions of " + *configPath)
+	r.Section("versions of " + path)
 	noteKeyIgnored(r, ignored)
 	sites := configTransports(cfg)
 	m := gatherMode{log: true, noAnchor: noAnchorNamed(", or run " + progname.Cmd() + " operator register to sign the version you hold")}
-	g, err := gatherAt(r, l, sites, cfg.ID, a, m, stdin, stdout)
+	g, err := gatherAt(r, sys, sites, cfg.ID, a, m, stdin, stdout)
 	if err != nil {
 		return err
 	}

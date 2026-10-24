@@ -33,16 +33,17 @@ func signFromFile(t *testing.T, priv string) {
 }
 
 // inviteWorkstation is a registered workstation: the fixture's files with
-// alice's key replaced by the signing key, that key recorded and held by the
-// agent, and the root pinned.
-func inviteWorkstation(t *testing.T) (l configstore.Local, shas []string, pub string) {
+// alice's key replaced by the signing key, in its system copy and its draft,
+// that key recorded in the system copy and held by the agent, and the root
+// pinned there.
+func inviteWorkstation(t *testing.T) (l workstation, shas []string, pub string) {
 	t.Helper()
 	shas, answer, files, priv, pub := storedHistoryKey(t, 1, 0)
 	l = registerWorkstation(t, answer, files[0], nil, pub)
-	if err := l.SetSigningKey(pub); err != nil {
+	if err := l.sys.SetSigningKey(pub); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.SetRoot(shas[0]); err != nil {
+	if err := l.sys.SetRoot(shas[0]); err != nil {
 		t.Fatal(err)
 	}
 	signFromFile(t, priv)
@@ -62,8 +63,8 @@ func bare(line string) string {
 	return f[0] + " " + f[1]
 }
 
-func inviteArgs(l configstore.Local, rest ...string) []string {
-	return append(rest, "--config", filepath.Join(l.Dir, config.FileName))
+func inviteArgs(l workstation, rest ...string) []string {
+	return append(rest, "--config", l.config())
 }
 
 func TestInviteWritesSignedInvite(t *testing.T) {
@@ -78,7 +79,7 @@ func TestInviteWritesSignedInvite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := config.Load(filepath.Join(l.Dir, config.FileName))
+	cfg, err := config.Load(l.config())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +176,7 @@ func TestInviteRefusesAgentWithoutSigningKey(t *testing.T) {
 
 func TestInviteRefusesUnknownRoot(t *testing.T) {
 	l, _, _ := inviteWorkstation(t)
-	if err := os.Remove(filepath.Join(l.Dir, ".paisans", "config-root")); err != nil {
+	if err := os.Remove(filepath.Join(l.sys.Dir, ".paisans", "config-root")); err != nil {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
@@ -205,20 +206,20 @@ func TestInviteNeedsOneUsernameAndAKey(t *testing.T) {
 // whose store holds what build commits, signed with its key: build is given
 // the store, the fixture's paisans-stack.yaml with the key in it, and the
 // private key path, and returns the files the workstation holds.
-func unpinnedWorkstation(t *testing.T, build func(s store, yaml, priv string) configstore.Files) (configstore.Local, string) {
+func unpinnedWorkstation(t *testing.T, build func(s store, yaml, priv string) configstore.Files) (workstation, string) {
 	t.Helper()
 	priv, pub := testKey(t)
 	s := newStore(t)
 	files := build(s, fixtureAs(t, pub), priv)
 	l := registerWorkstation(t, s.answer(t), files, nil, pub)
-	if err := l.SetSigningKey(pub); err != nil {
+	if err := l.sys.SetSigningKey(pub); err != nil {
 		t.Fatal(err)
 	}
 	bundle, err := s.repo.Bundle()
 	if err != nil {
 		t.Fatal(err)
 	}
-	cache, err := l.Cache()
+	cache, err := l.sys.Cache()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,24 +287,62 @@ func TestInviteRefusesAStoreWithoutOneRoot(t *testing.T) {
 	}
 }
 
-// An invite changes no file: a workstation with no store has none after it,
-// whether its root is pinned or not.
-func TestInviteMakesNoStore(t *testing.T) {
+// An invite changes nothing: not the system copy, whether its root is
+// pinned or not, and not the folder.
+func TestInviteChangesNothing(t *testing.T) {
 	l, _, _ := inviteWorkstation(t)
-	store := filepath.Join(l.Dir, ".paisans", "store.git")
-	if _, err := os.Stat(store); !os.IsNotExist(err) {
-		t.Fatalf("the fixture holds a store: %v", err)
+	unchanged := func(what string, before, after map[string]string) {
+		t.Helper()
+		if len(after) != len(before) {
+			t.Fatalf("%s: %d entries, were %d", what, len(after), len(before))
+		}
+		for p, v := range before {
+			if after[p] != v {
+				t.Fatalf("%s: %s changed", what, p)
+			}
+		}
 	}
+	sys, folder := tree(t, l.sys.Dir), tree(t, l.dir)
 	if err := runOperatorInvite(inviteArgs(l, "carol", "--key", newPub(t)), &bytes.Buffer{}); err != nil {
 		t.Fatal(problemText(err))
 	}
-	if err := os.Remove(filepath.Join(l.Dir, ".paisans", "config-root")); err != nil {
+	unchanged("the system copy", sys, tree(t, l.sys.Dir))
+	unchanged("the folder", folder, tree(t, l.dir))
+	if err := os.Remove(filepath.Join(l.sys.Dir, ".paisans", "config-root")); err != nil {
 		t.Fatal(err)
 	}
+	sys = tree(t, l.sys.Dir)
 	if err := runOperatorInvite(inviteArgs(l, "carol", "--key", newPub(t)), &bytes.Buffer{}); err == nil || !strings.Contains(problemText(err), "deployment pull") {
 		t.Fatalf("got %v", problemText(err))
 	}
-	if _, err := os.Stat(store); !os.IsNotExist(err) {
-		t.Fatalf("operator invite made %s: %v", store, err)
+	unchanged("the system copy, unpinned", sys, tree(t, l.sys.Dir))
+	unchanged("the folder", folder, tree(t, l.dir))
+}
+
+// The invite's root and signing key are the system copy's, whatever the
+// folder holds; in a folder with no draft, the invite reads the system
+// copy's files.
+func TestInviteRootFromSystemCopy(t *testing.T) {
+	l, shas, pub := inviteWorkstation(t)
+	var out bytes.Buffer
+	if err := runOperatorInvite(inviteArgs(l, "carol", "--key", newPub(t)), &out); err != nil {
+		t.Fatal(problemText(err))
+	}
+	inv, err := operatorinvite.ParseInvite(out.Bytes(), pub)
+	if err != nil || inv.Root != shas[0] {
+		t.Fatalf("got %+v, %v", inv, err)
+	}
+	noFolderState(t, l.dir)
+
+	empty := workstation{sys: l.sys, dir: t.TempDir()}
+	out.Reset()
+	if err := runOperatorInvite(inviteArgs(empty, "carol", "--key", newPub(t)), &out); err != nil {
+		t.Fatal(problemText(err))
+	}
+	if inv, err := operatorinvite.ParseInvite(out.Bytes(), pub); err != nil || inv.Root != shas[0] || inv.Deployment != fixtureDeploymentID {
+		t.Fatalf("with no draft: %+v, %v", inv, err)
+	}
+	if entries, _ := os.ReadDir(empty.dir); len(entries) != 0 {
+		t.Fatalf("the empty folder holds %v", entries)
 	}
 }

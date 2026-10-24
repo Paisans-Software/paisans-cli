@@ -22,7 +22,6 @@ import (
 	"github.com/getsops/sops/v3/version"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
-	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/create"
 	"github.com/paisans-software/paisans-cli/internal/keystore"
 	"github.com/paisans-software/paisans-cli/internal/operatorinvite"
@@ -298,7 +297,7 @@ func TestOperatorAddAsksAgainForNoSite(t *testing.T) {
 // alice's age key, which the keystore holds for the deployment, and that
 // .sops.yaml names: a deployment alice can accept a request on.
 type requestDeployment struct {
-	l          configstore.Local
+	l          workstation
 	cfg        *config.Config
 	root       string
 	invite     operatorinvite.Invite // the invite alice wrote for carol
@@ -318,14 +317,14 @@ func newRequestDeployment(t *testing.T) *requestDeployment {
 	shas, answer, files, alicePriv, alicePub := storedHistoryKey(t, 1, 0)
 	l := registerWorkstation(t, answer, files[0], nil, alicePub)
 	report := plainReporter(t)
-	if err := l.SetSigningKey(alicePub); err != nil {
+	if err := l.sys.SetSigningKey(alicePub); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.SetRoot(shas[0]); err != nil {
+	if err := l.sys.SetRoot(shas[0]); err != nil {
 		t.Fatal(err)
 	}
 	signFromFile(t, alicePriv)
-	d := &requestDeployment{l: l, root: shas[0], alicePriv: alicePriv, configPath: filepath.Join(l.Dir, config.FileName), report: report}
+	d := &requestDeployment{l: l, root: shas[0], alicePriv: alicePriv, configPath: l.config(), report: report}
 	var err error
 	if d.cfg, err = config.Load(d.configPath); err != nil {
 		t.Fatal(err)
@@ -338,7 +337,7 @@ func newRequestDeployment(t *testing.T) *requestDeployment {
 		t.Fatal(err)
 	}
 	sops := "creation_rules:\n  - age: " + d.alice.Recipient().String() + "\n"
-	if err := os.WriteFile(filepath.Join(l.Dir, config.SOPSConfigName), []byte(sops), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(l.dir, config.SOPSConfigName), []byte(sops), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	secrets, err := config.LoadSecrets(fixtureSecretsPath())
@@ -361,7 +360,7 @@ func newRequestDeployment(t *testing.T) *requestDeployment {
 	return d
 }
 
-func (d *requestDeployment) secretsPath() string { return filepath.Join(d.l.Dir, "secrets.enc.yaml") }
+func (d *requestDeployment) secretsPath() string { return filepath.Join(d.l.dir, "secrets.enc.yaml") }
 
 // signWith is the armored signature of data by the private key file priv.
 func signWith(t *testing.T, priv, namespace string, data []byte) []byte {
@@ -425,7 +424,7 @@ func (d *requestDeployment) files(t *testing.T) [3][]byte {
 	t.Helper()
 	var out [3][]byte
 	for i, name := range []string{config.FileName, config.SOPSConfigName, "secrets.enc.yaml"} {
-		b, err := os.ReadFile(filepath.Join(d.l.Dir, name))
+		b, err := os.ReadFile(filepath.Join(d.l.dir, name))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -450,7 +449,7 @@ func (d *requestDeployment) opensWith(t *testing.T, identity *age.X25519Identity
 
 func TestOperatorAddRequestDeclaresAndReencrypts(t *testing.T) {
 	d := newRequestDeployment(t)
-	names := dirNames(t, d.l.Dir)
+	names := dirNames(t, d.l.dir)
 	out, err := d.add(t, d.request(t, d.invite, d.alicePriv), "--all-sites")
 	if err != nil {
 		t.Fatalf("%v\n%s", problemText(err), out)
@@ -465,7 +464,7 @@ func TestOperatorAddRequestDeclaresAndReencrypts(t *testing.T) {
 			t.Errorf("sites.%s.ssh.keys does not name carol", name)
 		}
 	}
-	recipients, err := config.Recipients(d.l.Dir)
+	recipients, err := config.Recipients(d.l.dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,7 +489,7 @@ func TestOperatorAddRequestDeclaresAndReencrypts(t *testing.T) {
 	if strings.Contains(out, d.carol.String()) || strings.Contains(out, d.alice.String()) {
 		t.Error("a private key was printed")
 	}
-	if got := dirNames(t, d.l.Dir); !slices.Equal(got, names) {
+	if got := dirNames(t, d.l.dir); !slices.Equal(got, names) {
 		t.Errorf("the directory holds %v, and held %v", got, names)
 	}
 }
@@ -829,4 +828,17 @@ func TestOperatorAddRequestRefusesHandSetSOPSMetadata(t *testing.T) {
 			d.refused(t, req, "sops updatekeys", rest...)
 		})
 	}
+}
+
+// The root a request's invite must name is the one the system copy trusts,
+// and the folder holds no state of its own.
+func TestAddRequestRootFromSystemCopy(t *testing.T) {
+	d := newRequestDeployment(t)
+	noFolderState(t, d.l.dir)
+	other := strings.Repeat("cd", 20)
+	if err := d.l.sys.SetRoot(other); err != nil {
+		t.Fatal(err)
+	}
+	d.refused(t, d.request(t, d.invite, d.alicePriv), other, "--all-sites")
+	noFolderState(t, d.l.dir)
 }

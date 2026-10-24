@@ -450,31 +450,28 @@ func TestStateFiles(t *testing.T) {
 	}
 }
 
-// Current names the head and its revision only while the files are the
-// head's, and reads no state it would have to create.
-func TestCurrentIsTheHeadOnlyWhileTheFilesAreIt(t *testing.T) {
+// HeadIs names the head and its revision only for the head's files, and
+// creates no state.
+func TestHeadIsTheHeadOnlyForItsFiles(t *testing.T) {
 	needTools(t, "git", "ssh-keygen")
 	alice := newOperator(t)
 	sites := storeSites(t, "home-a")
 	f := edit(testFiles(), "1", map[string]string{"alice": alice.pub})
 	l := workstation(t, f)
-	if sha, rev, err := l.Current(); sha != "" || rev != 0 || err != nil {
+	if sha, rev, err := l.HeadIs(f); sha != "" || rev != 0 || err != nil {
 		t.Fatalf("before a publish: %q %d %v", sha, rev, err)
 	}
 	if _, err := os.Stat(filepath.Join(l.Dir, ".paisans")); !os.IsNotExist(err) {
-		t.Fatalf("Current made the state directory: %v", err)
+		t.Fatalf("HeadIs made the state directory: %v", err)
 	}
 	published, _, err := alice.publish(t, l, reach(sites, "home-a"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sha, rev, err := l.Current(); sha != published || rev != 1 || err != nil {
+	if sha, rev, err := l.HeadIs(f); sha != published || rev != 1 || err != nil {
 		t.Fatalf("published: %q %d %v, want %s at revision 1", sha, rev, err, published)
 	}
-	if err := l.WriteFiles(edit(f, "2", map[string]string{"alice": alice.pub})); err != nil {
-		t.Fatal(err)
-	}
-	if sha, rev, err := l.Current(); sha != "" || rev != 0 || err != nil {
+	if sha, rev, err := l.HeadIs(edit(f, "2", map[string]string{"alice": alice.pub})); sha != "" || rev != 0 || err != nil {
 		t.Fatalf("edited: %q %d %v", sha, rev, err)
 	}
 }

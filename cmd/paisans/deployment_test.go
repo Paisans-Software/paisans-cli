@@ -550,6 +550,7 @@ func TestConfigRecoverRefusesAnInjectedID(t *testing.T) {
 func TestConfigDryRunsDoNotSync(t *testing.T) {
 	shas, answer, files := storedHistory(t, 2, 0)
 	l := pullWorkstation(t, answer, shas[0], shas[0], files[0])
+	mirrorSystemCopy(t, l)
 	var runs []string
 	allSitesUp(answer, &runs)
 	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
@@ -669,6 +670,7 @@ func TestConfigRollbackIsReportedWithoutAsking(t *testing.T) {
 	l := pullWorkstation(t, answer, shas[0], shas[1], files[1])
 	seen := "9 " + strings.Repeat("b", 40)
 	os.WriteFile(filepath.Join(l.Dir, ".paisans", "config-seen"), []byte(seen+"\n"), 0o644)
+	sys := mirrorSystemCopy(t, l)
 	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
 	var rep, out bytes.Buffer
 	reporterOverride = ui.NewPlain(&rep, false)
@@ -693,8 +695,10 @@ func TestConfigRollbackIsReportedWithoutAsking(t *testing.T) {
 	if !strings.Contains(rep.String(), "--execute will ask for rollback") {
 		t.Errorf("dry run report:\n%s", rep.String())
 	}
-	if b, _ := os.ReadFile(filepath.Join(l.Dir, ".paisans", "config-seen")); string(b) != seen+"\n" {
-		t.Fatalf("seen changed to %q", b)
+	for _, dir := range []string{l.Dir, sys.Dir} {
+		if b, _ := os.ReadFile(filepath.Join(dir, ".paisans", "config-seen")); string(b) != seen+"\n" {
+			t.Fatalf("seen in %s changed to %q", dir, b)
+		}
 	}
 }
 
@@ -707,6 +711,7 @@ func TestConfigATriedRootRaisesNothing(t *testing.T) {
 	l := configstore.Local{Dir: t.TempDir()}
 	l.WriteFiles(files[0])
 	l.SetHead(shas[0])
+	sys := mirrorSystemCopy(t, l)
 	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
 	var out bytes.Buffer
 	for _, sub := range []string{"log", "pull"} {
@@ -714,8 +719,10 @@ func TestConfigATriedRootRaisesNothing(t *testing.T) {
 			t.Fatalf("%s: %v", sub, err)
 		}
 	}
-	if rev, _, _ := l.Seen(); rev != 0 {
-		t.Fatalf("seen raised to %d", rev)
+	for _, l := range []configstore.Local{l, sys} {
+		if rev, _, _ := l.Seen(); rev != 0 {
+			t.Fatalf("seen in %s raised to %d", l.Dir, rev)
+		}
 	}
 	if err := runDeployment([]string{"pull", "--root", shas[0], "--config", cfgPath, "--execute"}, noTerminalStdin(), &out); err != nil {
 		t.Fatal(err)
@@ -859,14 +866,17 @@ func TestConfigDryRunsRecordNothingSeen(t *testing.T) {
 	saved := agentKeys
 	agentKeys = func() []string { return []string{pub} }
 	t.Cleanup(func() { agentKeys = saved })
+	sys := mirrorSystemCopy(t, l)
 	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
 	var out bytes.Buffer
 	for _, sub := range []string{"pull", "log", "publish"} {
 		if err := runDeployment([]string{sub, "--config", cfgPath}, noTerminalStdin(), &out); err != nil {
 			t.Fatalf("%s: %v", sub, err)
 		}
-		if rev, _, _ := l.Seen(); rev != 0 {
-			t.Fatalf("a %s dry run raised seen to %d", sub, rev)
+		for _, l := range []configstore.Local{l, sys} {
+			if rev, _, _ := l.Seen(); rev != 0 {
+				t.Fatalf("a %s dry run raised seen in %s to %d", sub, l.Dir, rev)
+			}
 		}
 	}
 }
@@ -912,5 +922,55 @@ func TestPublishFirstVersionFromOneSiteAsksNothing(t *testing.T) {
 	}
 	if !took {
 		t.Fatalf("the version did not reach home-a: %q", runs)
+	}
+}
+
+// log judges from the system copy's pinned root and gathers into its store,
+// whatever the folder holds, and writes nothing into the folder or the
+// system copy's files and head. With no draft it reads the sites from the
+// system copy's files.
+func TestLogReadsSystemCopy(t *testing.T) {
+	shas, answer, files := storedHistory(t, 2, 0)
+	recoverHosts(t, answer)
+	allSitesUp(answer, nil)
+	w := newWorkstation(t, files[0])
+	if err := w.sys.SetRoot(shas[0]); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.sys.SetHead(shas[0]); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := runDeployment([]string{"log", "--config", w.config()}, noTerminalStdin(), &out); err != nil {
+		t.Fatal(problemText(err), err)
+	}
+	if !strings.Contains(out.String(), "root "+shas[0]) || !strings.Contains(out.String(), shas[1][:12]+"  ") {
+		t.Fatalf("log:\n%s", out.String())
+	}
+	noFolderState(t, w.dir)
+	cache, ok, err := w.sys.HeldStore()
+	if _, ferr := cache.Files(shas[1]); err != nil || !ok || ferr != nil {
+		t.Fatalf("the system copy's store does not hold %s: %v", shas[1], err)
+	}
+	if h, _ := w.sys.Head(); h != shas[0] {
+		t.Fatalf("log moved the head to %s", h)
+	}
+	if got, _ := w.sys.Files(); !got.Equal(files[0]) {
+		t.Fatal("log changed the system copy's files")
+	}
+	if rev, _, _ := w.sys.Seen(); rev != 0 {
+		t.Fatalf("log raised seen to %d", rev)
+	}
+
+	empty := t.TempDir()
+	out.Reset()
+	if err := runDeployment([]string{"log", "--config", filepath.Join(empty, "paisans-stack.yaml")}, noTerminalStdin(), &out); err != nil {
+		t.Fatal(problemText(err), err)
+	}
+	if !strings.Contains(out.String(), "root "+shas[0]) {
+		t.Fatalf("log with no draft:\n%s", out.String())
+	}
+	if entries, _ := os.ReadDir(empty); len(entries) != 0 {
+		t.Fatalf("the empty folder holds %v", entries)
 	}
 }

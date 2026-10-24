@@ -263,16 +263,17 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 const shownVersions = 3
 
 // removedClientName is the name app's client is looked for by, and where it
-// came from: the name in the newest version of this workstation's
+// came from: the name in the newest version of the system copy's
 // configuration history that declares app, else the name cfg gives app. app
 // has left paisans-stack.yaml, and its display_name with it, so cfg alone
 // names the client after the app. When a client ID is recorded for app, it
 // warns that the name is cfg's, and of the versions passed over because they
 // do not load.
 func removedClientName(r ui.Reporter, configPath string, cfg *config.Config, app, recordedID string) (name, from string, err error) {
+	// A deployment with no system copy here has no history to read.
 	var found configstore.Declaration
-	if l, err := workstationOf(configPath); err == nil {
-		if found, err = l.Declaring(app); err != nil {
+	if sys, _, _, err := systemFor(configPath, ""); err == nil {
+		if found, err = sys.Declaring(app); err != nil {
 			return "", "", fmt.Errorf("reading this workstation's configuration history for %s: %w", app, err)
 		}
 	}

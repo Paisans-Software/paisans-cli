@@ -7,11 +7,14 @@ import (
 	"io"
 	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/draft"
 	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -83,18 +86,17 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 	if err != nil {
 		return err
 	}
-	l, err := workstationOf(*configPath)
+	d, err := draftAt(*configPath)
 	if err != nil {
 		return err
 	}
-	// Where the files are not there and an answer left an invite pending,
+	// Where the folder holds no draft and an answer left an invite pending,
 	// register joins: the invite names the root and the key. --key or --root
 	// without --id is a plain register, which a pending invite does not
 	// take over.
-	if l.HasFiles() && *id != "" {
+	if l := (configstore.Local{Dir: d.Dir}); l.HasFiles() && *id != "" {
 		return &ui.Problem{Hint: "--id selects a pending invite to join, and " + ui.ShortPath(l.Dir) + " holds the files", Explain: "A join writes the files into a directory without them. Here register registers, and reads the deployment from " + config.FileName + "; run it without --id."}
-	}
-	if !l.HasFiles() && (*id != "" || (*keyPath == "" && *root == "")) {
+	} else if !l.HasFiles() && (*id != "" || (*keyPath == "" && *root == "")) {
 		invite, ok, err := selectPending(*id)
 		if err != nil {
 			return err
@@ -106,27 +108,92 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 			return joinInvite(reporter(), l, invite, *execute, ans, stdin, stdout)
 		}
 	}
-	a, err := anchorFor(l, *root)
+	sys, cfg, done, err := registerSystem(*configPath, *id, d, *root, *execute)
+	if err != nil {
+		return err
+	}
+	defer done()
+	a, err := anchorFor(sys, *root)
 	if err != nil {
 		return err
 	}
 	pin := a.Root
-	cfg, err := registerConfig(l, *configPath, pin)
-	if err != nil {
-		return err
+	if cfg == nil {
+		if cfg, err = registerConfig(sys, pin); err != nil {
+			return err
+		}
 	}
-	key, err := registerKey(l, cfg, *keyPath, stdout)
+	key, err := registerKey(sys, cfg, *keyPath, stdout)
 	if err != nil {
 		return err
 	}
 	k, _, _ := config.ParseKeyLine(key)
 	r := reporter()
 	r.Section("register " + k.Fingerprint + " for " + *configPath)
-	return attest(r, l, cfg, key, pin, *execute, ans, stdin, stdout)
+	return attest(r, sys, cfg, key, pin, *execute, ans, stdin, stdout)
+}
+
+// registerSystem is the system copy register attests from, locked with
+// execute, and done, which releases the lock. A draft of a deployment with
+// no system copy here is refused, as systemFor refuses it, unless root pins
+// the root: a pinned root anchors alone, so register makes the system copy,
+// reading the sites from the draft (cfg), and takes it away again when the
+// run records no head in it, as a dry run does not.
+func registerSystem(configPath, id string, d draft.Draft, root string, execute bool) (sys configstore.Local, cfg *config.Config, done func(), err error) {
+	done = func() {}
+	var deploymentID string
+	created := false
+	if root != "" && d.Has() {
+		// A draft that does not load, or names no deployment, is left to
+		// systemFor to report.
+		if c, err := config.Load(filepath.Join(d.Dir, config.FileName)); err == nil && deployment.ValidID(c.ID) && (id == "" || id == c.ID) {
+			st, err := openStore()
+			if err != nil {
+				return sys, nil, done, err
+			}
+			_, ok, err := st.Held(c.ID)
+			if err != nil {
+				return sys, nil, done, err
+			}
+			if !ok {
+				if sys, err = st.Local(c.ID); err != nil {
+					return sys, nil, done, err
+				}
+				cfg, deploymentID, created = c, c.ID, true
+			}
+		}
+	}
+	if !created {
+		if sys, _, deploymentID, err = systemFor(configPath, id); err != nil {
+			return sys, nil, done, err
+		}
+	}
+	release := func() {}
+	done = func() {
+		if created {
+			if head, err := sys.Head(); err != nil || head == "" {
+				os.RemoveAll(sys.Dir)
+			}
+		}
+		release()
+	}
+	if execute {
+		st, err := openStore()
+		if err == nil {
+			release, err = st.Lock(deploymentID)
+		}
+		if err != nil {
+			release = func() {}
+			done()
+			return sys, nil, func() {}, err
+		}
+	}
+	return sys, cfg, done, nil
 }
 
 // attest signs, with execute, an attestation of the sites' newest version
-// with key, once it equals the files l holds, pushes it to cfg's sites, and
+// with key, once it equals the files l holds (the system copy's, or the
+// join's folder), pushes it to cfg's sites, and
 // records the key. Trust starts from pin and from any version key signed.
 func attest(r ui.Reporter, l configstore.Local, cfg *config.Config, key, pin string, execute bool, ans answerer, stdin io.Reader, stdout io.Writer) error {
 	k, _, _ := config.ParseKeyLine(key)
@@ -202,15 +269,15 @@ func attest(r ui.Reporter, l configstore.Local, cfg *config.Config, key, pin str
 }
 
 // registerConfig is the configuration register reads the operators and the
-// sites from: the local paisans-stack.yaml, or, on a workstation without the files
-// and with a root pinned, the version the pin leads to in the workstation's
-// own store, which a recovery's dry run fills.
-func registerConfig(l configstore.Local, path, pin string) (*config.Config, error) {
+// sites from: the system copy's paisans-stack.yaml, or, in a system copy
+// without the files and with a root pinned, the version the pin leads to in
+// its store, which a recovery's dry run fills.
+func registerConfig(l configstore.Local, pin string) (*config.Config, error) {
 	if l.HasFiles() {
-		return config.Load(path)
+		return config.Load(filepath.Join(l.Dir, config.FileName))
 	}
 	if pin == "" {
-		return nil, &ui.Problem{Hint: "there are no configuration files here", Explain: "operator register attests the version you hold, and reads the sites from " + config.FileName + ". Run it beside your files with --config, or pin the first version you trust with --root <sha> to attest the version it leads to and write its files."}
+		return nil, &ui.Problem{Hint: "the system copy holds no configuration files", Explain: "operator register attests the version this workstation holds, and reads the sites from its " + config.FileName + ", and " + l.Dir + " has none. Pin the first version you trust with --root <sha> to attest the version it leads to and write its files."}
 	}
 	g, err := configstore.GatherAnchored(l, nil, "", configstore.Anchor{Root: pin}, configstore.GatherOptions{})
 	var rb *configstore.RollbackError
@@ -235,7 +302,7 @@ func registerConfig(l configstore.Local, path, pin string) (*config.Config, erro
 }
 
 // registerKey is the public key line register signs with: the one --key
-// names, else the one .paisans/signing-key records, else the one key in the
+// names, else the one the system copy records, else the one key in the
 // ssh-agent that an operator of cfg lists. Which operator the operator is, and
 // which key, are recorded and used from then on, so neither is guessed.
 func registerKey(l configstore.Local, cfg *config.Config, keyPath string, stdout io.Writer) (string, error) {

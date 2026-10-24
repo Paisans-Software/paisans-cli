@@ -16,7 +16,9 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
+	"github.com/paisans-software/paisans-cli/internal/draft"
 	"github.com/paisans-software/paisans-cli/internal/keystore"
+	"github.com/paisans-software/paisans-cli/internal/localstore"
 	"github.com/paisans-software/paisans-cli/internal/operatorinvite"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -104,10 +106,10 @@ func newJoinFixture(t *testing.T, listed, opens bool) joinFixture {
 
 	// alice's workstation writes the invite.
 	alice := registerWorkstation(t, answer, f1, nil, alicePub)
-	if err := alice.SetSigningKey(alicePub); err != nil {
+	if err := alice.sys.SetSigningKey(alicePub); err != nil {
 		t.Fatal(err)
 	}
-	if err := alice.SetRoot(v1); err != nil {
+	if err := alice.sys.SetRoot(v1); err != nil {
 		t.Fatal(err)
 	}
 	signFromFile(t, alicePriv)
@@ -116,8 +118,9 @@ func newJoinFixture(t *testing.T, listed, opens bool) joinFixture {
 		t.Fatal(problemText(err))
 	}
 
-	// carol's workstation holds what her answer recorded, and an empty
-	// folder.
+	// carol's workstation, a data directory of its own, holds what her
+	// answer recorded, and an empty folder.
+	withDataDir(t)
 	dir := t.TempDir()
 	if err := recordAgeBinding(fixtureDeploymentID, ageKey{Recipient: carol.Recipient().String(), Source: joinAgeSource}); err != nil {
 		t.Fatal(err)
@@ -470,16 +473,23 @@ func TestInviteAnswerAcceptJoin(t *testing.T) {
 		t.Fatal(err)
 	}
 	alice := registerWorkstation(t, s.answer(t), f1, nil, alicePub)
-	if err := alice.SetSigningKey(alicePub); err != nil {
+	if err := alice.sys.SetSigningKey(alicePub); err != nil {
 		t.Fatal(err)
 	}
-	if err := alice.SetRoot(v1); err != nil {
+	if err := alice.sys.SetRoot(v1); err != nil {
 		t.Fatal(err)
 	}
+	// Each workstation has a data directory of its own.
+	aliceData, carolData := os.Getenv(localstore.DirVariable), t.TempDir()
 	realSecrets(t)
 	saved, savedSign := agentKeys, configSignWith
 	t.Cleanup(func() { agentKeys, configSignWith = saved, savedSign })
 	as := func(keys *keystore.Memory, priv, pub string) {
+		data := carolData
+		if keys == aliceKeys {
+			data = aliceData
+		}
+		t.Setenv(localstore.DirVariable, data)
 		config.AgeKeystore = keys
 		agentKeys = func() []string { return []string{pub} }
 		configSignWith = func(string) string { return priv }
@@ -515,13 +525,13 @@ func TestInviteAnswerAcceptJoin(t *testing.T) {
 
 	// 3. alice accepts it.
 	as(aliceKeys, alicePriv, alicePub)
-	if err := runOperatorAdd([]string{"--request", requestFile, "--config", filepath.Join(alice.Dir, config.FileName), "--all-sites"}, notATerminal(t), &bytes.Buffer{}); err != nil {
+	if err := runOperatorAdd([]string{"--request", requestFile, "--config", alice.config(), "--all-sites"}, notATerminal(t), &bytes.Buffer{}); err != nil {
 		t.Fatal(problemText(err))
 	}
 
 	// 4. alice's files become the sites' newest version, as apply publishes
 	// them.
-	accepted, err := alice.Files()
+	accepted, err := draft.Draft{Dir: alice.dir}.Files()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -616,16 +626,16 @@ func TestRegisterRefusesIDBesideFiles(t *testing.T) {
 	}
 }
 
-// --key or --root without --id registers plainly, whatever is pending: a
-// pinned root in an empty folder reads the sites from this workstation's
-// store, which holds nothing here.
+// --key or --root without --id registers plainly, whatever is pending: in
+// an empty folder it registers the workstation's system copy, and there is
+// none here.
 func TestRegisterWithRootSkipsPendingInvites(t *testing.T) {
 	f := newJoinFixture(t, true, true)
 	plain := func(t *testing.T) {
 		t.Helper()
 		_, err := f.register(t, "--root", f.root)
 		text := problemText(err)
-		if err == nil || !strings.Contains(text, "pinned root is not in this workstation's store") || strings.Contains(text, "join") || strings.Contains(text, "pending") {
+		if err == nil || !strings.Contains(text, "this workstation holds no deployment") || strings.Contains(text, "pending") {
 			t.Fatalf("got %s", text)
 		}
 	}
