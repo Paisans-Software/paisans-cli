@@ -114,7 +114,7 @@ func runOperatorAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 		return &ui.Problem{Hint: "validate refuses the file with " + op.ID + " added", Explain: "Nothing was written."}
 	}
 	s := r.Step("declare " + op.ID + " in " + *configPath)
-	if err := config.AddOperator(*configPath, op.ID, entry, op.Sites); err != nil {
+	if err := config.WriteDeclaration(*configPath, out); err != nil {
 		s.Fail(err)
 		return err
 	}
@@ -207,9 +207,4 @@ func newFindings(before, after validate.Result) validate.Result {
 	return out
 }
 
-func siteSummary(sites []string) string {
-	if len(sites) == 0 {
-		return "on no site"
-	}
-	return "on " + strings.Join(sites, ", ")
-}
+func siteSummary(sites []string) string { return "on " + strings.Join(sites, ", ") }

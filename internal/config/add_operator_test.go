@@ -186,3 +186,38 @@ func TestAddOperatorParses(t *testing.T) {
 		}
 	}
 }
+
+// A flow list with a trailing comma, or none at all, gains the name without
+// a stray comma; operators: with nothing under it gains the entry beneath.
+func TestAddOperatorFlowAndEmpty(t *testing.T) {
+	for name, tc := range map[string]struct{ doc, want string }{
+		"trailing comma": {"operators:\n  alice: {}\nsites:\n  a:\n    ssh:\n      keys: [alice,]\n", "keys: [alice, carol]\n"},
+		"empty flow":     {"operators:\n  alice: {}\nsites:\n  a:\n    ssh:\n      keys: [ ]\n", "keys: [carol ]\n"},
+		"bare operators": {"operators:\nsites:\n  a:\n    ssh:\n      keys: []\n", "operators:\n  carol:\n    name: Carol Example\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, err := AddOperatorBytes([]byte(tc.doc), "carol", carol, []string{"a"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(out), tc.want) {
+				t.Errorf("got:\n%s", out)
+			}
+			var doc struct {
+				Operators map[string]Operator `yaml:"operators"`
+			}
+			if err := yaml.Unmarshal(out, &doc); err != nil || doc.Operators["carol"] != carol {
+				t.Errorf("parsed %+v, %v:\n%s", doc.Operators, err, out)
+			}
+		})
+	}
+}
+
+// A name YAML reads as something else is refused, since it is written plain.
+func TestAddOperatorRefusesNonStringNames(t *testing.T) {
+	for _, id := range []string{"null", "true", "false", "123", "1e3"} {
+		if _, err := AddOperatorBytes([]byte(operatorDoc), id, carol, nil); err == nil {
+			t.Errorf("%s accepted", id)
+		}
+	}
+}

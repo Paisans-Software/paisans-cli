@@ -3,34 +3,25 @@ package config
 import (
 	"bytes"
 	"fmt"
-	"os"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
-// AddOperator writes operators.<id> into the declaration at path and names
-// id in the ssh.keys of each of sites, and leaves every other byte as it was.
-// It is how `operator add` declares an operator. The entry goes after the
-// last operator, at its indentation; a site already naming id is left as it
-// is. A layout it cannot edit in place, such as a flow mapping, is refused
-// rather than reformatted, and nothing is written.
-func AddOperator(path, id string, op Operator, sites []string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("reading %s: %w", path, err)
-	}
-	out, err := AddOperatorBytes(data, id, op, sites)
-	if err != nil {
-		return fmt.Errorf("%s: %w", path, err)
-	}
-	return replaceFile(path, out)
-}
+// WriteDeclaration replaces the declaration at path with data, as every
+// in-place edit here does: through a file beside it, renamed over it, with
+// its mode kept. A command that checked the edited bytes writes those bytes.
+func WriteDeclaration(path string, data []byte) error { return replaceFile(path, data) }
 
-// AddOperatorBytes is AddOperator on a declaration held in memory, so a
-// command can check the result before writing it.
+// AddOperatorBytes is data with operators.<id> written in and id named in
+// the ssh.keys of each of sites, every other byte as it was, so a command can
+// check the result before writing it with WriteDeclaration. It is how
+// `operator add` declares an operator. The entry goes after the last
+// operator, at its indentation; a site already naming id is left as it is. A
+// layout it cannot edit in place, such as a flow mapping, is refused rather
+// than reformatted.
 func AddOperatorBytes(data []byte, id string, op Operator, sites []string) ([]byte, error) {
-	if !keyName.MatchString(id) {
+	if !keyName.MatchString(id) || !PlainString(id) {
 		return nil, fmt.Errorf("%q is not an operator name this toolkit accepts", id)
 	}
 	out, err := addOperatorEntry(data, id, op)
@@ -90,6 +81,15 @@ func addOperatorEntry(data []byte, id string, op Operator) ([]byte, error) {
 		text := "operators:" + nl + operatorEntry(id, op, "  ", nl) + nl
 		return splice(data, edit{at, at, text}), nil
 	}
+	if operators.Kind == yaml.ScalarNode && operators.Tag == "!!null" && operators.Value == "" && operators.Line == operatorsKey.Line {
+		// operators: with nothing after it: the entry goes on the next line.
+		at := lines.next(operatorsKey.Line)
+		if operatorsKey.Line == len(lines) {
+			data = append(data, nl...)
+			at = len(data)
+		}
+		return splice(data, edit{at, at, operatorEntry(id, op, "  ", nl)}), nil
+	}
 	if operators.Kind != yaml.MappingNode || operators.Style&yaml.FlowStyle != 0 || len(operators.Content) == 0 {
 		return nil, fmt.Errorf("operators: is not a block mapping this command can edit in place")
 	}
@@ -123,8 +123,11 @@ func addSiteKey(data []byte, site, id string) ([]byte, error) {
 	if walk(top, "sites", site) == nil {
 		return nil, fmt.Errorf("sites.%s is not declared", site)
 	}
-	if list == nil || list.Kind != yaml.SequenceNode || len(list.Content) == 0 {
+	if list == nil || list.Kind != yaml.SequenceNode {
 		return nil, fmt.Errorf("sites.%s.ssh.keys is not a list this command can add to. Give the site its ssh section, with its keys, first", site)
+	}
+	if len(list.Content) == 0 && list.Style&yaml.FlowStyle == 0 {
+		return nil, fmt.Errorf("sites.%s.ssh.keys is an empty list this command cannot add to; write it as [%s]", site, id)
 	}
 	for _, item := range list.Content {
 		if item.Kind == yaml.ScalarNode && item.Value == id {
@@ -132,8 +135,8 @@ func addSiteKey(data []byte, site, id string) ([]byte, error) {
 		}
 	}
 	lines := lineStarts(data)
-	final := list.Content[len(list.Content)-1]
 	if list.Style&yaml.FlowStyle == 0 {
+		final := list.Content[len(list.Content)-1]
 		for _, other := range list.Content {
 			if other != final && other.Line == final.Line {
 				return nil, fmt.Errorf("sites.%s.ssh.keys has more than one item on line %d; write one per line", site, final.Line)
@@ -159,8 +162,10 @@ func addSiteKey(data []byte, site, id string) ([]byte, error) {
 		}
 		return splice(data, edit{at, at, dash + id + nl}), nil
 	}
-	if list.Line != final.Line {
-		return nil, fmt.Errorf("sites.%s.ssh.keys is a flow list over several lines; write it on one line", site)
+	for _, item := range list.Content {
+		if item.Line != list.Line {
+			return nil, fmt.Errorf("sites.%s.ssh.keys is a flow list over several lines; write it on one line", site)
+		}
 	}
 	line := lines.text(data, list.Line)
 	open := lines.start(list.Line) + len(string([]rune(line)[:list.Column-1]))
@@ -174,6 +179,13 @@ func addSiteKey(data []byte, site, id string) ([]byte, error) {
 	at := open + closing
 	for at > open && data[at-1] == ' ' {
 		at--
+	}
+	// After [ or a trailing comma the name needs no comma of its own.
+	switch data[at-1] {
+	case '[':
+		return splice(data, edit{at, at, id}), nil
+	case ',':
+		return splice(data, edit{at, at, " " + id}), nil
 	}
 	return splice(data, edit{at, at, ", " + id}), nil
 }

@@ -78,12 +78,24 @@ func CheckNewOperator(op NewOperator, d Declared) error {
 			return &FlagError{"--key " + keyLabel(k), err}
 		}
 	}
+	if len(op.Sites) == 0 {
+		return &FlagError{"--site", errNoSite(d)}
+	}
 	for i, s := range op.Sites {
 		if err := checkSite(d.Sites, op.Sites[:i], s); err != nil {
 			return &FlagError{"--site " + s, err}
 		}
 	}
 	return nil
+}
+
+// errNoSite is why an operator needs a site: one who can log in to none can
+// run nothing.
+func errNoSite(d Declared) error {
+	if len(d.Sites) == 0 {
+		return errors.New("the deployment declares no site. Declare one, with its ssh section, first")
+	}
+	return errors.New("give at least one: an operator who can log in to no site can run nothing")
 }
 
 // AskNewOperator asks for whatever of op is missing or would be refused,
@@ -103,11 +115,22 @@ func AskNewOperator(p *Prompter, op NewOperator, d Declared) (NewOperator, error
 		return op, err
 	}
 	check := keyCheck(keys)
-	if !allPass(op.Keys, check) {
-		if op.Keys, err = p.Lines("SSH public keys", nil, check); err != nil {
+	// A refused key is said and dropped, and the rest are kept as the
+	// default, so a key given once need not be pasted again.
+	var kept []string
+	for _, k := range op.Keys {
+		if err := check(kept, k); err != nil {
+			p.Say("SSH public key %s: %v", keyLabel(k), err)
+			continue
+		}
+		kept = append(kept, k)
+	}
+	if len(kept) == 0 || len(kept) < len(op.Keys) {
+		if kept, err = p.Lines("SSH public keys", kept, check); err != nil {
 			return op, err
 		}
 	}
+	op.Keys = kept
 	if len(op.Sites) > 0 {
 		for i, s := range op.Sites {
 			if err := checkSite(d.Sites, op.Sites[:i], s); err != nil {
@@ -117,7 +140,7 @@ func AskNewOperator(p *Prompter, op NewOperator, d Declared) (NewOperator, error
 		return op, nil
 	}
 	if len(d.Sites) == 0 {
-		return op, nil
+		return op, &FlagError{"--site", errNoSite(d)}
 	}
 	all, err := p.YesNo(fmt.Sprintf("Can %s log in to every site (%s)?", op.ID, strings.Join(d.Sites, ", ")), true)
 	if err != nil {
@@ -127,13 +150,18 @@ func AskNewOperator(p *Prompter, op NewOperator, d Declared) (NewOperator, error
 		op.Sites = slices.Clone(d.Sites)
 		return op, nil
 	}
-	for _, s := range d.Sites {
-		yes, err := p.YesNo(fmt.Sprintf("Can %s log in to %s?", op.ID, s), false)
-		if err != nil {
-			return op, err
+	for len(op.Sites) == 0 {
+		for _, s := range d.Sites {
+			yes, err := p.YesNo(fmt.Sprintf("Can %s log in to %s?", op.ID, s), false)
+			if err != nil {
+				return op, err
+			}
+			if yes {
+				op.Sites = append(op.Sites, s)
+			}
 		}
-		if yes {
-			op.Sites = append(op.Sites, s)
+		if len(op.Sites) == 0 {
+			p.Say("%v.", errNoSite(d))
 		}
 	}
 	return op, nil
@@ -149,18 +177,6 @@ func ask(p *Prompter, q, given string, check func(string) error) (string, error)
 		p.Say("%s %q: %v", q, given, check(given))
 	}
 	return p.Text(q, "", check)
-}
-
-func allPass(lines []string, check func(got []string, s string) error) bool {
-	if len(lines) == 0 {
-		return false
-	}
-	for i, l := range lines {
-		if check(lines[:i], l) != nil {
-			return false
-		}
-	}
-	return true
 }
 
 func checkSite(sites, got []string, s string) error {

@@ -45,6 +45,11 @@ func checkOperatorID(s string) error {
 	if strings.ContainsAny(s[len(s)-1:], "._-") {
 		return errors.New("Pocket ID refuses a username ending in a dot, an underscore or a hyphen")
 	}
+	// The name is written plain, as a key and in each site's ssh.keys, so it
+	// must read back as itself rather than as null, a boolean or a number.
+	if !config.PlainString(s) {
+		return fmt.Errorf("YAML reads %s as something other than a name; choose another", s)
+	}
 	return nil
 }
 

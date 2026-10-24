@@ -236,3 +236,42 @@ func TestOperatorAddWritesNothingWhenInputEnds(t *testing.T) {
 		t.Error("the file changed")
 	}
 }
+
+// A refused --key at a terminal is said and dropped; the keys that pass are
+// kept, and Enter keeps them.
+func TestOperatorAddKeepsTheKeysThatPass(t *testing.T) {
+	path := createdDeployment(t)
+	in := answersFile(t, "", "")
+	var out bytes.Buffer
+	err := runOperatorAdd([]string{"carol", "--name", "Carol Example", "--email", "carol@example.org",
+		"--key", createCarolKey, "--key", createKey, "--config", path}, in, &out)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "this is alice's key") {
+		t.Errorf("alice's key not refused:\n%s", out.String())
+	}
+	if got := loadOperators(t, path).Operators["carol"].Keys; got != createCarolKey+"\n" {
+		t.Errorf("keys = %q", got)
+	}
+}
+
+// An operator must be given a site: answering no to every one asks again.
+func TestOperatorAddAsksAgainForNoSite(t *testing.T) {
+	path := createdDeployment(t)
+	in := answersFile(t, "n", "n", "n", "y")
+	var out bytes.Buffer
+	err := runOperatorAdd([]string{"carol", "--name", "Carol Example", "--email", "carol@example.org",
+		"--key", createCarolKey, "--config", path}, in, &out)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "can run nothing") {
+		t.Errorf("no reason given:\n%s", out.String())
+	}
+	for name, site := range loadOperators(t, path).Sites {
+		if !siteNames(site, "carol") {
+			t.Errorf("sites.%s.ssh.keys does not name carol", name)
+		}
+	}
+}
