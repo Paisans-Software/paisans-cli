@@ -821,7 +821,7 @@ func TestConfigRollbackThenRefusedPullLeavesSeen(t *testing.T) {
 // revision seen.
 func TestConfigRefusedPullWithRootRecordsNothing(t *testing.T) {
 	shas, answer, files := storedHistory(t, 2, 0)
-	recoverHosts(t, answer) // home-a alone answers: one of four sites
+	recoverHosts(t, answer)
 	l := configstore.Local{Dir: t.TempDir()}
 	edited := files[0]
 	edited.Paisans = append(append([]byte{}, edited.Paisans...), "# local edit\n"...)

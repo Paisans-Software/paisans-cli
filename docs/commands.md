@@ -632,10 +632,10 @@ paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # o
   on whichever sites answer, once at least one does, and name each site that
   did not, with its error. A command that reaches no site is refused.
 * **Words typed at a terminal:** `rollback` when the newest version is older
-  than one this workstation has seen. `--yes` types it. An accepted `rollback` re-bases `.paisans/config-seen` to the head
-  chosen once the command commits its change; a run that stops leaves it as it
-  was. `log` asks for neither: it warns and lists. A dry run says what
-  `--execute` will ask.
+  than one this workstation has seen. `--yes` types it. An accepted
+  `rollback` re-bases `.paisans/config-seen` to the head chosen once the
+  command commits its change; a run that stops leaves it as it was. `log` does
+  not ask: it warns and lists. A dry run says what `--execute` will ask.
 * **In `deployment apply`:** `deployment apply` gathers before its review and refuses a fork or a base
   older than the sites' newest version, naming `deployment pull`. With `--execute`
   it publishes the version it applies and each host records it; a host whose
@@ -814,10 +814,10 @@ paisans operator register --key ~/.ssh/id_ed25519.pub --execute
   the pin leads to and writes its files. A head your key signed already is
   pushed again, not attested again.
 * **`--execute`:** signs, pushes the attestation to every site it reaches, and
-  writes the key to `.paisans/signing-key`; `deployment publish` and `deployment apply` sign
-  with it from then on. It goes ahead on whichever sites answer.
-  Without it, nothing is signed or recorded, and no
-  site is changed.
+  writes the key to `.paisans/signing-key`; `deployment publish` and
+  `deployment apply` sign with it from then on. It goes ahead on whichever
+  sites answer. Without it, nothing is signed or recorded, and no site is
+  changed.
 
 See *Every site keeps signed copies of the configuration* in `README.md`.
 
@@ -1368,9 +1368,9 @@ images it superseded* in `README.md`).
   ask for. Each step records its part once it has succeeded.
 * **Configuration store:** before the review, every site's versions are gathered
   (under `configuration store`) and a fork, a base older than the sites' newest
-  version, or a key no operator lists is refused, naming `deployment pull` or `deployment
-  publish --merge`. It goes ahead on whichever sites answer. A dry run changes no site and starts no
-  sync. After the approval, a host whose record holds a newer revision, or
+  version, or a key no operator lists is refused, naming `deployment pull` or
+  `deployment publish --merge`. It goes ahead on whichever sites answer. A dry
+  run changes no site and starts no sync. After the approval, a host whose record holds a newer revision, or
   another version at the same revision, asks for `rollback`. `--execute` then
   publishes the version, signed with the recorded key, after the `site prepare`
   steps; a version that reaches no site refuses, naming `site prepare`. See

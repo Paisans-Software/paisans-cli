@@ -4569,7 +4569,10 @@ and nothing is pruned.
    store: those the configuration names, or, for a recovery, those the trusted heads
    name, not only the hosts given on the command line.
 3. The copies are combined, and only then are the rules applied and the head
-   chosen, so a site serving an old version is outvoted by the rest.
+   chosen, so a site serving an old version is superseded by the newer versions the
+   rest hold.
+4. Each site that did not answer is named with its error, and a command that
+   reaches no site is refused.
 
 ### Commands
 

@@ -945,8 +945,8 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 		return &ui.Problem{Hint: "no host named holds a version", Explain: "Nothing was recovered. Name another host with --from.", Cause: configstore.UnreachedError(g)}
 	}
 	// Every site a trusted head names is reached, not only the hosts given,
-	// so a host serving an old version is outvoted by the rest. With a fork,
-	// every head's sites are reached.
+	// so a host serving an old version is superseded by the newer versions the
+	// rest hold. With a fork, every head's sites are reached.
 	sites, err := recoverSites(l, g, deploymentID)
 	if err != nil {
 		return err

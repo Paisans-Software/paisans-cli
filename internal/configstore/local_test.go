@@ -317,8 +317,8 @@ func TestTwoOperatorsFromOneHeadForkAndMergeResolvesIt(t *testing.T) {
 	}
 }
 
-// Only a site reached directly counts toward the majority, and exactly half
-// is not one.
+// Only a site reached directly is Direct; a version arriving through another
+// site's sync makes that site a holder and nothing more.
 func TestGatherCountsOnlyDirectReaches(t *testing.T) {
 	needTools(t, "git", "ssh-keygen")
 	alice := newOperator(t)
@@ -345,10 +345,6 @@ func TestGatherCountsOnlyDirectReaches(t *testing.T) {
 	}
 	if direct != 2 || !slices.Equal(g.Holders[sha], []string{"home-b"}) {
 		t.Fatalf("direct %d, holders %v", direct, g.Holders)
-	}
-	g, err = gather(l, reach(sites, "home-a", "home-b", "vm", "watch"), testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
-	if err != nil {
-		t.Fatalf("two of three: %v", err)
 	}
 }
 

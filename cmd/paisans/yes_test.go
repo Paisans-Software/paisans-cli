@@ -54,8 +54,8 @@ func TestWithoutYesTheWordIsStillTyped(t *testing.T) {
 	}
 }
 
-// The words that go through helpers of their own: the
-// app's name, the site's name, and each question of a removal with --host-gone.
+// The words that go through helpers of their own: the app's name, the site's
+// name, and each question of a removal with --host-gone.
 func TestYesAnswersTheWordsBehindTheirHelpers(t *testing.T) {
 	withTerminal(t, false)
 	var out bytes.Buffer
