@@ -22,8 +22,9 @@ import (
 // yet: the id from paisans-stack.yaml, the version from the system copy's
 // head, when the draft is still that version's files. What the run cannot
 // know yet shows as pending: an id init has still to write, or files no
-// version holds until the run publishes them. A run that opened with either pending names both again once it ends,
-// finished or stopped, with what it learned on the way.
+// version holds until the run publishes them. A run that opened with
+// either pending names both again once it ends, finished or stopped, with
+// what it learned on the way.
 
 // runIdentity is the deployment id and the version a run applies, "" and 0
 // while not known.

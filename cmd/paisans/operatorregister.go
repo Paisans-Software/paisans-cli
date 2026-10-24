@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
@@ -113,11 +114,7 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) (err 
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if derr := done(); err == nil {
-			err = derr
-		}
-	}()
+	defer func() { err = done(err) }()
 	a, err := anchorFor(sys, *root)
 	if err != nil {
 		return err
@@ -147,7 +144,8 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) (err 
 }
 
 // registerSystem is the system copy register attests from, and done, which
-// ends the run's hold on it. A draft of a deployment with no system copy
+// ends the run's hold on it and returns the run's error, runErr, as it
+// should be reported. A draft of a deployment with no system copy
 // here is refused, as systemFor refuses it, unless root pins the root: a
 // pinned root anchors alone, so register makes the system copy, and sites is
 // the draft's configuration, which names the sites to gather from. Making
@@ -156,8 +154,8 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) (err 
 // directory; done puts that in place as the system copy only when the run
 // recorded a head there, as a dry run does not, and removes it. Otherwise
 // --execute holds the lock until done.
-func registerSystem(r ui.Reporter, configPath, id string, d draft.Draft, root string, execute bool) (sys configstore.Local, sites *config.Config, done func() error, err error) {
-	done = func() error { return nil }
+func registerSystem(r ui.Reporter, configPath, id string, d draft.Draft, root string, execute bool) (sys configstore.Local, sites *config.Config, done func(runErr error) error, err error) {
+	done = func(runErr error) error { return runErr }
 	st, err := openStore()
 	if err != nil {
 		return sys, nil, done, err
@@ -182,18 +180,28 @@ func registerSystem(r ui.Reporter, configPath, id string, d draft.Draft, root st
 				return sys, nil, done, err
 			}
 			sys = configstore.Local{Dir: staging}
-			return sys, c, func() error {
+			dest := filepath.Join(st.Base, "deployments", c.ID)
+			return sys, c, func(runErr error) error {
 				defer release()
-				var settled error
 				if head, err := sys.Head(); err == nil && head != "" {
-					if settled = settle(staging, filepath.Join(st.Base, "deployments", c.ID)); settled != nil {
-						return &ui.Problem{Hint: "the new system copy could not be put in place", Explain: "The attestation was pushed and is recorded in " + staging + ". Move that directory's contents into " + filepath.Join(st.Base, "deployments", c.ID) + ": " + errLine(settled) + ".", Cause: settled}
+					aside, err := settle(staging, dest)
+					if aside != "" {
+						r.Warn("what "+dest+" recorded is moved aside to "+aside, "That directory held no system copy, and the one this run made is in its place. Remove "+aside+" once you know nothing in it is needed.")
+					}
+					if err != nil {
+						what := "and pushed it as reported above"
+						if runErr != nil {
+							what = "and stopped before the sites were known to hold it (" + errLine(runErr) + "); they may not have it"
+						}
+						p := &ui.Problem{Hint: "the new system copy of " + c.ID + " could not be put in place", Explain: "This run recorded its head, " + shortSHA(head) + ", in " + staging + ", " + what + ". Move that directory's contents into " + dest + ", the paisans state directory .paisans last: " + errLine(err) + ".", Cause: err}
+						r.Warn(p.Hint, p.Explain)
+						return p
 					}
 				}
 				if err := os.RemoveAll(staging); err != nil {
 					r.Warn("the directory the run worked in is left in "+staging, errLine(err)+". It holds no system copy; remove it.")
 				}
-				return nil
+				return renamed(runErr, staging, dest)
 			}, nil
 		}
 		if !execute {
@@ -211,33 +219,80 @@ func registerSystem(r ui.Reporter, configPath, id string, d draft.Draft, root st
 			return sys, nil, done, err
 		}
 	}
-	return sys, nil, func() error { release(); return nil }, nil
+	return sys, nil, func(runErr error) error { release(); return runErr }, nil
 }
 
 // settle puts the system copy made in staging at dest: the directory
 // itself when dest is not there, else each of its entries in place of
-// dest's, which holds no system copy.
-func settle(staging, dest string) error {
+// dest's, which holds no system copy. What dest's .paisans held is moved
+// aside, never removed, and aside names where. .paisans, which holds the
+// head, goes in last, so dest is a system copy only once its files are
+// there.
+func settle(staging, dest string) (aside string, err error) {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
-		return err
+		return "", err
 	}
 	if _, err := os.Lstat(dest); errors.Is(err, os.ErrNotExist) {
-		return os.Rename(staging, dest)
+		return "", os.Rename(staging, dest)
 	}
 	entries, err := os.ReadDir(staging)
 	if err != nil {
+		return "", err
+	}
+	const state = ".paisans"
+	var names []string
+	for _, e := range entries {
+		if e.Name() != state {
+			names = append(names, e.Name())
+		}
+	}
+	if len(names) < len(entries) {
+		names = append(names, state)
+	}
+	for _, name := range names {
+		target := filepath.Join(dest, name)
+		if name == state {
+			if _, err := os.Lstat(target); err == nil {
+				aside = filepath.Join(dest, fmt.Sprintf("%s.replaced-%d", state, time.Now().Unix()))
+				if err := os.Rename(target, aside); err != nil {
+					return "", err
+				}
+			}
+		} else if err := os.RemoveAll(target); err != nil {
+			return aside, err
+		}
+		if err := os.Rename(filepath.Join(staging, name), target); err != nil {
+			return aside, err
+		}
+	}
+	return aside, nil
+}
+
+// renamed is err with each mention of the directory from, where the run
+// worked and which is gone once it ends, naming to instead.
+func renamed(err error, from, to string) error {
+	if err == nil {
+		return nil
+	}
+	if p, ok := err.(*ui.Problem); ok {
+		q := *p
+		q.Hint = strings.ReplaceAll(q.Hint, from, to)
+		q.Explain = strings.ReplaceAll(q.Explain, from, to)
+		return &q
+	}
+	if !strings.Contains(err.Error(), from) {
 		return err
 	}
-	for _, e := range entries {
-		if err := os.RemoveAll(filepath.Join(dest, e.Name())); err != nil {
-			return err
-		}
-		if err := os.Rename(filepath.Join(staging, e.Name()), filepath.Join(dest, e.Name())); err != nil {
-			return err
-		}
-	}
-	return nil
+	return renamedError{err, from, to}
 }
+
+type renamedError struct {
+	err      error
+	from, to string
+}
+
+func (e renamedError) Error() string { return strings.ReplaceAll(e.err.Error(), e.from, e.to) }
+func (e renamedError) Unwrap() error { return e.err }
 
 // createdFrom is the draft's configuration when register may make its
 // deployment's system copy: root pins a root and d is a draft that loads,

@@ -11,6 +11,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/localstore"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // registerWorkstation is a workstation whose system copy and draft hold
@@ -424,5 +425,70 @@ func TestRegisterRootKeepsADirectoryWithARecord(t *testing.T) {
 	}
 	if saved, ok, err := st.Load(fixtureDeploymentID); err != nil || !ok || saved.ID != fixtureDeploymentID {
 		t.Fatalf("the record is gone: %+v, %v", saved, err)
+	}
+}
+
+// settle puts the made copy over a directory that holds no system copy:
+// its files first and .paisans last, what that directory's .paisans held
+// moved aside rather than removed, and its other entries kept.
+func TestSettleKeepsWhatWasThere(t *testing.T) {
+	staging, dest := t.TempDir(), filepath.Join(t.TempDir(), "deployments", fixtureDeploymentID)
+	for path, body := range map[string]string{
+		filepath.Join(staging, "paisans-stack.yaml"):      "ours\n",
+		filepath.Join(staging, ".paisans", "config-head"): "head\n",
+		filepath.Join(dest, "saved.json"):                 "{}\n",
+		filepath.Join(dest, ".paisans", "config-root"):    "theirs\n",
+	} {
+		os.MkdirAll(filepath.Dir(path), 0o700)
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	aside, err := settle(staging, dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(filepath.Base(aside), ".paisans.replaced-") || filepath.Dir(aside) != dest {
+		t.Fatalf("aside %q", aside)
+	}
+	for path, want := range map[string]string{
+		filepath.Join(dest, "paisans-stack.yaml"):      "ours\n",
+		filepath.Join(dest, ".paisans", "config-head"): "head\n",
+		filepath.Join(dest, "saved.json"):              "{}\n",
+		filepath.Join(aside, "config-root"):            "theirs\n",
+	} {
+		if b, err := os.ReadFile(path); err != nil || string(b) != want {
+			t.Errorf("%s: %q, %v", path, b, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dest, ".paisans", "config-root")); !os.IsNotExist(err) {
+		t.Errorf("their root is still in .paisans: %v", err)
+	}
+
+	// Where dest is not there, staging itself becomes it.
+	staging, dest = t.TempDir(), filepath.Join(t.TempDir(), "deployments", fixtureDeploymentID)
+	os.WriteFile(filepath.Join(staging, "paisans-stack.yaml"), []byte("ours\n"), 0o600)
+	if aside, err := settle(staging, dest); err != nil || aside != "" {
+		t.Fatalf("aside %q, %v", aside, err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dest, "paisans-stack.yaml")); string(b) != "ours\n" {
+		t.Fatalf("got %q", b)
+	}
+}
+
+// A refusal raised while register works in its own directory names the
+// system copy's place instead, since the other is gone when the run ends.
+func TestRenamedNamesTheSystemCopy(t *testing.T) {
+	p := renamed(&ui.Problem{Hint: "in /tmp/register-x", Explain: "see /tmp/register-x/.paisans"}, "/tmp/register-x", "/data/deployments/x")
+	text := problemText(p)
+	if strings.Contains(text, "register-x") || !strings.Contains(text, "/data/deployments/x/.paisans") {
+		t.Fatalf("got %s", text)
+	}
+	plain := renamed(errors.New("open /tmp/register-x/secrets.enc.yaml"), "/tmp/register-x", "/data/deployments/x")
+	if plain.Error() != "open /data/deployments/x/secrets.enc.yaml" {
+		t.Fatalf("got %v", plain)
+	}
+	if renamed(nil, "a", "b") != nil {
+		t.Fatal("nil became an error")
 	}
 }
