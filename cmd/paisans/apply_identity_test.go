@@ -81,14 +81,14 @@ func TestApplyNamesAPublishedVersionAtTheEnd(t *testing.T) {
 	f.based(t)
 	edited := f.files[0]
 	edited.Paisans = append(append([]byte{}, edited.Paisans...), "# next\n"...)
-	if err := f.l.WriteFiles(edited); err != nil {
+	if err := f.write(edited); err != nil {
 		t.Fatal(err)
 	}
 	loggingSSH(t, "")
 	fakeGrants(t, grantedWith(t, f, &grant.ConfigPart{Hash: f.shas[0], Revision: 1}))
 	rec := recordConverge(t)
 	_ = f.applySite(t, noTerminalStdin(), "--execute")
-	head, _ := f.l.Head()
+	head, _ := f.sys.Head()
 	got := identityLines(rec)
 	if len(got) != 2 || head == f.shas[0] {
 		t.Fatalf("head %s, got %v\n%s", head, got, rec.Lines())

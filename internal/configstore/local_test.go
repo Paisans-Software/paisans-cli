@@ -1196,3 +1196,90 @@ func TestPaisansFilesLeavesOutAVersionWithoutOne(t *testing.T) {
 		t.Errorf("files %q", files)
 	}
 }
+
+// A publish on a base the caller names builds on it, whatever the head is,
+// and is refused, as one on the head is, when the sites' newest is another.
+func TestPublishOnTheBaseNamed(t *testing.T) {
+	needTools(t, "git", "ssh-keygen")
+	alice := newOperator(t)
+	sites := storeSites(t, "home-a")
+	all := reach(sites, "home-a")
+	first := edit(testFiles(), "1", map[string]string{"alice": alice.pub})
+	l := workstation(t, first)
+	g, err := gather(l, all, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := publishOpts{keyLine: alice.pub, signWith: alice.key, now: testNow}
+	v1, _, err := publishFiles(l, g, first, all, o, fakePush)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g, err = gather(l, all, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SetHead(strings.Repeat("d", 40)); err != nil {
+		t.Fatal(err)
+	}
+	base := v1
+	second := edit(testFiles(), "2", map[string]string{"alice": alice.pub})
+	o.base = &base
+	v2, _, err := publishFiles(l, g, second, all, o, fakePush)
+	if err != nil || v2 == v1 {
+		t.Fatalf("on %s: %s, %v", v1, v2, err)
+	}
+	if head, _ := l.Head(); head != v2 {
+		t.Errorf("head %s", head)
+	}
+	stale := strings.Repeat("e", 40)
+	o.base = &stale
+	if _, _, err := publishFiles(l, g, edit(testFiles(), "3", map[string]string{"alice": alice.pub}), all, o, fakePush); err == nil || !strings.Contains(err.Error(), "stale") {
+		t.Errorf("on a base the sites' newest is not: %v", err)
+	}
+}
+
+// Mark's undo puts back the records and drops every version a publish
+// added to the store, so a gather finds the head as it was.
+func TestMarkTakesAPublishBack(t *testing.T) {
+	needTools(t, "git", "ssh-keygen")
+	alice := newOperator(t)
+	sites := storeSites(t, "home-a")
+	all := reach(sites, "home-a")
+	first := edit(testFiles(), "1", map[string]string{"alice": alice.pub})
+	l := workstation(t, first)
+	g, err := gather(l, all, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := publishOpts{keyLine: alice.pub, signWith: alice.key, now: testNow}
+	v1, _, err := publishFiles(l, g, first, all, o, fakePush)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g, err = gather(l, all, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull); err != nil {
+		t.Fatal(err)
+	}
+	seen, _ := os.ReadFile(filepath.Join(l.Dir, ".paisans", "config-seen"))
+	undo, err := l.Mark()
+	if err != nil {
+		t.Fatal(err)
+	}
+	noPush := func(apply.Transport, deployment.Deployment, []byte) error { return errors.New("refused") }
+	v2, _, err := publishFiles(l, g, edit(testFiles(), "2", map[string]string{"alice": alice.pub}), all, o, noPush)
+	if err == nil || v2 == "" {
+		t.Fatalf("got %s, %v", v2, err)
+	}
+	if err := undo(); err != nil {
+		t.Fatal(err)
+	}
+	if head, _ := l.Head(); head != v1 {
+		t.Errorf("head %s", head)
+	}
+	if b, _ := os.ReadFile(filepath.Join(l.Dir, ".paisans", "config-seen")); string(b) != string(seen) {
+		t.Errorf("seen %q, was %q", b, seen)
+	}
+	cache, _ := l.Cache()
+	if shas, _ := cache.versionRefs(); !slices.Equal(shas, []string{v1}) {
+		t.Errorf("the store names %v", shas)
+	}
+}

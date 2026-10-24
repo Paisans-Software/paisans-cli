@@ -404,9 +404,11 @@ func TestConfigLogAnchorsOnTheNamedKey(t *testing.T) {
 	noFolderState(t, w.dir)
 }
 
-// publish, with no anchor, gives the advice pull gives, through pull, since
-// publish judges only from the recorded key.
+// publish of a deployment the sites hold and this workstation has no
+// system copy of refuses, naming the recovery and the join that make one:
+// trust starts only from what those or a deploy recorded here.
 func TestConfigPublishWithoutAnchorAdvises(t *testing.T) {
+	withDataDir(t)
 	key, pub := testKey(t)
 	s := newStore(t)
 	_, f := s.commit(t, fixtureAs(t, pub), "", nil, 1, key)
@@ -422,7 +424,7 @@ func TestConfigPublishWithoutAnchorAdvises(t *testing.T) {
 	for _, args := range [][]string{{"publish", "--config", cfgPath}, {"publish", "--config", cfgPath, "--execute"}} {
 		var out bytes.Buffer
 		text := problemText(runDeployment(args, noTerminalStdin(), &out))
-		for _, want := range []string{"no version to start trusting from", "paisans deployment pull --key <path.pub>", "ssh-add", "paisans deployment pull --root <sha>", "paisans operator register"} {
+		for _, want := range []string{"no version to start trusting from", "paisans deployment recover --from <user@host> --id " + fixtureDeploymentID, "paisans operator register --execute"} {
 			if !strings.Contains(text, want) {
 				t.Fatalf("%v: refusal %q does not say %q", args, text, want)
 			}

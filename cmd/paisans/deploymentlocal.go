@@ -20,9 +20,10 @@ import (
 )
 
 // What follows is the workstation's saved deployments (internal/localstore):
-// deployment apply --execute and deployment recover --execute save the
-// version they publish or recover, deployment fetch saves what a host
-// holds, and deployment list shows them.
+// a deploy makes the version it publishes the system copy's
+// (deploydraft.go), deployment recover --execute saves the version it
+// recovers, deployment fetch saves what a host holds, and deployment list
+// shows them.
 
 // openStore is the saved deployments. Tests point it at a directory of their
 // own through localstore.DirVariable.

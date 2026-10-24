@@ -216,13 +216,6 @@ func noAnchorNamed(otherwise string) string {
 	return "Name your own operator key's public key file with --key <path.pub>, loaded with ssh-add so it is recorded as this workstation's signing key, or pin the first version you trust with --root <sha>" + otherwise + "."
 }
 
-// noAnchorPublish is what publish's refusal for a missing anchor says to do.
-// publish judges only from the recorded signing key, so the pull that
-// records one comes first.
-func noAnchorPublish() string {
-	return "Name your own operator key's public key file with " + progname.Cmd() + " deployment pull --key <path.pub>, loaded with ssh-add so it is recorded as this workstation's signing key, or pin the first version you trust with " + progname.Cmd() + " deployment pull --root <sha>, or run " + progname.Cmd() + " operator register to sign the version you hold."
-}
-
 func shaShape(s string) bool {
 	if len(s) != 40 && len(s) != 64 {
 		return false
@@ -334,7 +327,7 @@ func describe(g configstore.Gathered, sha string) string {
 
 // forkProblem is the refusal for a fork, naming each head.
 func forkProblem(g configstore.Gathered, more ...string) error {
-	return &ui.Problem{Hint: "the sites hold a fork", Explain: "Two trusted versions build on one parent:\n" + forkHeads(g) + "\nMerge their files by hand, then publish with " + progname.Cmd() + " deployment publish --merge." + strings.Join(append([]string{""}, more...), " ")}
+	return &ui.Problem{Hint: "the sites hold a fork", Explain: "Two trusted versions build on one parent:\n" + forkHeads(g) + "\nMerge their files by hand into one draft, writing each head's files into a folder of its own with " + progname.Cmd() + " deployment checkout --head <sha>, then publish it with " + progname.Cmd() + " deployment publish --merge." + strings.Join(append([]string{""}, more...), " ")}
 }
 
 // forkHeads lists the heads of a fork, one line each.
@@ -454,7 +447,7 @@ func runDeploymentPublish(args []string, stdin io.Reader, stdout io.Writer) erro
 	if err != nil {
 		return err
 	}
-	l, err := workstationOf(*configPath)
+	d, err := draftAt(*configPath)
 	if err != nil {
 		return err
 	}
@@ -463,42 +456,47 @@ func runDeploymentPublish(args []string, stdin io.Reader, stdout io.Writer) erro
 		return err
 	}
 	// A version holds the secrets encrypted, and only encrypted.
-	if err := config.CheckSecretsFile(filepath.Join(l.Dir, "secrets.enc.yaml")); err != nil {
+	if err := config.CheckSecretsFile(filepath.Join(d.Dir, configstore.FileSecrets)); err != nil {
+		return err
+	}
+	raw, err := d.Files()
+	if err != nil {
+		return &ui.Problem{Hint: "the files of a version cannot be read", Explain: "publish signs the draft's " + config.FileName + ", secrets.enc.yaml and .sops.yaml from " + d.Dir + " as a version. " + errLine(err) + ".", Cause: err}
+	}
+	files, err := asVersion(raw)
+	if err != nil {
 		return err
 	}
 	r := reporter()
 	r.Section("publish " + *configPath)
-	key, err := signingKeyFor(l, cfg)
+	sites := configTransports(cfg)
+	t, err := gatherDeploy(r, d, cfg, sites, raw.Paisans, gatherMode{execute: *execute, answers: ans}, stdin, stdout)
+	defer t.done()
 	if err != nil {
 		return err
 	}
+	g := t.g
+	t.again, t.source = "deployment publish --execute", "published from "+d.Dir
+	parents, err := configstore.Parents(g, t.base, *merge)
+	if err != nil {
+		if g.Verdict.Fork && !*merge {
+			return forkProblem(g)
+		}
+		return err
+	}
+	// After the gather, which brings the base into the system copy's
+	// store: the key is checked against the operators the base lists, the
+	// same check for a dry run as for --execute, so a dry run never
+	// promises a version --execute refuses to sign.
+	key, err := signingKeyFor(t.sys, cfg)
+	if err != nil {
+		return err
+	}
+	if err := configstore.CheckSigner(t.sys, parents, cfg, key); err != nil {
+		return err
+	}
 	k, _, _ := config.ParseKeyLine(key)
-	sites := configTransports(cfg)
 	if !*execute {
-		a, err := l.Anchor()
-		if err != nil {
-			return err
-		}
-		g, err := gatherAt(r, l, sites, cfg.ID, a, gatherMode{noAnchor: noAnchorPublish()}, stdin, stdout)
-		if err != nil {
-			return err
-		}
-		head, err := l.Head()
-		if err != nil {
-			return err
-		}
-		parents, err := configstore.Parents(g, head, *merge)
-		if err != nil {
-			if g.Verdict.Fork && !*merge {
-				return forkProblem(g)
-			}
-			return err
-		}
-		// The same check --execute makes, so a dry run never promises a
-		// version --execute refuses to sign.
-		if err := configstore.CheckSigner(l, parents, cfg, key); err != nil {
-			return err
-		}
 		what := "the first version"
 		if len(parents) > 0 {
 			var on []string
@@ -510,35 +508,33 @@ func runDeploymentPublish(args []string, stdin io.Reader, stdout io.Writer) erro
 		r.Step("publish "+what).End(ui.Pending, "signed with "+k.Fingerprint)
 		return nil
 	}
-	a, err := l.Anchor()
-	if err != nil {
-		return err
-	}
-	g, err := gatherAt(r, l, sites, cfg.ID, a, gatherMode{execute: true, answers: ans, noAnchor: noAnchorPublish()}, stdin, stdout)
-	if err != nil {
-		return err
-	}
 	s := r.Step("sign and push the version, signed with " + k.Fingerprint)
-	sha, pushed, err := configstore.PublishFrom(l, g, sites, key, configSignWith(key), *merge, configNow())
-	var pe *configstore.PushError
-	switch {
-	case errors.As(err, &pe) && len(pushed) > 0:
-		s.End(ui.Warned, fmt.Sprintf("%s reached %s", sha[:12], strings.Join(pushed, ", ")))
-		for _, site := range slices.Sorted(maps.Keys(pe.Failed)) {
-			r.Warn(site+" did not take the version", fmt.Sprintf("%v. It gets the version from its peers' sync, or from publishing again.", pe.Failed[site]))
+	var sha string
+	err = t.deploy(r, s, files, func(sys configstore.Local) (string, int, error) {
+		var pushed []string
+		var err error
+		sha, pushed, err = configstore.PublishOn(sys, g, t.base, files, sites, key, configSignWith(key), *merge, configNow())
+		var pe *configstore.PushError
+		switch {
+		case errors.As(err, &pe) && len(pushed) > 0:
+			s.End(ui.Warned, fmt.Sprintf("%s reached %s", sha[:12], strings.Join(pushed, ", ")))
+			for _, site := range slices.Sorted(maps.Keys(pe.Failed)) {
+				r.Warn(site+" did not take the version", fmt.Sprintf("%v. It gets the version from its peers' sync, or from publishing again.", pe.Failed[site]))
+			}
+		case err != nil:
+			s.Fail(err)
+			return "", 0, err
+		default:
+			s.Done(sha[:12])
 		}
-	case err != nil:
-		s.Fail(err)
-		var rb *configstore.RollbackError
-		if errors.As(err, &rb) {
-			return &ui.Problem{Hint: "the sites' newest version is older than one seen here", Explain: rb.Error() + ". Nothing was published: a version on it would build on an old one. Find out why the newer version is gone; " + progname.Cmd() + " deployment log shows what each site holds.", Cause: err}
+		cache, err := sys.Cache()
+		if err != nil {
+			return "", 0, err
 		}
-		if errors.Is(err, configstore.ErrNoAnchor) {
-			return &ui.Problem{Hint: "no version to start trusting from", Explain: err.Error() + ". " + noAnchorPublish(), Cause: err}
-		}
+		return sha, cache.Revision(sha), nil
+	})
+	if err != nil {
 		return err
-	default:
-		s.Done(sha[:12])
 	}
 	r.Result("published %s", sha)
 	return nil

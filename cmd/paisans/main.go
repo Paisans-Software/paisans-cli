@@ -30,6 +30,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/dns"
+	"github.com/paisans-software/paisans-cli/internal/draft"
 	"github.com/paisans-software/paisans-cli/internal/garage"
 	"github.com/paisans-software/paisans-cli/internal/gatewaymove"
 	"github.com/paisans-software/paisans-cli/internal/grant"
@@ -702,10 +703,11 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 			return err
 		}
 		identity.applied(store.held())
-	} else if v := reviewedByRun.version; v != nil && (!bytes.Equal(v.files.Paisans, loaded.Paisans) || !bytes.Equal(v.files.Secrets, loaded.Secrets)) {
+	} else if v := reviewedByRun.version; v != nil && (!bytes.Equal(v.files.Paisans, draft.StripMarker(loaded.Paisans)) || !bytes.Equal(v.files.Secrets, loaded.Secrets)) {
 		// Every step applies the run's current version, which a step that
 		// records at Pocket ID advances: files edited otherwise are not what
-		// the store holds.
+		// the store holds. The draft's "drafted from" line is no part of
+		// the version, and the run's deploy rewrites it.
 		return &ui.Problem{Hint: "the configuration changed after the run published it", Explain: config.FileName + " or secrets.enc.yaml is not what this run published as " + v.sha[:12] + ", so applying it would put on " + *site + " a version the store does not hold. Nothing was changed on " + *site + " by this step. Run " + progname.Cmd() + " deployment apply --execute again, which publishes the files as they are now."}
 	}
 

@@ -24,14 +24,16 @@ import (
 // so a site serving an old version cannot put it on a host that has had a
 // newer one without the operator noticing.
 //
-// The order is the point. Before the review: gather, and refuse a fork or
-// local files that are not based on the sites' newest version, since
-// applying them would undo whatever the newer version changed. After the
+// The order is the point. Before the review: gather into the system copy's
+// store, and refuse a fork or a draft that is not based on the sites'
+// newest version, since applying it would undo whatever the newer version
+// changed. After the
 // approval and before the first change: check each host's record, which
 // only reads. Then publish: deployment apply --site before its first change, apply
 // without --site once its site prepare steps have made every site's store
 // and before any other step changes a host (see runConverge). What is
-// published is the bytes apply loaded and applies, never a second read.
+// published is the bytes apply loaded and applies, never a second read, and
+// publishing deploys them into the system copy (deploydraft.go).
 
 // appliedVersion is the version of the configuration an apply puts on its
 // hosts, as each host's grant record holds it.
@@ -66,10 +68,9 @@ type storeVersion interface {
 var applyStore = gatherForApply
 
 // gathered is a gather an apply goes on from: the version it will publish
-// builds on parents, or is same when the local files are that version's
-// already.
+// builds on parents, or is same when the draft is that version's already.
 type gathered struct {
-	l        configstore.Local
+	deployer
 	g        configstore.Gathered
 	sites    map[string]apply.Transport
 	key      string
@@ -83,70 +84,71 @@ type gathered struct {
 }
 
 // gatherForApply gathers as deployment publish does, without the side effects
-// in a dry run: no site syncs. The seen record is written only when the
-// version is published, after the review's approval (configstore.PublishFiles).
-// loaded is the paisans-stack.yaml and secrets.enc.yaml the caller loaded and
-// applies, which are what is published; nil reads them here, for apply
-// without --site, whose steps each check that they load the same.
+// in a dry run: no site syncs, and the system copy's store records the
+// versions gathered and nothing else. The seen record is written only when
+// the version is published, after the review's approval
+// (configstore.PublishOn). loaded is the paisans-stack.yaml and
+// secrets.enc.yaml the caller loaded and applies, which are what is
+// published, its "drafted from" line stripped; nil reads them here, for
+// apply without --site, whose steps each check that they load the same.
 // It refuses, before the review, what --execute could not publish: files
-// that are not the three of a version, a fork, a base that is not the
-// sites' newest version, a key no operator lists, and, with --execute, a run
-// that reaches no site. No base at all is a deployment's first version.
+// that are not the three of a version, a fork, a draft whose base is not
+// the sites' newest version, a key no operator lists, and, with --execute,
+// a run that reaches no site. No base at all is a deployment's first
+// version.
 func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *configstore.Files, cfg *config.Config, execute bool, ans answerer, stdin io.Reader, stdout io.Writer) (storeVersion, error) {
-	l, err := workstationOf(configPath)
+	d, err := draftAt(configPath)
 	if err != nil {
 		return nil, err
 	}
-	beside := filepath.Join(l.Dir, "secrets.enc.yaml")
+	beside := filepath.Join(d.Dir, configstore.FileSecrets)
 	if secretsPath != "" && !samePath(secretsPath, beside) {
-		return nil, &ui.Problem{Hint: "--secrets names a file other than secrets.enc.yaml beside " + config.FileName, Explain: "apply publishes the version it applies, and a version holds the secrets.enc.yaml beside " + config.FileName + ". Applying " + secretsPath + " would put on the hosts secrets the store does not hold. Drop --secrets, or move the file beside " + config.FileName + "."}
+		return nil, &ui.Problem{Hint: "--secrets names a file other than secrets.enc.yaml beside " + config.FileName, Explain: "apply publishes the version it applies, and a version holds the draft's secrets.enc.yaml, beside its " + config.FileName + ". Applying " + secretsPath + " would put on the hosts secrets the store does not hold. Drop --secrets, or move the file beside " + config.FileName + "."}
 	}
-	files, err := l.Files()
+	raw, err := d.Files()
 	if err == nil && loaded != nil {
-		files.Paisans, files.Secrets = loaded.Paisans, loaded.Secrets
+		raw.Paisans, raw.Secrets = loaded.Paisans, loaded.Secrets
 	}
 	if err != nil {
-		return nil, &ui.Problem{Hint: "the files of a version cannot be read", Explain: "apply publishes " + config.FileName + ", secrets.enc.yaml and .sops.yaml from " + l.Dir + " as the version it applies. " + errLine(err) + ".", Cause: err}
+		return nil, &ui.Problem{Hint: "the files of a version cannot be read", Explain: "apply publishes the draft's " + config.FileName + ", secrets.enc.yaml and .sops.yaml from " + d.Dir + " as the version it applies. " + errLine(err) + ".", Cause: err}
+	}
+	files, err := asVersion(raw)
+	if err != nil {
+		return nil, err
 	}
 	// A version holds the secrets encrypted, and only encrypted.
 	if err := config.CheckSecretsBytes(beside, files.Secrets); err != nil {
 		return nil, err
 	}
-	a, err := l.Anchor()
-	if err != nil {
-		return nil, err
-	}
 	r.Section("configuration store")
 	sites := configTransports(cfg)
-	g, err := gatherAt(r, l, sites, cfg.ID, a, gatherMode{execute: execute, answers: ans}, stdin, stdout)
+	t, err := gatherDeploy(r, d, cfg, sites, raw.Paisans, gatherMode{execute: execute, answers: ans}, stdin, stdout)
 	if err != nil {
 		return nil, err
 	}
+	g := t.g
+	t.again, t.source = "deployment apply --execute", "applied from "+d.Dir
 	if g.Verdict.Fork {
 		return nil, forkProblem(g, "Nothing was applied.")
 	}
-	head, err := l.Head()
+	parents, err := configstore.Parents(g, t.base, false)
+	if err != nil {
+		return nil, &ui.Problem{Hint: "the draft is not based on the sites' newest version", Explain: err.Error() + ". Applying it would undo whatever that version changed. Nothing was applied.", Cause: err}
+	}
+	// After the gather, which brings the base into the system copy's
+	// store: the key is checked against the operators the base lists.
+	key, err := signingKeyFor(t.sys, cfg)
 	if err != nil {
 		return nil, err
 	}
-	parents, err := configstore.Parents(g, head, false)
-	if err != nil {
-		return nil, &ui.Problem{Hint: "the local files are not based on the sites' newest version", Explain: err.Error() + ". Applying them would undo whatever that version changed. Nothing was applied.", Cause: err}
-	}
-	// After the gather, which brings the base into the local store: the
-	// key is checked against the operators the base lists.
-	key, err := signingKeyFor(l, cfg)
-	if err != nil {
-		return nil, err
-	}
-	if err := configstore.CheckSigner(l, parents, cfg, key); err != nil {
+	if err := configstore.CheckSigner(t.sys, parents, cfg, key); err != nil {
 		return nil, err
 	}
 	if len(g.Direct()) == 0 && execute {
 		return nil, &ui.Problem{Hint: "no site answered", Explain: "apply publishes the version it applies before the first change, and no site can take it. Nothing was applied.", Cause: configstore.UnreachedError(g)}
 	}
-	v := &gathered{l: l, g: g, sites: sites, key: key, files: files, parents: parents, revision: 1, answers: ans}
-	if v.same, err = showChange(r, l, g, parents, files); err != nil {
+	v := &gathered{deployer: t.deployer, g: g, sites: sites, key: key, files: files, parents: parents, revision: 1, answers: ans}
+	if v.same, err = showChange(r, t.sys, g, parents, files); err != nil {
 		return nil, err
 	}
 	for _, p := range parents {
@@ -158,26 +160,28 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *confi
 	return v, nil
 }
 
-// showChange shows, before the review, how the local files differ from the
-// sites' newest version, which the gather brought into the local store:
-// paisans-stack.yaml as a diff from that version, the secrets by key name
-// only, never a value. It returns that version when the files are it
-// already, "" otherwise. A first version has nothing to differ from.
-func showChange(r ui.Reporter, l configstore.Local, g configstore.Gathered, parents []string, files configstore.Files) (string, error) {
+// showChange shows, before the review, how the draft differs from the
+// sites' newest version, the one it builds on, which the gather brought
+// into the system copy's store: paisans-stack.yaml as a diff from that
+// version, the secrets by key name only, never a value. files are the
+// draft's as a version holds them, its "drafted from" line stripped. It
+// returns that version when the draft is it already, "" otherwise. A first
+// version has nothing to differ from.
+func showChange(r ui.Reporter, sys configstore.Local, g configstore.Gathered, parents []string, files configstore.Files) (string, error) {
 	s := r.Step("what changes in the configuration")
 	if len(parents) == 0 {
 		s.End(ui.OK, "the first version, nothing to compare it with")
 		return "", nil
 	}
 	head := parents[0]
-	cache, err := l.Cache()
+	cache, err := sys.Cache()
 	if err != nil {
 		s.Fail(err)
 		return "", err
 	}
 	theirs, err := cache.Files(head)
 	if err != nil {
-		s.End(ui.Warned, describe(g, head)+" is not in the local store to compare with")
+		s.End(ui.Warned, describe(g, head)+" is not in the system copy's store to compare with")
 		return "", nil
 	}
 	if theirs.Equal(files) {
@@ -185,12 +189,12 @@ func showChange(r ui.Reporter, l configstore.Local, g configstore.Gathered, pare
 		return head, nil
 	}
 	rev := g.Versions[head].Revision
-	lines, err := difference(theirs, files, sides{dirA: fmt.Sprintf("revision-%d/", rev), dirB: "local/", inA: fmt.Sprintf("revision %d", rev), inB: "the local files"})
+	lines, err := difference(theirs, files, sides{dirA: fmt.Sprintf("revision-%d/", rev), dirB: "draft/", inA: fmt.Sprintf("revision %d", rev), inB: "the draft"})
 	if err != nil {
 		s.Fail(err)
 		return "", err
 	}
-	s.End(ui.OK, "the local files against "+describe(g, head))
+	s.End(ui.OK, "the draft against "+describe(g, head))
 	if len(lines) == 0 {
 		// Equal keys and values, stored differently: sops's metadata.
 		lines = []string{"secrets.enc.yaml differs only in sops's metadata"}
@@ -237,27 +241,35 @@ func (v *gathered) publish(r ui.Reporter, execute bool) (*appliedVersion, error)
 		return nil, nil
 	}
 	s := r.Step("publish " + v.what())
-	sha, pushed, err := configstore.PublishFiles(v.l, v.g, v.files, v.sites, v.key, configSignWith(v.key), false, configNow())
-	return v.saved(r)(published(r, s, sha, pushed, err, v.revision, v.files))
+	return v.deployed(r, s, v.files, v.revision, func(sys configstore.Local) (string, []string, error) {
+		return configstore.PublishOn(sys, v.g, v.base, v.files, v.sites, v.key, configSignWith(v.key), false, configNow())
+	})
 }
 
 func (v *gathered) next(r ui.Reporter, prev *appliedVersion, files configstore.Files) (*appliedVersion, error) {
 	s := r.Step(fmt.Sprintf("publish revision %d", prev.revision+1))
 	s.Detail("what this run recorded in secrets.enc.yaml, on %s", prev.sha[:12])
-	sha, pushed, err := configstore.PublishNext(v.l, v.g, prev.sha, prev.revision, files, v.sites, v.key, configSignWith(v.key), configNow())
-	return v.saved(r)(published(r, s, sha, pushed, err, prev.revision+1, files))
+	return v.deployed(r, s, files, prev.revision+1, func(sys configstore.Local) (string, []string, error) {
+		return configstore.PublishNext(sys, v.g, prev.sha, prev.revision, files, v.sites, v.key, configSignWith(v.key), configNow())
+	})
 }
 
-// saved saves a version the run published to this workstation's deployments,
-// so every deployment applied from here is found again by deployment list
-// wherever its files were.
-func (v *gathered) saved(r ui.Reporter) func(*appliedVersion, error) (*appliedVersion, error) {
-	return func(a *appliedVersion, err error) (*appliedVersion, error) {
-		if err == nil && a != nil {
-			saveVersion(r, v.l, a.sha, a.revision, a.files, v.key, "applied from "+v.l.Dir)
+// deployed deploys files as revision, which push signs and pushes on the
+// system copy, ending s, the step that publishes them, from what push
+// returned.
+func (v *gathered) deployed(r ui.Reporter, s ui.Step, files configstore.Files, revision int, push func(sys configstore.Local) (string, []string, error)) (*appliedVersion, error) {
+	var a *appliedVersion
+	err := v.deploy(r, s, files, func(sys configstore.Local) (string, int, error) {
+		sha, pushed, err := push(sys)
+		if a, err = published(r, s, sha, pushed, err, revision, files); err != nil {
+			return "", 0, err
 		}
-		return a, err
+		return a.sha, a.revision, nil
+	})
+	if err != nil {
+		return nil, err
 	}
+	return a, nil
 }
 
 // published ends s, the step that published files as revision, from what

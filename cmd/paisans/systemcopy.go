@@ -192,6 +192,13 @@ func draftVersion(d draft.Draft) (configstore.Files, error) {
 	if err != nil {
 		return f, err
 	}
+	return asVersion(f)
+}
+
+// asVersion is a draft's files f, as read, as a version holds them: the
+// "drafted from" line stripped from paisans-stack.yaml and the blueprints
+// it needs snapshotted.
+func asVersion(f configstore.Files) (configstore.Files, error) {
 	f.Paisans = draft.StripMarker(f.Paisans)
 	if configstore.SnapshotBlueprints != nil {
 		snap, err := configstore.SnapshotBlueprints(f.Paisans)

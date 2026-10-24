@@ -11,6 +11,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/draft"
 	"github.com/paisans-software/paisans-cli/internal/localstore"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -64,17 +65,18 @@ func fetchFrom(t *testing.T, reg, answer string) {
 	t.Cleanup(func() { reporterOverride = savedR })
 }
 
-// deployment apply --execute saves the version it published, with the key that signed
-// it as the saved copy's anchor, so a later fetch can judge the sites from
-// it wherever the deployment's own files went.
+// deployment apply --execute of a new deployment makes its system copy:
+// the version it published, with the key that signed it as the anchor, so
+// a later fetch can judge the sites from it wherever the draft went, and
+// the record deployment list shows.
 func TestApplySavesThePublishedVersion(t *testing.T) {
-	st := ownStore(t)
 	f := newApplyStore(t, 0)
+	st := must(openStore())
 	loggingSSH(t, "")
 	fakeGrants(t, grantedWith(t, f, nil))
 	recordConverge(t)
 	_ = f.applySite(t, noTerminalStdin(), "--execute")
-	head, _ := f.l.Head()
+	head, _ := f.sys.Head()
 	if head == "" {
 		t.Fatal("nothing was published")
 	}
@@ -86,7 +88,7 @@ func TestApplySavesThePublishedVersion(t *testing.T) {
 		t.Errorf("record %+v", rec)
 	}
 	l, _ := st.Local(fixtureID(t))
-	want, _ := f.l.Files()
+	want, _ := draftVersion(draft.Draft{Dir: f.dir})
 	got, err := l.Files()
 	if err != nil || !bytes.Equal(got.Paisans, want.Paisans) || !bytes.Equal(got.Secrets, want.Secrets) {
 		t.Fatalf("saved files differ: %v", err)
@@ -101,8 +103,8 @@ func TestApplySavesThePublishedVersion(t *testing.T) {
 
 // A dry run saves nothing.
 func TestApplyDryRunSavesNothing(t *testing.T) {
-	st := ownStore(t)
 	f := newApplyStore(t, 0)
+	st := must(openStore())
 	loggingSSH(t, "")
 	fakeGrants(t, grantedWith(t, f, nil))
 	recordConverge(t)

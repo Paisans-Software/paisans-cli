@@ -113,3 +113,33 @@ func TestDraftWriteFiles(t *testing.T) {
 		t.Errorf("files differ: %+v", got)
 	}
 }
+
+// Mark replaces the line, or adds it, and changes nothing else: the rest of
+// paisans-stack.yaml, its mode, and the other two files.
+func TestDraftMark(t *testing.T) {
+	d := Draft{Dir: t.TempDir()}
+	if err := os.WriteFile(filepath.Join(d.Dir, config.FileName), []byte("sites: {}\n# mine\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(d.Dir, configstore.FileSecrets), []byte("s\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range []Marker{{Revision: 2, SHA: sha40}, {Revision: 3, SHA: strings.Repeat("c", 40)}} {
+		if err := d.Mark(m); err != nil {
+			t.Fatal(err)
+		}
+		body, _ := os.ReadFile(filepath.Join(d.Dir, config.FileName))
+		if got, ok := ReadMarker(body); !ok || got != m || string(StripMarker(body)) != "sites: {}\n# mine\n" {
+			t.Fatalf("got %q", body)
+		}
+	}
+	if info, _ := os.Stat(filepath.Join(d.Dir, config.FileName)); info.Mode().Perm() != 0o600 {
+		t.Errorf("mode %v", info.Mode().Perm())
+	}
+	if b, _ := os.ReadFile(filepath.Join(d.Dir, configstore.FileSecrets)); string(b) != "s\n" {
+		t.Errorf("secrets %q", b)
+	}
+	if _, err := os.Stat(filepath.Join(d.Dir, configstore.FileSOPS)); !os.IsNotExist(err) {
+		t.Errorf(".sops.yaml written: %v", err)
+	}
+}

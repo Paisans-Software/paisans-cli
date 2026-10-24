@@ -17,6 +17,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
+	"github.com/paisans-software/paisans-cli/internal/draft"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/version"
 )
@@ -653,11 +654,12 @@ func TestConfigPublishAfterAnAcceptedRollback(t *testing.T) {
 	if err := l.WriteFiles(edited); err != nil {
 		t.Fatal(err)
 	}
+	sys := mirrorSystemCopy(t, l)
 	if err := runDeployment([]string{"publish", "--config", cfgPath, "--execute"}, noTerminalStdin(), &out); err != nil {
 		t.Fatal(err)
 	}
-	head, _ := l.Head()
-	b, _ := os.ReadFile(seenPath)
+	head, _ := sys.Head()
+	b, _ := os.ReadFile(filepath.Join(sys.Dir, ".paisans", "config-seen"))
 	if head == shas[1] || string(b) != "3 "+head+"\n" {
 		t.Fatalf("head %s, seen %q", head, b)
 	}
@@ -800,6 +802,7 @@ func TestConfigPublishDryRunChecksTheSigner(t *testing.T) {
 	if err := l.SetSigningKey(other); err != nil {
 		t.Fatal(err)
 	}
+	mirrorSystemCopy(t, l)
 	saved := agentKeys
 	agentKeys = func() []string { return []string{other} }
 	t.Cleanup(func() { agentKeys = saved })
@@ -882,7 +885,8 @@ func TestConfigDryRunsRecordNothingSeen(t *testing.T) {
 }
 
 // A first version published from one site of four that answered, holding
-// nothing, is signed and pushed at no terminal, with nothing asked.
+// nothing, is signed and pushed at no terminal, with nothing asked, and
+// makes the deployment's system copy.
 func TestPublishFirstVersionFromOneSiteAsksNothing(t *testing.T) {
 	key, pub := testKey(t)
 	recoverHosts(t, "__PAISANS_EMPTY__\n") // home-a alone answers, holding nothing
@@ -894,6 +898,7 @@ func TestPublishFirstVersionFromOneSiteAsksNothing(t *testing.T) {
 	agentKeys = func() []string { return []string{pub} }
 	configSignWith = func(string) string { return key }
 	t.Cleanup(func() { agentKeys, configSignWith = saved, savedSign })
+	withDataDir(t)
 	l := configstore.Local{Dir: t.TempDir()}
 	f := snapshotted(configstore.Files{Paisans: []byte(fixtureAs(t, pub)), Secrets: []byte("secrets\n"), SOPS: []byte("creation_rules: []\n")})
 	if err := l.WriteFiles(f); err != nil {
@@ -911,9 +916,14 @@ func TestPublishFirstVersionFromOneSiteAsksNothing(t *testing.T) {
 	if err := runDeployment([]string{"publish", "--config", cfgPath, "--execute"}, noTerminalStdin(), &out); err != nil {
 		t.Fatal(problemText(err))
 	}
-	if h, _ := l.Head(); h == "" {
+	sys, ok, err := must(openStore()).Held(fixtureDeploymentID)
+	if err != nil || !ok {
+		t.Fatalf("no system copy after publishing: %v", err)
+	}
+	if h, _ := sys.Head(); h == "" {
 		t.Fatal("no head after publishing")
 	}
+	noFolderState(t, l.Dir)
 	took := false
 	for _, r := range runs {
 		if strings.HasPrefix(r, "home-a: ") && strings.Contains(r, "bundle verify") {
@@ -973,4 +983,47 @@ func TestLogReadsSystemCopy(t *testing.T) {
 	if entries, _ := os.ReadDir(empty); len(entries) != 0 {
 		t.Fatalf("the empty folder holds %v", entries)
 	}
+}
+
+// deployment publish --execute deploys the draft as apply does: its files
+// become the system copy's, the version holds them without the "drafted
+// from" line, the line names the version published, and the record names
+// the folder. A dry run changes none of it.
+func TestPublishDeploysDraft(t *testing.T) {
+	f := newApplyStore(t, 1)
+	f.based(t)
+	edited := f.editDraft(t, "# next\n")
+	before := rawFiles(t, f.dir)
+	var out bytes.Buffer
+	captureStdout(t, func() {
+		if err := runDeployment([]string{"publish", "--config", f.cfgPath}, noTerminalStdin(), &out); err != nil {
+			t.Fatal(problemText(err))
+		}
+	})
+	if h, _ := f.sys.Head(); h != f.shas[0] || f.pushed() || !maps.Equal(rawFiles(t, f.dir), before) {
+		t.Fatalf("a dry run moved the head to %s, pushed %v", h, f.pushed())
+	}
+	captureStdout(t, func() {
+		if err := runDeployment([]string{"publish", "--config", f.cfgPath, "--execute"}, noTerminalStdin(), &out); err != nil {
+			t.Fatal(problemText(err))
+		}
+	})
+	head, _ := f.sys.Head()
+	cache, _ := f.sys.Cache()
+	if head == f.shas[0] || cache.Revision(head) != 2 || !f.pushed() {
+		t.Fatalf("head %s, pushed %v", head, f.pushed())
+	}
+	v, err := cache.Files(head)
+	got, _ := f.sys.Files()
+	if err != nil || !bytes.Equal(v.Paisans, edited.Paisans) || !bytes.Equal(got.Paisans, edited.Paisans) || !bytes.Equal(got.Secrets, edited.Secrets) {
+		t.Errorf("the version or the system copy is not the draft: %v", err)
+	}
+	if m, ok := draft.ReadMarker(f.draftBody(t)); !ok || m.SHA != head || m.Revision != 2 {
+		t.Errorf("marker %+v %v", m, ok)
+	}
+	saved, ok, err := must(openStore()).Load(fixtureDeploymentID)
+	if err != nil || !ok || saved.SHA != head || saved.Source != "published from "+f.dir {
+		t.Errorf("record %+v, %v", saved, err)
+	}
+	noFolderState(t, f.dir)
 }

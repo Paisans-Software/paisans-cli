@@ -827,6 +827,9 @@ type publishOpts struct {
 	signWith string // what git's user.signingKey is given
 	merge    bool
 	now      time.Time
+	// base, when set, is the version the files build on, in place of the
+	// head.
+	base *string
 }
 
 // PublishFrom commits the three local files as a version whose parent is
@@ -853,6 +856,13 @@ func PublishFiles(l Local, g Gathered, f Files, sites map[string]apply.Transport
 	return publishFiles(l, g, f, sites, publishOpts{keyLine: keyLine, signWith: signWith, merge: merge, now: now}, Push)
 }
 
+// PublishOn is PublishFiles on base, the version f builds on, in place of
+// l's head: a draft names the version it was drafted from, which need not
+// be the one l's files are. "" is no base, a deployment's first version.
+func PublishOn(l Local, g Gathered, base string, f Files, sites map[string]apply.Transport, keyLine, signWith string, merge bool, now time.Time) (string, []string, error) {
+	return publishFiles(l, g, f, sites, publishOpts{keyLine: keyLine, signWith: signWith, merge: merge, now: now, base: &base}, Push)
+}
+
 func publishFrom(l Local, g Gathered, sites map[string]apply.Transport, o publishOpts, push PushFunc) (string, []string, error) {
 	f, err := l.Files()
 	if err != nil {
@@ -876,6 +886,9 @@ func publishFiles(l Local, g Gathered, f Files, sites map[string]apply.Transport
 	head, err := l.Head()
 	if err != nil {
 		return "", nil, err
+	}
+	if o.base != nil {
+		head = *o.base
 	}
 	if len(g.Direct()) == 0 {
 		return "", nil, fmt.Errorf("no site answered, so nothing was published: %w", UnreachedError(g))
@@ -1237,3 +1250,63 @@ func attestFrom(l Local, g Gathered, sites map[string]apply.Transport, pin, keyL
 // sha, for a copy made from a version another workstation directory already
 // judged: the copy then refuses an older head as that directory would.
 func (l Local) Remember(rev int, sha string) error { return l.raiseSeen(rev, sha) }
+
+// Mark records what a publish writes to l, its trust records and the
+// versions its store names, and returns what puts them back: a publish no
+// site took is taken back whole, so the store names no version only this
+// workstation holds and the records name nothing the sites lack. The
+// objects a taken-back version left in the store are unnamed, and no
+// version.
+func (l Local) Mark() (undo func() error, err error) {
+	type record struct {
+		data []byte
+		held bool
+	}
+	saved := map[string]record{}
+	for _, name := range []string{rootFile, headFile, seenFile, signingFile} {
+		data, err := os.ReadFile(l.state(name))
+		switch {
+		case err == nil:
+			saved[name] = record{data: data, held: true}
+		case errors.Is(err, os.ErrNotExist):
+			saved[name] = record{}
+		default:
+			return nil, err
+		}
+	}
+	var named []string
+	if cache, ok, err := l.HeldStore(); err != nil {
+		return nil, err
+	} else if ok {
+		if named, err = cache.versionRefs(); err != nil {
+			return nil, err
+		}
+	}
+	return func() error {
+		var errs []error
+		for _, name := range slices.Sorted(maps.Keys(saved)) {
+			r := saved[name]
+			if r.held {
+				errs = append(errs, writeAtomic(l.state(name), r.data, stateFileMode))
+			} else if err := os.Remove(l.state(name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+				errs = append(errs, err)
+			}
+		}
+		cache, ok, err := l.HeldStore()
+		if err != nil || !ok {
+			return errors.Join(append(errs, err)...)
+		}
+		now, err := cache.versionRefs()
+		if err != nil {
+			return errors.Join(append(errs, err)...)
+		}
+		for _, sha := range now {
+			if !slices.Contains(named, sha) {
+				if _, err := cache.git(nil, nil, "update-ref", "-d", "refs/versions/"+sha); err != nil {
+					errs = append(errs, err)
+				}
+			}
+		}
+		return errors.Join(errs...)
+	}, nil
+}

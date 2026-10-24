@@ -5,7 +5,8 @@
 //
 // A deployment's files usually sit in a directory the operator chose, often a
 // git repository, and that directory is easy to lose or to forget the path
-// of. Every deployment apply --execute saves the version it published here as well, and
+// of. Every deploy (deployment apply --execute, deployment publish
+// --execute) makes the version it published the copy here, and
 // paisans deployment fetch fills it from a host, so an operator can always
 // find each deployment they run without remembering where its files were.
 //

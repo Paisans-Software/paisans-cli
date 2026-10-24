@@ -97,3 +97,34 @@ func (d Draft) Write(f configstore.Files, m Marker) error {
 	f.Paisans = WithMarker(f.Paisans, m)
 	return configstore.WriteFilesTo(d.Dir, f)
 }
+
+// Mark rewrites the first line of the folder's paisans-stack.yaml to m and
+// leaves the rest of it, and the other two files, as they are: what the
+// operator edited since the version m names stays a draft on it.
+func (d Draft) Mark(m Marker) error {
+	path := d.path(config.FileName)
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(d.Dir, "."+config.FileName+".tmp-")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(WithMarker(body, m)); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), info.Mode().Perm()); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
+}
