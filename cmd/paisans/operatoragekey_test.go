@@ -171,3 +171,58 @@ func TestAgeKeyNeverPrintsPrivate(t *testing.T) {
 		}
 	}
 }
+
+// With no keystore and no file named, age-key is refused in words that fit
+// an operator with no .sops.yaml and no init to run.
+func TestAgeKeyNoKeystoreRefusal(t *testing.T) {
+	withoutAgeKey(t)
+	withKeystore(t, keystore.Unavailable{})
+	err, out, _ := runAgeKey(t, "--id", ageKeyTestID)
+	if err == nil {
+		t.Fatalf("age-key printed %q, want a refusal", out)
+	}
+	text := problemText(err) + err.Error()
+	for _, bad := range []string{"init", ".sops.yaml"} {
+		if strings.Contains(text, bad) {
+			t.Errorf("the refusal mentions %q:\n%s", bad, text)
+		}
+	}
+	if !strings.Contains(text, "--age-private-key-file") || !strings.Contains(text, "SOPS_AGE_KEY") {
+		t.Errorf("the refusal names no way out:\n%s", text)
+	}
+}
+
+// A key file that does not hold exactly one age key is refused and left as
+// it was.
+func TestAgeKeyRefusesBadFile(t *testing.T) {
+	a, _ := age.GenerateX25519Identity()
+	b, _ := age.GenerateX25519Identity()
+	for name, content := range map[string]string{
+		"empty":    "",
+		"two keys": a.String() + "\n" + b.String() + "\n",
+		"garbage":  "this is not a key\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			withoutAgeKey(t)
+			ks := keystore.NewMemory()
+			withKeystore(t, ks)
+			keyFile := filepath.Join(t.TempDir(), "mine.key")
+			if err := os.WriteFile(keyFile, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			err, out, printed := runAgeKey(t, "--id", ageKeyTestID, "--age-private-key-file", keyFile)
+			if err == nil {
+				t.Fatalf("age-key printed %q, want a refusal", out)
+			}
+			if data, _ := os.ReadFile(keyFile); string(data) != content {
+				t.Error("the key file was changed")
+			}
+			if len(ks.Items) != 0 {
+				t.Errorf("the keystore was written: %v", ks.Items)
+			}
+			if strings.Contains(out+printed+err.Error()+problemText(err), "AGE-SECRET-KEY-1") {
+				t.Error("a private key was shown")
+			}
+		})
+	}
+}

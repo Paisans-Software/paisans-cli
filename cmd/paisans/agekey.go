@@ -56,7 +56,7 @@ func ensureAgeKey(r ui.Reporter, id, configPath, secretsPath, keyFile string) er
 
 	// The private key is kept before .sops.yaml names its public key, and
 	// the write belongs to the same step, so a failure reports both.
-	_, export, err := makeAgeKey(r, id, configPath, keyFile, func(step ui.Step, k ageKey) error {
+	_, export, err := makeAgeKey(r, "init", id, configPath, keyFile, func(step ui.Step, k ageKey) error {
 		if err := config.WriteSOPSConfig(dir, k.Recipient); err != nil {
 			// The key is not removed, since deleting a key is not init's
 			// decision. Saying where it is makes the next run's refusal of
@@ -95,11 +95,12 @@ type ageKey struct {
 
 // makeAgeKey makes a new age key and keeps it in the keystore under id, or in
 // keyFile when one is named, reading it back. It is the one place a key is
-// made, for init and for operatorAgeKey. whileOpen runs inside the "save age
+// made, for init and for operatorAgeKey. command names the caller in what it
+// tells the operator to do next: "init" or "operator age-key". whileOpen runs inside the "save age
 // key" step once the key is kept, and a failure from it fails that step.
 // export is the line that points sops at a key kept in a file or reached by
 // a command, empty when there is none to give.
-func makeAgeKey(r ui.Reporter, id, configPath, keyFile string, whileOpen func(step ui.Step, k ageKey) error) (k ageKey, export string, err error) {
+func makeAgeKey(r ui.Reporter, command, id, configPath, keyFile string, whileOpen func(step ui.Step, k ageKey) error) (k ageKey, export string, err error) {
 	step := r.Step("make age key")
 	identity, err := age.GenerateX25519Identity()
 	if err != nil {
@@ -114,11 +115,11 @@ func makeAgeKey(r ui.Reporter, id, configPath, keyFile string, whileOpen func(st
 	key, recipient := identity.String(), identity.Recipient().String()
 	var where, shown string
 	if keyFile != "" {
-		where, err = writeKeyFile(id, configPath, keyFile, key)
+		where, err = writeKeyFile(command, id, configPath, keyFile, key)
 		shown = ui.ShortPath(where)
 		export = "SOPS_AGE_KEY_FILE=" + shellQuote(where)
 	} else {
-		where, err = storeKey(id, key, recipient)
+		where, err = storeKey(command, id, key, recipient)
 		shown = where
 		if command := config.AgeKeystore.LookupCommand(id); command != "" {
 			export = "SOPS_AGE_KEY_CMD=" + shellQuote(command)
@@ -181,22 +182,23 @@ func useVariableKey(r ui.Reporter, variables []string, dir, sopsPath, secretsPat
 	return nil
 }
 
-// storeKey keeps key in the keystore under id and reads it back.
-func storeKey(id, key, recipient string) (string, error) {
+// storeKey keeps key in the keystore under id and reads it back. command is
+// the caller, as in makeAgeKey.
+func storeKey(command, id, key, recipient string) (string, error) {
 	ks := config.AgeKeystore
 	item := ks.Describe(id)
 	err := ks.Put(id, key, recipient)
 	if errors.Is(err, keystore.ErrExists) {
 		return "", &ui.Problem{
 			Hint:    "the keystore already holds an age key for this deployment",
-			Explain: item + " is there from an earlier init that stopped. It is not replaced, since something may be encrypted to its key. Look at it, remove it if nothing uses it, and re-run init.",
+			Explain: item + " is there from an earlier " + command + " that stopped. It is not replaced, since something may be encrypted to its key. Look at it, remove it if nothing uses it, and re-run " + command + ".",
 			Cause:   err,
 		}
 	}
 	if err != nil {
 		return "", &ui.Problem{
 			Hint:    "no keystore to keep the age key in",
-			Explain: "init keeps this deployment's age key in the macOS Keychain or the Secret Service (secret-tool), and neither could store it. Either:\n- re-run with --age-private-key-file <path> to keep it in a file you choose, outside this directory\n- bring your own key: write its public key to " + config.SOPSConfigName + " under creation_rules and re-run init",
+			Explain: noKeystoreExplain(command),
 			Cause:   err,
 		}
 	}
@@ -204,18 +206,35 @@ func storeKey(id, key, recipient string) (string, error) {
 	if err != nil || got != key {
 		return "", &ui.Problem{
 			Hint:    "the age key read back from the keystore is not the one stored",
-			Explain: "Nothing was encrypted to it and " + config.SOPSConfigName + " was not written. Look at " + item + ", remove it, and re-run init.",
+			Explain: keyNotUsed(command) + " Look at " + item + ", remove it, and re-run " + command + ".",
 			Cause:   err,
 		}
 	}
 	return item, nil
 }
 
+// noKeystoreExplain is what to do when no keystore can hold the key.
+func noKeystoreExplain(command string) string {
+	const where = " keeps this deployment's age key in the macOS Keychain or the Secret Service (secret-tool), and neither could store it. Either:\n- re-run with --age-private-key-file <path> to keep it in a file you choose, outside this directory\n- bring your own key: "
+	if command == "init" {
+		return "init" + where + "write its public key to " + config.SOPSConfigName + " under creation_rules and re-run init"
+	}
+	return command + where + "set SOPS_AGE_KEY_FILE or SOPS_AGE_KEY_CMD to a key you already hold"
+}
+
+// keyNotUsed says what a key that failed its read-back left undone.
+func keyNotUsed(command string) string {
+	if command == "init" {
+		return "Nothing was encrypted to it and " + config.SOPSConfigName + " was not written."
+	}
+	return "Nothing was encrypted to it."
+}
+
 // writeKeyFile writes key to path at 0600, never over an existing file and
 // never inside the directory that holds the configuration, which is usually
 // a git repository: there the key would be one `git add .` from being
 // committed. It reads the key back, and returns the absolute path.
-func writeKeyFile(id, configPath, path, key string) (string, error) {
+func writeKeyFile(command, id, configPath, path, key string) (string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return "", err
@@ -236,7 +255,7 @@ func writeKeyFile(id, configPath, path, key string) (string, error) {
 	if errors.Is(err, os.ErrExist) {
 		return "", &ui.Problem{
 			Hint:    ui.ShortPath(abs) + " already exists",
-			Explain: "init never replaces a key file, since something may be encrypted to the key in it. Name a new path.",
+			Explain: command + " never replaces a key file, since something may be encrypted to the key in it. Name a new path.",
 		}
 	}
 	if err != nil {
@@ -253,7 +272,7 @@ func writeKeyFile(id, configPath, path, key string) (string, error) {
 	if err != nil || strings.TrimSpace(string(data)) != key {
 		return "", &ui.Problem{
 			Hint:    "the age key read back from " + ui.ShortPath(abs) + " is not the one written",
-			Explain: "Nothing was encrypted to it and " + config.SOPSConfigName + " was not written. Remove the file and re-run init.",
+			Explain: keyNotUsed(command) + " Remove the file and re-run " + command + ".",
 			Cause:   err,
 		}
 	}

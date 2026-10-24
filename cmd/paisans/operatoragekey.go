@@ -115,7 +115,7 @@ func operatorAgeKey(r ui.Reporter, id, configPath, keyFile string) (ageKey, erro
 		}
 	}
 
-	k, export, err := makeAgeKey(r, id, configPath, keyFile, nil)
+	k, export, err := makeAgeKey(r, "operator age-key", id, configPath, keyFile, nil)
 	if err != nil {
 		return ageKey{}, err
 	}
