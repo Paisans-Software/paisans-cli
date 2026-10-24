@@ -95,9 +95,9 @@ func TestReaderRole(t *testing.T) {
 	}
 }
 
-// Only the unsubscribe links reach the service; the gateway answers every
-// other path itself.
-func TestEngagementSnippetProxiesOnlyUnsubscribe(t *testing.T) {
+// Only the unsubscribe links and the health probe the monitor's public check
+// reads reach the service; the gateway answers every other path itself.
+func TestEngagementSnippetProxiesUnsubscribeAndHealth(t *testing.T) {
 	var snippet string
 	for path, body := range planFiles(build(t)) {
 		if strings.HasSuffix(path, "/digest.caddy") {
@@ -107,8 +107,17 @@ func TestEngagementSnippetProxiesOnlyUnsubscribe(t *testing.T) {
 	if snippet == "" {
 		t.Fatal("no digest.caddy in the plan")
 	}
-	if strings.Count(snippet, "reverse_proxy") != 1 || !strings.Contains(snippet, "@unsubscribe path /u/*") || !strings.Contains(snippet, "respond 404") {
-		t.Errorf("the digest's snippet proxies more than /u/*:\n%s", snippet)
+	for _, want := range []string{
+		"@public expression `path('/u/*') || (method('GET') && path('/healthz'))`",
+		"handle @public {",
+		"respond 404",
+	} {
+		if !strings.Contains(snippet, want) {
+			t.Errorf("the digest's snippet lacks %q:\n%s", want, snippet)
+		}
+	}
+	if n := strings.Count(snippet, "reverse_proxy"); n != 1 {
+		t.Errorf("the digest's snippet has %d reverse_proxy, want 1:\n%s", n, snippet)
 	}
 }
 

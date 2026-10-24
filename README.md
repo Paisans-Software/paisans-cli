@@ -855,7 +855,8 @@ Mbin. The design is in `docs/specs/2026-10-24-engagement-digest.md`.
   second apply. A column the list names and Mbin lacks fails the apply, so a
   Mbin release that changes its schema is noticed here and not in a
   digest that silently misses a week.
-* **What the gateway forwards.** Only `/u/*`, the unsubscribe links, and
+* **What the gateway forwards.** `/u/*`, the unsubscribe links, and
+  `GET /healthz`, which answers ok or 503, for the monitor's public check;
   everything else on the hostname answers 404. The route has no Pocket ID
   gate (`gateable: false`) because a member clicking from an inbox may not be
   signed in, and the signed token in the link is what names them.
