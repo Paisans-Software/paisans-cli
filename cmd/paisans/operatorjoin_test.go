@@ -302,13 +302,13 @@ func TestJoinSaysWhenYourKeyIsNotReached(t *testing.T) {
 	if err != nil || recipient == "" {
 		t.Fatalf("no recorded age key: %v", err)
 	}
-	for _, want := range []string{"they do not open", recipient, joinAgeSource, "SOPS_AGE_KEY_FILE", "SOPS_AGE_KEY_CMD"} {
+	for _, want := range []string{"they do not open", recipient, joinAgeSource, "what stops them opening is on this workstation", "SOPS_AGE_KEY_FILE", "SOPS_AGE_KEY_CMD"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("lacks %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "operator add --request") {
-		t.Errorf("a local failure sent the inviter to accept again:\n%s", out)
+	if strings.Contains(out, "operator add --request") || strings.Contains(out, "does not reach that key") {
+		t.Errorf("a local failure sent the inviter to accept again, or guessed its cause:\n%s", out)
 	}
 }
 

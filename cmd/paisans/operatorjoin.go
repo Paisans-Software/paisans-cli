@@ -178,7 +178,7 @@ func checkJoinSecrets(r ui.Reporter, dir, id string) {
 		if source != "" {
 			from = ", which the answer took from " + strings.TrimPrefix(source, "from ")
 		}
-		r.Explain(fmt.Sprintf("%s. The secrets are encrypted to your age key %s%s, so this workstation does not reach that key now. %s Then run %s secrets list here to check.", hint, recipient, from, explain, progname.Cmd()))
+		r.Explain(fmt.Sprintf("The secrets are encrypted to your age key %s%s, so your request was accepted; what stops them opening is on this workstation: %s. %s Then run %s secrets list here to check.", recipient, from, hint, explain, progname.Cmd()))
 		return
 	}
 	r.Explain(fmt.Sprintf("%s. The secrets are not encrypted to your age key, so the request was not fully accepted. Any operator runs %s operator add --request with the same request again, then %s deployment apply --execute; then run %s deployment pull here.", hint, progname.Cmd(), progname.Cmd(), progname.Cmd()))
