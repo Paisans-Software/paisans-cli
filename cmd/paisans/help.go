@@ -409,6 +409,14 @@ var helpCommands = []helpCommand{
 			"Writes the file only when validate refuses nothing the addition introduced. Reaches no host: the next deployment apply --execute gives the operator their sites, publishes the change and makes their Pocket ID account. Their age key, to read the secrets, is added to .sops.yaml by hand.",
 	},
 	{
+		name:    "operator age-key",
+		summary: "Show your age public key for a deployment, making the key first if there is none.",
+		usage:   []string{"paisans operator age-key [--id <deployment id>] [--config " + config.FileName + "]\n                       [--age-private-key-file <path>]"},
+		detail: "Print your age public key for the deployment, on a line of its own at the end of the output. The id comes from --id, or from " + config.FileName + " beside it. " +
+			"The key is the first of these that is present: the one key a SOPS_AGE_* variable holds, the keystore item for the deployment id, the file --age-private-key-file names when it exists, and otherwise a new key, kept in that file when one is named and in the keystore when not. " +
+			"Never prints the private key, and never replaces a keystore item or a key file. Reaches no host and changes nothing in the configuration.",
+	},
+	{
 		name:    "operator magic-link",
 		summary: "Give a declared operator a one-time sign-in link.",
 		usage:   []string{"paisans operator magic-link <operator> [--app <pocket-id app>]\n                       [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                       [--site <name>] [--ssh <destination>] [--execute]"},

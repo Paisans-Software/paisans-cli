@@ -30,6 +30,9 @@ func runOperator(args []string, stdin io.Reader, stdout io.Writer) error {
 	if len(args) > 0 && args[0] == "register" {
 		return runOperatorRegister(args[1:], stdin, stdout)
 	}
+	if len(args) > 0 && args[0] == "age-key" {
+		return runOperatorAgeKey(args[1:], stdout)
+	}
 	if len(args) > 0 && args[0] == "magic-link" {
 		return runOperatorMagicLink(args[1:])
 	}
@@ -37,9 +40,9 @@ func runOperator(args []string, stdin io.Reader, stdout io.Writer) error {
 		return runOperatorGrants(args[1:])
 	}
 	if len(args) == 0 {
-		return &ui.Problem{Hint: "operator takes one subcommand", Explain: "Use add, register, magic-link or grants."}
+		return &ui.Problem{Hint: "operator takes one subcommand", Explain: "Use add, register, age-key, magic-link or grants."}
 	}
-	return &ui.Problem{Hint: fmt.Sprintf("operator has no subcommand %q", args[0]), Explain: "Use add, register, magic-link or grants."}
+	return &ui.Problem{Hint: fmt.Sprintf("operator has no subcommand %q", args[0]), Explain: "Use add, register, age-key, magic-link or grants."}
 }
 
 func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error {

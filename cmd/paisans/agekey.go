@@ -54,11 +54,57 @@ func ensureAgeKey(r ui.Reporter, id, configPath, secretsPath, keyFile string) er
 		return useVariableKey(r, variables, dir, sopsPath, secretsPath, keyFile)
 	}
 
+	// The private key is kept before .sops.yaml names its public key, and
+	// the write belongs to the same step, so a failure reports both.
+	_, export, err := makeAgeKey(r, id, configPath, keyFile, func(step ui.Step, k ageKey) error {
+		if err := config.WriteSOPSConfig(dir, k.Recipient); err != nil {
+			// The key is not removed, since deleting a key is not init's
+			// decision. Saying where it is makes the next run's refusal of
+			// an existing item or file expected rather than a surprise.
+			return &ui.Problem{
+				Hint:    config.SOPSConfigName + " could not be written after the age key was kept",
+				Explain: fmt.Sprintf("%s, holding the new age key, was left in place. Nothing was encrypted to it yet. Remove it before re-running init, or init refuses to make another.", k.where),
+				Cause:   err,
+			}
+		}
+		step.Detail("public key %s, written to %s", k.Recipient, ui.ShortPath(sopsPath))
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	noteKeyHome(r, keyFile, export)
+	r.Warn("this is the only copy of the age key", "Losing it loses every secret in "+ui.ShortPath(secretsPath)+". Add a second recipient to "+config.SOPSConfigName+", another operator's key or an offline backup key, then run sops updatekeys "+ui.ShortPath(secretsPath)+".")
+	return nil
+}
+
+// ageKey is an operator's age key as the commands that need only its public
+// half see it.
+type ageKey struct {
+	Recipient string
+	// Source is how a step names where the key came from: "from
+	// SOPS_AGE_KEY_CMD", the keystore item's description, or the key file's
+	// short path.
+	Source string
+	// Made is true when this call made the key, false when it found one.
+	Made bool
+
+	// where is what holds a key that was made, for a failure to name.
+	where string
+}
+
+// makeAgeKey makes a new age key and keeps it in the keystore under id, or in
+// keyFile when one is named, reading it back. It is the one place a key is
+// made, for init and for operatorAgeKey. whileOpen runs inside the "save age
+// key" step once the key is kept, and a failure from it fails that step.
+// export is the line that points sops at a key kept in a file or reached by
+// a command, empty when there is none to give.
+func makeAgeKey(r ui.Reporter, id, configPath, keyFile string, whileOpen func(step ui.Step, k ageKey) error) (k ageKey, export string, err error) {
 	step := r.Step("make age key")
 	identity, err := age.GenerateX25519Identity()
 	if err != nil {
 		step.Fail(err)
-		return err
+		return ageKey{}, "", err
 	}
 	step.Done("")
 	// Where the key went is its own line, shown at every verbosity: the
@@ -66,7 +112,7 @@ func ensureAgeKey(r ui.Reporter, id, configPath, secretsPath, keyFile string) er
 	// line that only --verbose shows is one they never see.
 	step = r.Step("save age key")
 	key, recipient := identity.String(), identity.Recipient().String()
-	var where, shown, export string
+	var where, shown string
 	if keyFile != "" {
 		where, err = writeKeyFile(id, configPath, keyFile, key)
 		shown = ui.ShortPath(where)
@@ -78,24 +124,21 @@ func ensureAgeKey(r ui.Reporter, id, configPath, secretsPath, keyFile string) er
 			export = "SOPS_AGE_KEY_CMD=" + shellQuote(command)
 		}
 	}
-	if err == nil {
-		if werr := config.WriteSOPSConfig(dir, recipient); werr != nil {
-			// The key is not removed, since deleting a key is not init's
-			// decision. Saying where it is makes the next run's refusal of
-			// an existing item or file expected rather than a surprise.
-			err = &ui.Problem{
-				Hint:    config.SOPSConfigName + " could not be written after the age key was kept",
-				Explain: fmt.Sprintf("%s, holding the new age key, was left in place. Nothing was encrypted to it yet. Remove it before re-running init, or init refuses to make another.", where),
-				Cause:   werr,
-			}
-		}
+	k = ageKey{Recipient: recipient, Source: shown, Made: true, where: where}
+	if err == nil && whileOpen != nil {
+		err = whileOpen(step, k)
 	}
 	if err != nil {
 		step.Fail(err)
-		return err
+		return ageKey{}, "", err
 	}
-	step.Detail("public key %s, written to %s", recipient, ui.ShortPath(sopsPath))
 	step.Done(shown)
+	return k, export, nil
+}
+
+// noteKeyHome tells the operator how a key kept outside the keystore is
+// reached, once makeAgeKey has said where it went.
+func noteKeyHome(r ui.Reporter, keyFile, export string) {
 	switch {
 	case keyFile != "":
 		// paisans does not look for a key file on its own, so without this
@@ -104,8 +147,6 @@ func ensureAgeKey(r ui.Reporter, id, configPath, secretsPath, keyFile string) er
 	case export != "":
 		r.Detail("paisans finds the key on its own. To run sops by hand: export %s", export)
 	}
-	r.Warn("this is the only copy of the age key", "Losing it loses every secret in "+ui.ShortPath(secretsPath)+". Add a second recipient to "+config.SOPSConfigName+", another operator's key or an offline backup key, then run sops updatekeys "+ui.ShortPath(secretsPath)+".")
-	return nil
 }
 
 // useVariableKey is ensureAgeKey for an operator who brings the key through
