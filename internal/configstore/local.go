@@ -1254,10 +1254,14 @@ func (l Local) Remember(rev int, sha string) error { return l.raiseSeen(rev, sha
 // Mark records what a publish writes to l, its trust records and the
 // versions its store names, and returns what puts them back: a publish no
 // site took is taken back whole, so the store names no version only this
-// workstation holds and the records name nothing the sites lack. The
-// objects a taken-back version left in the store are unnamed, and no
-// version.
-func (l Local) Mark() (undo func() error, err error) {
+// workstation holds and the records name nothing the sites lack. undo is
+// given the version the publish committed, "" for none, and drops it from
+// the store unless the store named it at the mark; a version another
+// gather brought in meanwhile is left. The objects a dropped version left
+// in the store are unnamed, and no version. A push whose error is
+// ambiguous, a site having taken the bytes and the answer lost, drops the
+// version here too; the next gather brings it back from that site.
+func (l Local) Mark() (undo func(committed string) error, err error) {
 	type record struct {
 		data []byte
 		held bool
@@ -1282,7 +1286,7 @@ func (l Local) Mark() (undo func() error, err error) {
 			return nil, err
 		}
 	}
-	return func() error {
+	return func(committed string) error {
 		var errs []error
 		for _, name := range slices.Sorted(maps.Keys(saved)) {
 			r := saved[name]
@@ -1292,20 +1296,18 @@ func (l Local) Mark() (undo func() error, err error) {
 				errs = append(errs, err)
 			}
 		}
+		if committed == "" || slices.Contains(named, committed) {
+			return errors.Join(errs...)
+		}
+		if checkSHA(committed) != nil {
+			return errors.Join(append(errs, fmt.Errorf("%q is not a version", committed))...)
+		}
 		cache, ok, err := l.HeldStore()
 		if err != nil || !ok {
 			return errors.Join(append(errs, err)...)
 		}
-		now, err := cache.versionRefs()
-		if err != nil {
-			return errors.Join(append(errs, err)...)
-		}
-		for _, sha := range now {
-			if !slices.Contains(named, sha) {
-				if _, err := cache.git(nil, nil, "update-ref", "-d", "refs/versions/"+sha); err != nil {
-					errs = append(errs, err)
-				}
-			}
+		if _, err := cache.git(nil, nil, "update-ref", "-d", "refs/versions/"+committed); err != nil {
+			errs = append(errs, err)
 		}
 		return errors.Join(errs...)
 	}, nil

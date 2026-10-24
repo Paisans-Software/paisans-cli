@@ -400,6 +400,14 @@ func TestApplyStopsWhenNoSiteTakesTheVersion(t *testing.T) {
 	if !checked(logged(t, log)) || !rec.Has("warn", "watch did not take the version") {
 		t.Errorf("checked %v\n%s", checked(logged(t, log)), rec.Lines())
 	}
+	// A version some sites took is the system copy's, whatever the others
+	// did: head, seen and the draft's line name it.
+	head, _ := f.sys.Head()
+	rev, seen, _ := f.sys.Seen()
+	m, ok := draft.ReadMarker(f.draftBody(t))
+	if head == f.shas[0] || rev != 2 || seen != head || !ok || m.SHA != head || m.Revision != 2 {
+		t.Errorf("head %s, seen %d %s, marker %+v %v", head, rev, seen, m, ok)
+	}
 }
 
 // deployment apply --site on a deployment whose sites have no store yet refuses before
@@ -1458,5 +1466,135 @@ func TestApplyRefusesWhileTheSystemCopyIsLocked(t *testing.T) {
 	}
 	if h, _ := f.sys.Head(); h != f.shas[0] {
 		t.Errorf("head moved to %s", h)
+	}
+}
+
+// scratchLeft is the scratch directories a gather of a deployment with no
+// system copy left in the temporary directory.
+func scratchLeft(t *testing.T) []string {
+	t.Helper()
+	left, err := filepath.Glob(filepath.Join(os.TempDir(), "paisans-gather-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return left
+}
+
+// The scratch directory a deployment with no system copy gathers into is
+// gone once apply or publish ends: after a dry run, a first deploy, and a
+// refusal of a deployment the sites hold versions of.
+func TestApplyLeavesNoScratchDirectory(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	f := newApplyStore(t, 0)
+	loggingSSH(t, "")
+	fakeGrants(t, grantedWith(t, f, nil))
+	recordConverge(t)
+	_ = f.applySite(t, noTerminalStdin())
+	if left := scratchLeft(t); len(left) != 0 {
+		t.Errorf("a dry run left %q", left)
+	}
+	var out bytes.Buffer
+	captureStdout(t, func() { _ = runDeployment([]string{"publish", "--config", f.cfgPath}, noTerminalStdin(), &out) })
+	if left := scratchLeft(t); len(left) != 0 {
+		t.Errorf("a publish dry run left %q", left)
+	}
+	_ = f.applySite(t, noTerminalStdin(), "--execute")
+	if head, _ := f.sys.Head(); head == "" {
+		t.Fatal("nothing deployed")
+	}
+	if left := scratchLeft(t); len(left) != 0 {
+		t.Errorf("a first deploy left %q", left)
+	}
+
+	g := newApplyStore(t, 1)
+	if err := os.RemoveAll(g.sys.Dir); err != nil {
+		t.Fatal(err)
+	}
+	loggingSSH(t, "")
+	fakeGrants(t, grantedWith(t, g, nil))
+	recordConverge(t)
+	if err := g.applySite(t, noTerminalStdin(), "--execute"); err == nil || !strings.Contains(problemText(err), "paisans deployment recover") {
+		t.Fatalf("got %v", problemText(err))
+	}
+	if left := scratchLeft(t); len(left) != 0 {
+		t.Errorf("a refusal left %q", left)
+	}
+}
+
+// What fails once a site took the version is a warning and takes nothing
+// back: a record that cannot be written leaves the system copy holding the
+// version, its head, seen and files, and the draft's line naming it.
+func TestApplyAfterThePushWarnsAndKeepsTheVersion(t *testing.T) {
+	f := newApplyStore(t, 1)
+	f.based(t)
+	edited := f.editDraft(t, "# next\n")
+	// saved.json cannot be replaced by a directory of that name.
+	if err := os.MkdirAll(filepath.Join(f.sys.Dir, "saved.json", "x"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	loggingSSH(t, "")
+	fakeGrants(t, grantedWith(t, f, &grant.ConfigPart{Hash: f.shas[0], Revision: 1}))
+	rec := recordConverge(t)
+	_ = f.applySite(t, noTerminalStdin(), "--execute")
+	if !rec.Has("warn", "the system copy's record was not written") {
+		t.Errorf("no warning:\n%s", rec.Lines())
+	}
+	head, _ := f.sys.Head()
+	rev, seen, _ := f.sys.Seen()
+	cache, _ := f.sys.Cache()
+	got, _ := f.sys.Files()
+	m, ok := draft.ReadMarker(f.draftBody(t))
+	if head == f.shas[0] || rev != 2 || seen != head || cache.Revision(head) != 2 || !bytes.Equal(got.Paisans, edited.Paisans) || !ok || m.SHA != head {
+		t.Errorf("head %s, seen %d %s, marker %+v %v\n%s", head, rev, seen, m, ok, rec.Lines())
+	}
+}
+
+// A "drafted from" line that cannot be rewritten after the publish is a
+// warning: the system copy keeps the version's files.
+func TestDeployWarnsWhenTheMarkerCannotBeRewritten(t *testing.T) {
+	sys := withSystemCopy(t, fixtureDeploymentID)
+	d := draft.Draft{Dir: t.TempDir()}
+	version := configstore.Files{Paisans: []byte("id: " + fixtureDeploymentID + "\n"), Secrets: []byte("draft: secrets\n"), SOPS: []byte("creation_rules: []\n")}
+	if err := d.Write(version, draft.Marker{Revision: 1, SHA: strings.Repeat("a", 40)}); err != nil {
+		t.Fatal(err)
+	}
+	rec := &ui.Recorder{}
+	sha := strings.Repeat("b", 40)
+	got, rev, err := deployDraft(rec, sys, d, version, func() (string, int, error) {
+		return sha, 2, os.Remove(filepath.Join(d.Dir, config.FileName))
+	})
+	if err != nil || got != sha || rev != 2 {
+		t.Fatalf("got %s %d %v", got, rev, err)
+	}
+	if !rec.Has("warn", `the draft's "drafted from" line was not rewritten`) {
+		t.Errorf("no warning:\n%s", rec.Lines())
+	}
+	if b, _ := os.ReadFile(filepath.Join(sys.Dir, config.FileName)); string(b) != string(version.Paisans) {
+		t.Errorf("the system copy holds %q", b)
+	}
+}
+
+// A first deploy that no site took leaves no system copy: no root, no
+// signing key, no record, nothing under the data directory's deployments.
+func TestApplyFailedFirstDeployLeavesNoSystemCopy(t *testing.T) {
+	f := newApplyStore(t, 0)
+	configSiteTransport = func(name string, _ config.Site) apply.Transport {
+		return &storeHost{name: name, answer: f.answer, runs: f.runs, noPush: true}
+	}
+	loggingSSH(t, "")
+	fakeGrants(t, grantedWith(t, f, nil))
+	recordConverge(t)
+	before := f.draftBody(t)
+	if err := f.applySite(t, noTerminalStdin(), "--execute"); err == nil || !strings.Contains(problemText(err), "no site took the version") {
+		t.Fatalf("got %v", problemText(err))
+	}
+	if _, err := os.Stat(f.sys.Dir); !os.IsNotExist(err) {
+		t.Errorf("the system copy is there: %v", err)
+	}
+	if _, ok, _ := must(openStore()).Held(fixtureDeploymentID); ok {
+		t.Error("a system copy is held")
+	}
+	if !bytes.Equal(f.draftBody(t), before) {
+		t.Error("the draft changed")
 	}
 }

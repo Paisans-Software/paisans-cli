@@ -123,6 +123,9 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *confi
 	r.Section("configuration store")
 	sites := configTransports(cfg)
 	t, err := gatherDeploy(r, d, cfg, sites, raw.Paisans, gatherMode{execute: execute, answers: ans}, stdin, stdout)
+	// Nothing after the gather reads the scratch directory of a deployment
+	// with no system copy: its deploy makes the system copy.
+	defer t.done()
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +165,9 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *confi
 
 // showChange shows, before the review, how the draft differs from the
 // sites' newest version, the one it builds on, which the gather brought
-// into the system copy's store: paisans-stack.yaml as a diff from that
+// into the system copy's store. That version is the draft's base, and is
+// the baseline whatever the system copy's own files are, since it is what
+// the deploy changes on the sites: paisans-stack.yaml as a diff from that
 // version, the secrets by key name only, never a value. files are the
 // draft's as a version holds them, its "drafted from" line stripped. It
 // returns that version when the draft is it already, "" otherwise. A first
@@ -262,7 +267,7 @@ func (v *gathered) deployed(r ui.Reporter, s ui.Step, files configstore.Files, r
 	err := v.deploy(r, s, files, func(sys configstore.Local) (string, int, error) {
 		sha, pushed, err := push(sys)
 		if a, err = published(r, s, sha, pushed, err, revision, files); err != nil {
-			return "", 0, err
+			return sha, 0, err
 		}
 		return a.sha, a.revision, nil
 	})

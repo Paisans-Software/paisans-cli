@@ -205,9 +205,12 @@ func recordDeploy(r ui.Reporter, st localstore.Store, files configstore.Files, s
 
 // deployDraft deploys d: it makes f, d's files as the version publish signs
 // them, the system copy's files, and runs publish, which signs and pushes
-// that version and returns it. A publish that fails puts the system copy
-// back as it was: its files byte for byte, and what it records and the
-// versions its store names (configstore.Local.Mark). One that succeeds
+// that version and returns it. publish returns an error only when no site
+// holds the version, with the version it committed, if any: that publish
+// is taken back, the system copy put back as it was, its files byte for
+// byte, what it records and the version dropped from its store
+// (configstore.Local.Mark). Once a site took the version nothing takes it
+// back, and what fails after is a warning. One that succeeds
 // rewrites d's "drafted from" line to name the version, and leaves the rest
 // of d as it is, whatever was edited there since it was read. The system
 // copy's files are written without the blueprints f holds, which are
@@ -228,7 +231,7 @@ func deployDraft(r ui.Reporter, sys configstore.Local, d draft.Draft, f configst
 	}
 	sha, rev, err := publish()
 	if err != nil {
-		if back := errors.Join(putBack(sys.Dir, before), undo()); back != nil {
+		if back := errors.Join(putBack(sys.Dir, before), undo(sha)); back != nil {
 			return "", 0, errors.Join(err, back)
 		}
 		return "", 0, err

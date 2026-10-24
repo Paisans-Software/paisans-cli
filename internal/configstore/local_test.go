@@ -1269,7 +1269,7 @@ func TestMarkTakesAPublishBack(t *testing.T) {
 	if err == nil || v2 == "" {
 		t.Fatalf("got %s, %v", v2, err)
 	}
-	if err := undo(); err != nil {
+	if err := undo(v2); err != nil {
 		t.Fatal(err)
 	}
 	if head, _ := l.Head(); head != v1 {
@@ -1281,5 +1281,52 @@ func TestMarkTakesAPublishBack(t *testing.T) {
 	cache, _ := l.Cache()
 	if shas, _ := cache.versionRefs(); !slices.Equal(shas, []string{v1}) {
 		t.Errorf("the store names %v", shas)
+	}
+}
+
+// Mark's undo drops only the version the publish committed: one another
+// gather brought into the store meanwhile stays. A first version taken back
+// leaves no root and no signing key recorded.
+func TestMarkDropsOnlyTheCommittedVersion(t *testing.T) {
+	needTools(t, "git", "ssh-keygen")
+	alice := newOperator(t)
+	sites := storeSites(t, "home-a")
+	all := reach(sites, "home-a")
+	first := edit(testFiles(), "1", map[string]string{"alice": alice.pub})
+	l := workstation(t, first)
+	g, err := gather(l, all, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	undo, err := l.Mark()
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := publishOpts{keyLine: alice.pub, signWith: alice.key, now: testNow}
+	noPush := func(apply.Transport, deployment.Deployment, []byte) error { return errors.New("refused") }
+	v1, _, err := publishFiles(l, g, first, all, o, noPush)
+	if err == nil || v1 == "" {
+		t.Fatalf("got %s, %v", v1, err)
+	}
+	if root, _ := l.Root(); root != v1 {
+		t.Fatalf("root %q", root)
+	}
+	// What a concurrent gather brought in: another version, named.
+	cache, _ := l.Cache()
+	other, err := cache.Commit(edit(testFiles(), "other", map[string]string{"alice": alice.pub}), nil, 1, alice.key, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := undo(v1); err != nil {
+		t.Fatal(err)
+	}
+	root, _ := l.Root()
+	key, _ := l.SigningKey()
+	head, _ := l.Head()
+	if root != "" || key != "" || head != "" {
+		t.Errorf("root %q, key %q, head %q left", root, key, head)
+	}
+	if shas, _ := cache.versionRefs(); !slices.Equal(shas, []string{other}) {
+		t.Errorf("the store names %v, want only %s", shas, other)
 	}
 }

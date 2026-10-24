@@ -509,11 +509,22 @@ func runDeploymentPublish(args []string, stdin io.Reader, stdout io.Writer) erro
 		return nil
 	}
 	s := r.Step("sign and push the version, signed with " + k.Fingerprint)
+	// The revision is the one publishFiles gives the version: its base's
+	// when the draft is that version, else one past its parents'. It is
+	// found from the gather, so nothing can fail once a site took it.
+	revision := 1
+	for _, p := range parents {
+		revision = max(revision, g.Versions[p].Revision+1)
+	}
 	var sha string
 	err = t.deploy(r, s, files, func(sys configstore.Local) (string, int, error) {
 		var pushed []string
 		var err error
 		sha, pushed, err = configstore.PublishOn(sys, g, t.base, files, sites, key, configSignWith(key), *merge, configNow())
+		rev := revision
+		if !*merge && sha != "" && sha == t.base {
+			rev = g.Versions[sha].Revision
+		}
 		var pe *configstore.PushError
 		switch {
 		case errors.As(err, &pe) && len(pushed) > 0:
@@ -523,15 +534,11 @@ func runDeploymentPublish(args []string, stdin io.Reader, stdout io.Writer) erro
 			}
 		case err != nil:
 			s.Fail(err)
-			return "", 0, err
+			return sha, 0, err
 		default:
 			s.Done(sha[:12])
 		}
-		cache, err := sys.Cache()
-		if err != nil {
-			return "", 0, err
-		}
-		return sha, cache.Revision(sha), nil
+		return sha, rev, nil
 	})
 	if err != nil {
 		return err
