@@ -211,3 +211,28 @@ checks:
       !has(app.settings.uploads_max_size_mb) || type(app.settings.uploads_max_size_mb) != string || app.settings.uploads_max_size_mb == '' || (int(app.settings.uploads_max_size_mb.trim()) >= 1 && int(app.settings.uploads_max_size_mb.trim()) <= 1048576)
     message_expr: |-
       'is "' + app.settings.uploads_max_size_mb + '". WriteFreely accepts a whole number from 1 to 1048576, and config.ini locks this setting, so any other value stops the blog at startup.'
+  # config.ini is read with go-ini, which replaces %(name)s in any value,
+  # backtick quoted or not, with the value of the key it names, in the same
+  # section or at the top of the file. A setting's text written there could
+  # therefore show the OIDC client's secret on the sign in button.
+  - id: writefreely-setting-interpolates
+    level: refuse
+    hint: a writefreely setting holds %(
+    key: settings.site_name
+    rule: |-
+      !has(app.settings.site_name) || type(app.settings.site_name) != string || !app.settings.site_name.contains('%(')
+    message: "holds %(. config.ini is read with go-ini, which replaces %(name)s with the value of the key it names, the OIDC client's secret among them, so this setting could print another value where it is shown."
+  - id: writefreely-setting-interpolates
+    level: refuse
+    hint: a writefreely setting holds %(
+    key: settings.theme
+    rule: |-
+      !has(app.settings.theme) || type(app.settings.theme) != string || !app.settings.theme.contains('%(')
+    message: "holds %(. config.ini is read with go-ini, which replaces %(name)s with the value of the key it names, the OIDC client's secret among them, so this setting could print another value where it is shown."
+  - id: writefreely-setting-interpolates
+    level: refuse
+    hint: a writefreely setting holds %(
+    key: settings.oidc_display_name
+    rule: |-
+      !has(app.settings.oidc_display_name) || type(app.settings.oidc_display_name) != string || !app.settings.oidc_display_name.contains('%(')
+    message: "holds %(. config.ini is read with go-ini, which replaces %(name)s with the value of the key it names, the OIDC client's secret among them, so this setting could print another value where it is shown."

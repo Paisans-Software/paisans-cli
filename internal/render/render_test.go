@@ -430,7 +430,7 @@ func TestTheBlogReadsPostgresAndS3(t *testing.T) {
 		"type = postgres",
 		"type = s3",
 		"s3_endpoint = " + endpoint,
-		"s3_bucket = blog-uploads",
+		"s3_bucket = `blog-uploads`",
 		"s3_access_key_id = ",
 		"s3_secret_access_key = ",
 		// Path style addressing, rendered rather than defaulted: Garage
