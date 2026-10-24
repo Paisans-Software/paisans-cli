@@ -120,6 +120,11 @@ type Action struct {
 	// patroni.env left HAProxy running on the old file. Execute restarts
 	// each of these that `up -d` left in place, and none it replaced.
 	Refresh []string
+	// Tiers orders a restart of every service of the stack when one service
+	// runs in another's namespace (pid, ipc or network_mode "service:X"):
+	// each tier is restarted once the one before it runs again, nil for one
+	// restart of the whole project. See restartTiers.
+	Tiers [][]string
 }
 
 // quoteAll is names shell quoted, space separated.
@@ -148,6 +153,12 @@ func (a Action) Command(d deployment.Deployment) string {
 		return compose + " up -d --no-deps" + timeout + " " + quoteAll(a.Up)
 	case a.Recreate:
 		return compose + " up -d" + timeout
+	case len(a.Tiers) > 0 && len(a.Services) == 0:
+		steps := make([]string, len(a.Tiers))
+		for i, names := range a.Tiers {
+			steps[i] = compose + " restart" + timeout + " " + quoteAll(names)
+		}
+		return strings.Join(steps, " && ")
 	case len(a.Services) > 0 && !slices.Contains(a.Services, "patroni"):
 		return compose + " restart " + strings.Join(a.Services, " ")
 	case len(a.Services) > 0:
@@ -1100,6 +1111,10 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 				out.heldOwed = append(out.heldOwed, pendingAction{Stack: app, DatabasePath: true})
 			}
 		}
+	}
+
+	if err := out.orderRestarts(); err != nil {
+		return nil, fmt.Errorf("%s: %w", site, err)
 	}
 
 	sort.Slice(out.Changes, func(i, j int) bool { return out.Changes[i].Path < out.Changes[j].Path })

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -36,6 +37,9 @@ type world struct {
 	// afterRestart replaces instance when auth is restarted, as a switchover's
 	// gate does.
 	afterRestart map[string]string
+	// composes is each stack's compose file as the host holds it. Unset, a
+	// stack has one service.
+	composes map[string]string
 }
 
 func newWorld() *world {
@@ -96,7 +100,13 @@ func (h host) Run(command string) (string, error) {
 			w.leader = strings.Fields(command[i+len("--candidate "):])[0]
 		}
 		return "Successfully switched over", nil
-	case strings.HasSuffix(command, "/compose.yaml restart"):
+	case strings.HasPrefix(command, "cat /srv/paisans/f2a9/") && strings.HasSuffix(command, "/compose.yaml"):
+		stack := strings.TrimSuffix(strings.TrimPrefix(command, "cat /srv/paisans/f2a9/"), "/compose.yaml")
+		if c, ok := w.composes[stack]; ok {
+			return c, nil
+		}
+		return "services:\n  app: {}\n", nil
+	case strings.Contains(command, "/compose.yaml restart"):
 		if w.failRestart != "" && strings.Contains(command, "/srv/paisans/f2a9/"+w.failRestart+"/") {
 			return "Error response from daemon: no such container", errors.New("exit status 1")
 		}
@@ -396,6 +406,24 @@ func TestEachSwitchRestartsTheDatabaseAppsOnEveryAppsSite(t *testing.T) {
 }
 
 // A restart that fails stops the test where it is.
+// A service that runs in the app's namespace is restarted once the app runs
+// again, not with it, or Docker cannot start it.
+func TestARestartTakesANamespaceJoinAfterTheApp(t *testing.T) {
+	cfg, w, o, _ := setup(t, ok)
+	o.Execute = true
+	w.composes = map[string]string{"auth": "services:\n  app: {}\n  bootstrap:\n    pid: service:app\n"}
+	rec := &ui.Recorder{Verbose_: true}
+	o.Report = rec
+	if err := Run(cfg, o); err != nil {
+		t.Fatalf("%v\n%s", err, rec.Lines())
+	}
+	compose := "docker compose -f /srv/paisans/f2a9/auth/compose.yaml"
+	want := "home-a: " + compose + " restart 'app' && " + compose + " restart 'bootstrap'"
+	if !slices.Contains(w.ran, want) {
+		t.Errorf("auth was not restarted as %q:\n%s", want, strings.Join(w.ran, "\n"))
+	}
+}
+
 func TestAFailedAppRestartStops(t *testing.T) {
 	cfg, w, o, _ := setup(t, ok)
 	w.failRestart = "auth"

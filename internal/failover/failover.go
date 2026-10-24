@@ -367,6 +367,19 @@ func restartCommand(d deployment.Deployment, app string) string {
 	return d.ComposeCmd(app) + " restart"
 }
 
+// restartOn is the command restarting app's stack through t, ordered by the
+// compose file the host holds: a service that runs in another's namespace,
+// as Wiki.js's bootstrap runs in the app's, cannot be restarted with it (see
+// apply.RestartStack).
+func (r *runner) restartOn(t apply.Transport, app string) (string, error) {
+	d := r.cfg.Deployment()
+	compose, err := t.Run("cat " + d.Compose(app))
+	if err != nil {
+		return "", fmt.Errorf("reading %s: %s", d.Compose(app), firstLine(compose, err))
+	}
+	return apply.RestartStack(d, app, compose)
+}
+
 // listPlan is the dry run: each switchover as the steps Execute reports,
 // titled alike, with the command it runs and the cost of it as details.
 func (r *runner) listPlan(leader, candidate, back, home string) {
@@ -453,8 +466,14 @@ func (r *runner) gate(from, to string) error {
 			s.Fail(err)
 			return err
 		}
-		s.Detail("%s", restartCommand(r.cfg.Deployment(), st.app))
-		out, err := t.Run(restartCommand(r.cfg.Deployment(), st.app))
+		restart, err := r.restartOn(t, st.app)
+		if err != nil {
+			err = fmt.Errorf("failover test stopped after switching %s to %s: %s on %s: %w, so nothing after it ran", from, to, st.app, st.site, err)
+			s.Fail(err)
+			return err
+		}
+		s.Detail("%s", restart)
+		out, err := t.Run(restart)
 		if err != nil {
 			err = fmt.Errorf("failover test stopped after switching %s to %s: restarting %s on %s failed, so nothing after it ran: %s", from, to, st.app, st.site, firstLine(out, err))
 			s.Fail(err)
