@@ -252,3 +252,6 @@ func ConnectCommand(t SSHTransport) string { return t.connectCommand() }
 
 // AuthProblem is t's authProblem, for tests.
 func AuthProblem(t SSHTransport, err error, out string) error { return t.authProblem(err, out) }
+
+// RestartTiers exposes the order a whole stack restart takes its services in.
+func RestartTiers(compose string) ([][]string, error) { return restartTiers(compose) }

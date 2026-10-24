@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Fixed
+
+- `deployment apply` and `failover test` restart a service that joins another's PID, IPC or network namespace after that service runs again, so Wiki.js's bootstrap comes back up with the app instead of staying exited.
+
 ## [0.3.0-rc.6] - 2026-10-23
 
 ### Added
