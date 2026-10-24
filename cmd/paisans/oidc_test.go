@@ -157,12 +157,15 @@ func (f *idpFake) RunInput(command, stdin string) (string, error) {
 		if c == nil {
 			return reply(404, map[string]string{"error": "Record not found"})
 		}
+		// As Pocket ID does: an empty launch URL is refused, and only null
+		// clears one.
 		if m := launchURLParam.FindStringSubmatch(stdin); m != nil {
 			if m[1] == "" {
-				c.LaunchURL = nil
-			} else {
-				c.LaunchURL = &m[1]
+				return reply(400, map[string]string{"error": "LaunchURL must be a valid URL"})
 			}
+			c.LaunchURL = &m[1]
+		} else if strings.Contains(stdin, `\"launchURL\":null`) {
+			c.LaunchURL = nil
 		}
 		return reply(200, c)
 	case strings.Contains(stdin, "/api/oidc/clients\""):

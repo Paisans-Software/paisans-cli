@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Fixed
+
+- `deployment apply` and `oidc client create` clear a `no_launch` blueprint's launch URL with pocketid-go 0.4.1, which Pocket ID accepts, instead of being refused with `LaunchURL must be a valid URL`.
+
 ## [0.3.0-rc.7] - 2026-10-23
 
 ### Fixed

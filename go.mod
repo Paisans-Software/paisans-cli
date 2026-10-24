@@ -7,7 +7,7 @@ require (
 	filippo.io/age v1.3.1
 	github.com/getsops/sops/v3 v3.13.3
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
-	github.com/paisans-software/pocketid-go v0.4.0
+	github.com/paisans-software/pocketid-go v0.4.1
 	golang.org/x/crypto v0.55.0
 	golang.org/x/net v0.57.0
 	golang.org/x/term v0.45.0

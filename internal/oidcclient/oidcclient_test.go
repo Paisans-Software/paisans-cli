@@ -121,6 +121,11 @@ func (f *fakeIDP) serve(method string, u *url.URL, body string) (int, string) {
 			SkipConsent       bool     `json:"skipConsent"`
 		}
 		_ = json.Unmarshal([]byte(body), &in)
+		// binding:"omitempty,url" on a *string skips only nil, so an empty
+		// launch URL is refused and only null clears one.
+		if in.LaunchURL != nil && *in.LaunchURL == "" {
+			return 400, marshal(map[string]string{"error": "LaunchURL must be a valid URL"})
+		}
 		c := f.client(parts[3])
 		c.Name, c.CallbackURLs, c.IsPublic, c.PkceEnabled, c.IsGroupRestricted, c.LaunchURL = in.Name, in.CallbackURLs, in.IsPublic, in.PkceEnabled, in.IsGroupRestricted, in.LaunchURL
 		c.SkipConsent = in.SkipConsent
@@ -1044,7 +1049,7 @@ func TestANoLaunchClientHoldingAToolkitLaunchURLIsCleared(t *testing.T) {
 		if p.Steps[0].Title != "clear launch URL for talk" {
 			t.Errorf("title %q", p.Steps[0].Title)
 		}
-		want := `clear launch URL for client talk: PUT /api/oidc/clients/c-1 with launchURL "" and every other field sent back as it is now`
+		want := `clear launch URL for client talk: PUT /api/oidc/clients/c-1 with launchURL null and every other field sent back as it is now`
 		if p.Steps[0].Detail != want {
 			t.Errorf("line %q", p.Steps[0].Detail)
 		}
@@ -1057,8 +1062,8 @@ func TestANoLaunchClientHoldingAToolkitLaunchURLIsCleared(t *testing.T) {
 		if err := json.Unmarshal([]byte(f.updates[0]), &sent); err != nil {
 			t.Fatal(err)
 		}
-		if v, ok := sent["launchURL"]; !ok || v != "" {
-			t.Errorf("sent launchURL %v (present %v), want an empty string", v, ok)
+		if v, ok := sent["launchURL"]; !ok || v != nil {
+			t.Errorf("sent launchURL %v (present %v), want null", v, ok)
 		}
 		if sent["isGroupRestricted"] != true || sent["pkceEnabled"] != true {
 			t.Errorf("sent %v", sent)
