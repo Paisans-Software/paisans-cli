@@ -38,6 +38,7 @@ const (
 	FoundationOAuth2Proxy        = "oauth2-proxy"
 	FoundationUptime             = "uptime"
 	FoundationAccount            = "account"
+	FoundationValkey             = "valkey"
 )
 
 // foundationNames are the images every foundation names.
@@ -45,6 +46,7 @@ var foundationNames = map[string]bool{
 	FoundationEtcd: true, FoundationHAProxy: true, FoundationGarage: true, FoundationCaddy: true,
 	FoundationHeartbeat: true, FoundationPocketID: true, FoundationOperatorReconciler: true,
 	FoundationOAuth2Proxy: true, FoundationUptime: true, FoundationAccount: true,
+	FoundationValkey: true,
 }
 
 // supportedTags is, for each image the toolkit's code is written against, the

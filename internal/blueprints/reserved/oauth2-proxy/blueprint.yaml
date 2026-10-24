@@ -11,6 +11,11 @@ services:
   # nobody can route to. Its image is the core catalog's
   # foundation.yaml's.
   - {name: "app", foundation: "oauth2-proxy", purpose: "the gate, admitting members, listening on 4180"}
+  # The gate's sessions. The cookie carries only a ticket naming one, and
+  # a refresh rewrites the session here, never the cookie: forward_auth
+  # passes none of the gate's response headers back to the browser, so a
+  # cookie a refresh had changed would never arrive.
+  - {name: "sessions", foundation: "valkey", purpose: "the gate's session store"}
 database: {engine: none}
 port: 4180
 config:
@@ -47,8 +52,12 @@ oidc:
   reads_groups: true
 secrets:
   generate:
-    # The blueprint renders no session store, so oauth2-proxy keeps the whole
-    # session in the cookie, encrypted with this secret: a cookie sealed with
-    # the old one no longer opens.
+    # Signs the ticket each cookie carries: a ticket signed with the old one
+    # no longer opens its session.
     - {name: cookie_secret, rotation_cost: signs-out}
-  self_rotated: ["cookie_secret"]
+    # The session store's password, which the gate and the store read from
+    # the same .env. The store keeps nothing on disk, so the restart that
+    # takes a new one signs everyone out of the gate; each member's next
+    # request passes through sign in at the identity provider again.
+    - {name: session_store_password, rotation_cost: signs-out}
+  self_rotated: ["cookie_secret", "session_store_password"]

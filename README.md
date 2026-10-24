@@ -2652,7 +2652,7 @@ Finishing either command first costs nothing but its resume.
 | `external.smtp_password`, `apps.<app>.smtp_password` | the mail provider, logged in to with the next password from this machine, then from every site running an app that uses it, before any site is handed it | each app that logs in to send mail with it, which takes a `username` | none |
 | `oidc_clients.<app>.client_secret` | Pocket ID | the app | none |
 | `apps.<app>.oauth` (Mbin's OAuth2 unit) | Mbin | Mbin | every API client and app signs in again |
-| Mbin `app_secret`, oauth2-proxy `cookie_secret`, uptime `session_secret`, account `session_key` | the app | the app | signed in browser sessions of that app end |
+| Mbin `app_secret`, oauth2-proxy `cookie_secret` and `session_store_password`, uptime `session_secret`, account `session_key` | the app | the app | signed in browser sessions of that app end |
 | Synapse `mas_signing_key`, `mas_matrix_secret` | MAS, the homeserver | MAS, the homeserver | Matrix sessions end, on the stricter reading |
 | `apps.<app>.s3_access_key_id` and `s3_secret_access_key` | Garage | the app | none |
 | Pocket ID `static_api_key`, uptime `admin_password` | the app | the toolkit, the operator, and the account service, whose stack is re-applied with it | none |
@@ -3680,14 +3680,21 @@ from what nobody wrote.
 
 **Nobody declares the gate.** When any app sets `gated` or `auto_login`, the
 toolkit runs it as an app named `gate`, of blueprint `oauth2-proxy`, at
-`gate.<community.domain>`, pinned to the gateway site. It holds no data, being
-a session cookie and nothing durable, so it sits with the edge it serves: it is
-down only when the gateway is, and that takes every app with it anyway. It is
-one container admitting the `members` group, which fails closed: a session
-outside the group is refused, never waved through. Everything an app gets, it
-gets too: a client at the identity provider, a generated cookie secret, a DNS
-record from `dns init` and a check on the monitor. Its session cookie is scoped
-to the community's domain with a leading dot, so one sign-in covers every app.
+`gate.<community.domain>`, pinned to the gateway site. It holds nothing
+durable, so it sits with the edge it serves: it is down only when the gateway
+is, and that takes every app with it anyway. It is two containers: the gate,
+admitting the `members` group, which fails closed, so a session outside the
+group is refused, never waved through; and a Valkey beside it holding the
+sessions, in memory only. The session cookie carries only a ticket naming a
+session in that store, because a refresh must never have to change the
+cookie: the gateway's `forward_auth` sends none of the gate's response headers
+to the browser, so a changed cookie would never arrive and the next request
+would spend a refresh token the identity provider had already replaced. A
+session lost with the store costs its member one pass through sign in at an
+identity provider that still knows them. Everything an app gets, it gets too:
+a client at the identity provider, generated secrets, a DNS record from
+`dns init` and a check on the monitor. Its session cookie is scoped to the
+community's domain with a leading dot, so one sign-in covers every app.
 Four things follow, and each is refused:
 
 * **Declaring an `oauth2-proxy` app.** The gate is the toolkit's; the apps it
@@ -4327,7 +4334,7 @@ not measured on hosts, and live as named constants in `internal/hostmem`.
 | PostgreSQL, Patroni and HAProxy | 1 GiB | `cluster.sites`: the `data` sites | Spilo's PostgreSQL with its shared buffers and a few connections per app, Patroni's Python process, and HAProxy in front |
 | Garage | 256 MiB | the sites `storage.garage.sites` names, whatever their roles | its metadata database and the buffers of the uploads it is handling |
 | Caddy | 128 MiB | the gateway, and a monitor with `web_server.managed_by: paisans` | the toolkit's Caddy, its certificates and connections |
-| oauth2-proxy | 64 MiB | the gateway the gate app is pinned to, when an app is gated | the visibility gate |
+| oauth2-proxy | 64 MiB | the gateway the gate app is pinned to, when an app is gated | the visibility gate, and its session store, capped at 16 MiB |
 | The uptime monitor | 256 MiB | `monitor` sites | a Node.js process |
 | Pocket ID and an app | 1 GiB | `apps` sites | Pocket ID and one app beside it. Mbin, with its PHP workers and Valkey, or Wiki.js needs more of its own, so an apps site running several needs more than its floor |
 
