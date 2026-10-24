@@ -16,7 +16,7 @@ func TestAnApplyThatMovesTheLeaderSaysSo(t *testing.T) {
 	noWait(t)
 	host := newHost()
 	host.leaderAfter = "home-b"
-	host.replicaHas = []string{"account", "auth", "talk", "wiki"}
+	host.replicaHas = []string{"account", "auth", "digest", "talk", "wiki"}
 	var watched []apply.LeaderMove
 	t.Cleanup(apply.OnLeaderMove(func(m apply.LeaderMove) { watched = append(watched, m) }))
 	p := bootstrapPlan(t, host)
@@ -58,7 +58,7 @@ func TestAnApplyThatLeavesTheLeaderSaysNothing(t *testing.T) {
 			noWait(t)
 			host := newHost()
 			host.leader, host.leaderAfter = tc.before, tc.after
-			host.replicaHas = []string{"account", "auth", "talk", "wiki"}
+			host.replicaHas = []string{"account", "auth", "digest", "talk", "wiki"}
 			var watched []apply.LeaderMove
 			t.Cleanup(apply.OnLeaderMove(func(m apply.LeaderMove) { watched = append(watched, m) }))
 			p := bootstrapPlan(t, host)
@@ -341,7 +341,7 @@ func TestPatroniRunningWithOldEtcdHosts(t *testing.T) {
 		noWait(t)
 		host := applied(t, "home-a")
 		host.etcdHosts = "10.44.0.8:2379,10.44.0.9:2379"
-		host.replicaHas = []string{"account", "auth", "talk", "wiki"}
+		host.replicaHas = []string{"account", "auth", "digest", "talk", "wiki"}
 		p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
 		if err != nil {
 			t.Fatal(err)

@@ -42,6 +42,16 @@
       "mode": "0644"
     },
     {
+      "path": "srv/paisans/f2a9/digest/.env",
+      "sha256": "c44928ae358f75abf603223eff7212f9ad8981babd76aa0b05014d54f1550133",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/digest/compose.yaml",
+      "sha256": "12fb51b0e66267e3a88f09f627cb854cc39cc1f0a4c1d80f6fdc59d15738aa00",
+      "mode": "0644"
+    },
+    {
       "path": "srv/paisans/f2a9/infra/compose.yaml",
       "sha256": "4c9d2bd075d98858135623e6934d331ba5fd3eb632125bb15e24cea02b0e22ab",
       "mode": "0644"

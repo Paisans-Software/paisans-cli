@@ -1,0 +1,18 @@
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
+#
+# Routing for digest, imported by the gateway's block for
+# digest.example.org. Never gated: a member clicking unsubscribe from an inbox
+# may not be signed in, and the signed token in the link is what names them.
+# The unsubscribe links, /u/<token>, are the only public route the service
+# has, so nothing else is proxied.
+@unsubscribe path /u/*
+handle @unsubscribe {
+	reverse_proxy 10.44.0.1:8083 10.44.0.2:8083 {
+		# Failover across apps sites; see upstream_failover in the Caddyfile.
+		import upstream_failover
+		header_up X-Forwarded-Proto https
+	}
+}
+handle {
+	respond 404
+}
