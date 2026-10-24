@@ -825,6 +825,85 @@ version without anyone numbering it.
 | `apps.<account>.email_hash_key` | keys the HMAC of a declined address, so a copy of the database alone cannot test a guessed address | `secrets rotate` refuses it and `--all` keeps it; only `paisans secrets set` changes it, and that forgets every declined address |
 | `apps.<account>.session_key` | signs the service's sign-in cookie | signs everyone out of the account service and nothing else |
 
+### The engagement digest
+
+The `engagement` blueprint runs [`Paisans-Software/paisans-engagement-service`](https://github.com/Paisans-Software/paisans-engagement-service),
+which emails each member a weekly digest of what happened in the community's
+Mbin. The design is in `docs/specs/2026-10-24-engagement-digest.md`.
+
+* **When and to whom.** It sends on Monday at 08:00, covering the seven days
+  before. The time is the host's local time, not UTC: the container mounts
+  `/etc/localtime` read only, because a container otherwise runs in UTC and
+  nothing else in the toolkit sets a zone. No setting changes the day or the
+  hour, so every deployment has one schedule. A recipient is a local Mbin
+  account with a verified address; banned, deleted, unverified, bot and
+  remote accounts get nothing, and neither does an address that unsubscribed.
+* **How it reads Mbin.** Through a read only Postgres role, `<app>_reader`
+  (`digest_reader` for an app named `digest`), which `deployment apply` creates
+  beside the app's own role. The role has `SELECT` on named columns of named
+  tables and nothing else, so it cannot write to Mbin's database, and it
+  cannot see a session, a token, a password hash, a TOTP secret, a key or an
+  IP address: those tables and columns are never in the list. The list is in
+  `internal/apply/sourcegrant.go`, and the service's own list of what its
+  queries read must match it.
+* **When the grant runs.** After every app stack on the site is healthy,
+  Mbin's included, because the tables it names exist only once Mbin has
+  started and run its migrations. On a new deployment Mbin has not done that
+  at the first apply, so the grant is reported as owed, nothing is granted, and
+  the next `deployment apply` of the site that leads Patroni grants it.
+  Until then the digest cannot read Mbin, and the first digest follows that
+  second apply. A column the list names and Mbin lacks fails the apply, so a
+  Mbin release that changes its schema is noticed here and not in a
+  digest that silently misses a week.
+* **What the gateway forwards.** Only `/u/*`, the unsubscribe links, and
+  everything else on the hostname answers 404. The route has no Pocket ID
+  gate (`gateable: false`) because a member clicking from an inbox may not be
+  signed in, and the signed token in the link is what names them.
+
+```yaml
+apps:
+  talk:
+    blueprint: mbin
+    hostname: talk.example.org
+    placement: cluster
+  digest:
+    blueprint: engagement
+    hostname: digest.example.org
+    placement: cluster
+```
+
+The service's own database, in the cluster's Postgres, holds only
+unsubscribes and the record of what was sent to each member each week. A
+member is identified in it, and in every token, by Mbin's `oauth_oidc_id`,
+the member's Pocket ID subject. It reads the deployment's `smtp:` block like
+any other app that sends mail (see *Mail is declared once and overridden per
+app*).
+
+### What `validate` refuses for the digest
+
+| Rule | When |
+|---|---|
+| `engagement-one-per-deployment` | a second `engagement` app. Refused: the digest would mail every member twice |
+| `engagement-must-be-clustered` | an engagement app that is not `placement: cluster`. Refused: it keeps its state in the cluster's Postgres and must keep sending when a site is lost |
+| `engagement-without-source` | no `mbin` app. Refused: it has nothing to read |
+| `engagement-one-source` | more than one `mbin` app. Refused: it could not tell which community to summarise |
+| `engagement-source-not-clustered` | the `mbin` app is pinned. Refused: the reader role is created in the cluster's Postgres, and a pinned Mbin runs against a Postgres of its own on its site, where no such role exists |
+| `engagement-without-smtp` | the app resolves no SMTP host or `from_address`. Warned: it is an email and cannot send without them |
+
+**Mbin must have `placement: cluster`.** The one-Mbin rule also keeps the
+source unambiguous: the digest reads one database and one community's title.
+
+The core catalog's `foundation.yaml` carries an `engagement` track, the
+service's image. It is optional in a foundation, so a core catalog released
+before it still reads; declaring an engagement app against one without it is
+refused when the stack is rendered, with a message that asks for a catalog
+release that publishes one.
+
+| Secret | What it does | Rotating it |
+|---|---|---|
+| `apps.<engagement>.source_database_password` | the password of `<app>_reader` | `secrets rotate` alters the role on the Patroni leader and re-applies the engagement stack; Mbin never holds it, so its stack is untouched. Reconnects |
+| `apps.<engagement>.digest_signing_key` | signs every unsubscribe link | the service rotates it itself, with a restart. **Every unsubscribe link in an email already sent stops working**, because it was signed with the old key; the next digest carries links signed with the new one |
+
 ## Monitoring
 
 The `uptime` kind runs the [`Paisans-Software/uptime`](https://github.com/Paisans-Software/uptime)
@@ -2071,7 +2150,7 @@ The toolkit names no image itself. Every image a deployment runs by default is
 named by the **core catalog**, Paisans-Software/paisans-blueprints: an app's
 in its blueprint, and the toolkit's own (etcd, Spilo, HAProxy, Garage, the
 gateway's Caddy, the heartbeat, Pocket ID and its operator reconciler, the gate,
-the account service and the monitor) in its `foundation.yaml`. Each is a
+the account service, the digest and the monitor) in its `foundation.yaml`. Each is a
 **track**: a repository and a tag pattern in which each `*` matches one run of
 digits.
 
@@ -2896,7 +2975,7 @@ no `username`, such as a test deployment's Mailpit under `security: none`, is
 sent to without logging in, so it takes no password: none is asked for, and
 `secrets rotate --all` leaves out one that is set.
 
-Four blueprints read it (`blueprints.SendsMail`): the account service, which takes it as
+Five blueprints read it (`blueprints.SendsMail`): the engagement digest, which takes it as `ENGAGEMENT_SMTP_*` in its `.env` for the weekly email; the account service, which takes it as
 `ACCOUNT_SMTP_*` in its `.env` for its notices to community admins and applicants; the
 uptime monitor, which puts it in its seed file; Pocket ID, which takes it as
 `SMTP_HOST`, `SMTP_PORT`, `SMTP_TLS`, `SMTP_USER`, `SMTP_PASSWORD` and
@@ -3181,8 +3260,8 @@ each app the leftovers belong to, which is the command that takes them off
 
 #### A blueprint can come from a catalog
 
-The blueprints built into the toolkit are the reserved four (`pocket-id`, the
-gate, `account`, `uptime`). The first party ones, `mbin`, `wikijs` and the
+The blueprints built into the toolkit are the reserved five (`pocket-id`, the
+gate, `account`, `uptime`, `engagement`). The first party ones, `mbin`, `wikijs` and the
 rest, are the **core catalog**'s, which the toolkit fetches at its newest
 release this toolkit reads (see *Images follow tracks*). Any other comes from a **catalog**: a git repository of blueprints the deployment
 declares and pins to a commit, and an app names it qualified:
@@ -4395,7 +4474,7 @@ restore that looks complete until someone goes looking for their account.
 |----------|-------|------------|
 | `paisans-stack.yaml` | topology | nothing knows what to build, unless a site holds a version of it (every site does; see *Every site keeps signed copies of the configuration*) |
 | `secrets.enc.yaml` | credentials | every secret must be regenerated and every OIDC client re-minted, unless a site holds a version of it and an operator's age key still decrypts it |
-| Database dumps / WAL archive | member accounts, posts, settings | the community is empty |
+| Database dumps / WAL archive | member accounts, posts, settings; the digest's database holds only unsubscribes and the per member weekly send record | the community is empty |
 | Object storage | media, uploads, attachments | posts render with broken images |
 
 The config files capture **infrastructure**, not **application state**. Groups,
