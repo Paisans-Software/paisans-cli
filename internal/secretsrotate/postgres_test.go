@@ -38,6 +38,11 @@ type pgWorld struct {
 	// apps is the database password each site's app stack presents, keyed
 	// site/app.
 	apps map[string]string
+	// readerApps is the Mbin reader password each site's engagement stack
+	// presents, keyed site/app.
+	readerApps map[string]string
+	// readerDatabases is every database a login as a reader named.
+	readerDatabases []string
 	// adminLogin is an admin role that may log in, as Spilo 3 bootstraps it;
 	// false is the NOLOGIN admin Spilo 4's post_init.sh creates.
 	adminLogin bool
@@ -88,9 +93,10 @@ func newPGWorld(t *testing.T) *pgWorld {
 		},
 		Cluster: config.Cluster{Sites: []string{"home-a", "home-b", "home-c"}, Synchronous: true},
 		Apps: map[string]config.App{
-			"forum": {Blueprint: config.Blueprint("mbin"), Placement: config.Placement{Mode: config.PlacementCluster}},
-			"notes": {Blueprint: config.Blueprint("wikijs"), Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-b"}},
-			"proxy": {Blueprint: config.BlueprintOAuth2Proxy, Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"}},
+			"forum":  {Blueprint: config.Blueprint("mbin"), Placement: config.Placement{Mode: config.PlacementCluster}},
+			"notes":  {Blueprint: config.Blueprint("wikijs"), Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-b"}},
+			"proxy":  {Blueprint: config.BlueprintOAuth2Proxy, Placement: config.Placement{Mode: config.PlacementPinned, Site: "home-a"}},
+			"digest": {Blueprint: config.BlueprintEngagement, Placement: config.Placement{Mode: config.PlacementCluster}},
 		},
 	}
 	s := &config.Secrets{}
@@ -98,16 +104,18 @@ func newPGWorld(t *testing.T) *pgWorld {
 	s.Cluster.AdminPassword = "admin-old"
 	s.Cluster.StandbyPassword = "standby-old"
 	s.Apps = map[string]map[string]any{
-		"forum": {"database_password": "forum-old"},
-		"notes": {"database_password": "notes-old"},
+		"forum":  {"database_password": "forum-old"},
+		"notes":  {"database_password": "notes-old"},
+		"digest": {"database_password": "digest-old", "source_database_password": "reader-old"},
 	}
 	w := &pgWorld{
 		t: t, cfg: cfg, store: &memStore{s: s},
 		leader: "home-b", sync: "home-c",
-		roles:  map[string]string{"postgres": "super-old", "admin": "admin-old", "standby": "standby-old", "forum": "forum-old"},
+		roles:  map[string]string{"postgres": "super-old", "admin": "admin-old", "standby": "standby-old", "forum": "forum-old", "digest": "digest-old", "digest_reader": "reader-old"},
 		pinned: map[string]string{"notes": "notes-old"},
 		file:   map[string]map[string]string{}, running: map[string]map[string]string{},
-		apps: map[string]string{"home-a/forum": "forum-old", "home-b/forum": "forum-old", "home-b/notes": "notes-old"},
+		apps:       map[string]string{"home-a/forum": "forum-old", "home-b/forum": "forum-old", "home-b/notes": "notes-old", "home-a/digest": "digest-old", "home-b/digest": "digest-old"},
+		readerApps: map[string]string{"home-a/digest": "reader-old", "home-b/digest": "reader-old"},
 	}
 	for _, site := range cfg.Cluster.Sites {
 		w.file[site] = map[string]string{"PGPASSWORD_SUPERUSER": "super-old", "PGPASSWORD_ADMIN": "admin-old", "PGPASSWORD_STANDBY": "standby-old"}
@@ -148,6 +156,12 @@ func (w *pgWorld) env() Env {
 						w.running[site] = maps(w.file[site])
 					}
 					continue
+				}
+				if reader, ok := s.Get("apps." + stack + ".source_database_password"); ok && stack == "digest" {
+					if w.readerApps[site+"/"+stack] != reader {
+						w.readerApps[site+"/"+stack] = reader
+						w.log = append(w.log, "apply "+site+" "+stack+" reader")
+					}
 				}
 				value, _ := s.Get("apps." + stack + ".database_password")
 				if w.apps[site+"/"+stack] != value {
@@ -193,6 +207,7 @@ var (
 	envVarRef  = regexp.MustCompile(`"\$(PGPASSWORD_[A-Z]+)"`)
 	candidate  = regexp.MustCompile(`--candidate (\S+)`)
 	loginUser  = regexp.MustCompile(` -U (\w+)`)
+	loginDB    = regexp.MustCompile(` -d (\w+)`)
 	alterRole  = regexp.MustCompile(`ALTER ROLE "(\w+)" WITH PASSWORD '((?:[^']|'')*)';`)
 	composeApp = regexp.MustCompile(`/([\w-]+)/compose\.yaml exec -T postgres`)
 )
@@ -257,6 +272,9 @@ func (h *pgHost) RunInput(command, stdin string) (string, error) {
 			return "psql: error: connection refused", w.loginErr
 		}
 		role := loginUser.FindStringSubmatch(command)[1]
+		if strings.HasSuffix(role, "_reader") {
+			w.readerDatabases = append(w.readerDatabases, loginDB.FindStringSubmatch(command)[1])
+		}
 		if role == "admin" && pinnedApp == "" && !w.adminLogin {
 			// Spilo's post_init.sh creates admin NOLOGIN under Patroni 4.
 			return `psql: error: FATAL:  role "admin" is not permitted to log in`, errors.New("exit status 2")
@@ -702,5 +720,61 @@ func TestClusterRolesInOneRunFollowTheLeader(t *testing.T) {
 	}
 	if len(w.store.s.Rotations) != 0 {
 		t.Fatalf("rotations left: %v", w.store.s.Rotations)
+	}
+}
+
+func TestSourceReaderAltersOnTheLeaderAndAppliesTheEngagementStacks(t *testing.T) {
+	w := newPGWorld(t)
+	r := SourceReader("digest")
+	if r.Path() != "apps.digest.source_database_password" || !r.Cost().Reconnects {
+		t.Fatalf("path %q cost %+v", r.Path(), r.Cost())
+	}
+	var users []string
+	for _, u := range r.Users(w.env()) {
+		users = append(users, u.Site+":"+strings.Join(u.Stacks, ","))
+	}
+	if !slices.Equal(users, []string{"home-a:digest", "home-b:digest"}) {
+		t.Fatalf("users %v, want the engagement app on every apps site, not Mbin", users)
+	}
+	if err := w.rotate(r); err != nil {
+		t.Fatal(err)
+	}
+	next, _ := w.store.s.Get("apps.digest.source_database_password")
+	if w.roles["digest_reader"] != next || next == "reader-old" {
+		t.Fatalf("the cluster accepts %q for the reader, the file holds %q", w.roles["digest_reader"], next)
+	}
+	if w.roles["digest"] != "digest-old" {
+		t.Fatalf("the app's own role changed to %q", w.roles["digest"])
+	}
+	if w.readerApps["home-a/digest"] != next || w.readerApps["home-b/digest"] != next {
+		t.Fatalf("stacks present %v", w.readerApps)
+	}
+	if indexOf(w.log, "alter role digest_reader on home-b") < 0 {
+		t.Fatalf("not altered on the leader: %v", w.log)
+	}
+	if len(w.readerDatabases) == 0 {
+		t.Fatal("no login as the reader was checked")
+	}
+	for _, d := range w.readerDatabases {
+		if d != "forum" {
+			t.Fatalf("the reader logged in to %q, the only database it may connect to is Mbin's forum", d)
+		}
+	}
+	w.noSecretOnArgv(next)
+}
+
+func TestSourceReaderPrecheck(t *testing.T) {
+	w := newPGWorld(t)
+	for _, app := range []string{"forum", "proxy", "missing"} {
+		if err := SourceReader(app).(Prechecker).Precheck(w.env()); err == nil {
+			t.Fatalf("%s: not refused", app)
+		}
+	}
+	if err := SourceReader("digest").(Prechecker).Precheck(w.env()); err != nil {
+		t.Fatal(err)
+	}
+	delete(w.cfg.Apps, "forum")
+	if err := SourceReader("digest").(Prechecker).Precheck(w.env()); err == nil {
+		t.Fatal("an engagement app with no Mbin to read was not refused")
 	}
 }

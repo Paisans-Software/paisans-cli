@@ -254,6 +254,7 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 		"apps.digest.database_password",
 		"apps.talk.database_password",
 		"apps.wiki.database_password",
+		"apps.digest.source_database_password",
 		"apps.talk.rabbitmq_password",
 		"apps.auth.dns_email_hash_key",
 		"apps.digest.digest_signing_key",
@@ -1375,5 +1376,27 @@ func TestSecretsRotateTakesABlueprintsHeartbeatToken(t *testing.T) {
 	tail := []string{"apps.auth.dns_2fa_heartbeat_token", "apps.notes.heartbeat_token", "apps.wiki.heartbeat_token"}
 	if len(got) < len(tail) || !slices.Equal(got[len(got)-len(tail):], tail) {
 		t.Errorf("--all does not end with the blueprints' heartbeat tokens after the continuity tokens: %v", got)
+	}
+}
+
+// The engagement digest's Mbin reader password is rotated by name as the
+// reader role's, and is not mistaken for the app's own database password.
+func TestSecretsRotateTakesTheDigestsSourceDatabasePassword(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := rotatorFor("apps.digest.source_database_password", rotateWiring{cfg: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Path() != "apps.digest.source_database_password" || !r.Cost().Reconnects {
+		t.Errorf("path %q cost %+v", r.Path(), r.Cost())
+	}
+	if want := secretsrotate.SourceReader("digest"); fmt.Sprintf("%T", r) != fmt.Sprintf("%T", want) {
+		t.Errorf("rotator %T, want %T", r, want)
+	}
+	if _, err := rotatorFor("apps.wiki.source_database_password", rotateWiring{cfg: cfg}); err == nil {
+		t.Error("a blueprint with no reader was given a reader rotation")
 	}
 }
