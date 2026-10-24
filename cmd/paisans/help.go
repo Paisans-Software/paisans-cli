@@ -417,6 +417,14 @@ var helpCommands = []helpCommand{
 			"Never prints the private key, and never replaces a keystore item or a key file. Reaches no host and changes nothing in the configuration.",
 	},
 	{
+		name:    "operator invite",
+		summary: "Write a signed invite for a new operator to stdout.",
+		usage:   []string{"paisans operator invite <username> --key <path.pub or key line> [--config " + config.FileName + "]"},
+		detail: "Write an invite for the operator <username> will be, signed through your ssh-agent with the key .paisans/signing-key records. " +
+			"The invite names the deployment, its domain, the root of the history this workstation trusts, the new operator's key without its comment, and each site's ssh host, port and user. It holds nothing secret.\n\n" +
+			"Refuses a username or key an operator already has, a workstation with no recorded signing key (run operator register), and one that does not know its root (run deployment pull). Reaches no host and changes no file.",
+	},
+	{
 		name:    "operator magic-link",
 		summary: "Give a declared operator a one-time sign-in link.",
 		usage:   []string{"paisans operator magic-link <operator> [--app <pocket-id app>]\n                       [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                       [--site <name>] [--ssh <destination>] [--execute]"},
