@@ -153,14 +153,8 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *confi
 		r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "--execute will ask for the word "+partialWord+" at a terminal.")
 	}
 	v := &gathered{l: l, g: g, sites: sites, key: key, files: files, parents: parents, revision: 1, answers: ans}
-	if len(parents) == 1 {
-		cache, err := l.Cache()
-		if err != nil {
-			return nil, err
-		}
-		if pf, err := cache.Files(parents[0]); err == nil && pf.Equal(files) {
-			v.same = parents[0]
-		}
+	if v.same, err = showChange(r, l, g, parents, files); err != nil {
+		return nil, err
 	}
 	for _, p := range parents {
 		v.revision = max(v.revision, g.Versions[p].Revision+1)
@@ -169,6 +163,47 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *confi
 		v.revision = g.Versions[v.same].Revision
 	}
 	return v, nil
+}
+
+// showChange shows, before the review, how the local files differ from the
+// sites' newest version, which the gather brought into the local store:
+// paisans-stack.yaml as a diff from that version, the secrets by key name
+// only, never a value. It returns that version when the files are it
+// already, "" otherwise. A first version has nothing to differ from.
+func showChange(r ui.Reporter, l configstore.Local, g configstore.Gathered, parents []string, files configstore.Files) (string, error) {
+	s := r.Step("what changes in the configuration")
+	if len(parents) == 0 {
+		s.End(ui.OK, "the first version, nothing to compare it with")
+		return "", nil
+	}
+	head := parents[0]
+	cache, err := l.Cache()
+	if err != nil {
+		s.Fail(err)
+		return "", err
+	}
+	theirs, err := cache.Files(head)
+	if err != nil {
+		s.End(ui.Warned, describe(g, head)+" is not in the local store to compare with")
+		return "", nil
+	}
+	if theirs.Equal(files) {
+		s.End(ui.OK, "unchanged from "+describe(g, head))
+		return head, nil
+	}
+	rev := g.Versions[head].Revision
+	lines, err := difference(theirs, files, sides{dirA: fmt.Sprintf("revision-%d/", rev), dirB: "local/", inA: fmt.Sprintf("revision %d", rev), inB: "the local files"})
+	if err != nil {
+		s.Fail(err)
+		return "", err
+	}
+	s.End(ui.OK, "the local files against "+describe(g, head))
+	if len(lines) == 0 {
+		// Equal keys and values, stored differently: sops's metadata.
+		lines = []string{"secrets.enc.yaml differs only in sops's metadata"}
+	}
+	r.Verbatim(lines)
+	return "", nil
 }
 
 // samePath reports whether a and b name one file, as absolute paths.

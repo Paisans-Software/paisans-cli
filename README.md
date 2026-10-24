@@ -5939,7 +5939,9 @@ makes `site prepare` install their key for the deployment's user; or
 by pointing `apps.<name>.images` at an image they control, which `deployment apply` pulls
 and runs with whatever the template mounts. A plan line saying `○ authorize
 ssh key` is easy to miss, and with `--execute` it is not shown at all. So both
-commands show what changes and ask before it does.
+commands show what changes and ask before it does. Before its review,
+`deployment apply` shows how the configuration differs from the sites' newest
+version: `paisans-stack.yaml` as a diff, the secrets by key only.
 `docs/specs/2026-10-11-config-review.md` is the approved specification.
 
 **The grant** is the part of the configuration that decides who may log in to

@@ -1368,7 +1368,10 @@ images it superseded* in `README.md`).
 * **Configuration store:** before the review, every site's versions are gathered
   (under `configuration store`) and a fork, a base older than the sites' newest
   version, or a key no operator lists is refused, naming `deployment pull` or `deployment
-  publish --merge`. With `--execute`, it asks for `partial` when fewer than a
+  publish --merge`. Under `what changes in the configuration` the review shows
+  how the local files differ from the sites' newest version, its revision and
+  signer named: `paisans-stack.yaml` as a diff, the secrets by key only.
+  With `--execute`, it asks for `partial` when fewer than a
   majority of sites answered directly. A dry run changes no site and starts no
   sync. After the approval, a host whose record holds a newer revision, or
   another version at the same revision, asks for `rollback`. `--execute` then

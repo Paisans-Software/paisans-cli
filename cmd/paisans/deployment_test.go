@@ -405,10 +405,22 @@ func TestConfigPullOverEditsRefusesAndShowsTheDifference(t *testing.T) {
 }
 
 func TestSecretsKeyChangesNamesKeysOnly(t *testing.T) {
-	got := secretsKeyChanges([]byte("a:\n  b: ENC[x]\n  c: ENC[y]\nsops:\n  mac: m1\n"), []byte("a:\n  b: ENC[x]\n  c: ENC[z]\n  d: ENC[w]\nsops:\n  mac: m2\n"))
+	got := secretsKeyChanges([]byte("a:\n  b: ENC[x]\n  c: ENC[y]\nsops:\n  mac: m1\n"), []byte("a:\n  b: ENC[x]\n  c: ENC[z]\n  d: ENC[w]\nsops:\n  mac: m2\n"), localAndHead)
 	want := []string{"secrets: a.c differs", "secrets: a.d only in the head"}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("got %q", got)
+	}
+}
+
+// The diff names each side by its label, never by the temporary file git
+// compared.
+func TestUnifiedDiffNamesTheSides(t *testing.T) {
+	got, err := unifiedDiff([]byte("a: 1\n"), []byte("a: 2\n"), "local/x.yaml", "head/x.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "--- local/x.yaml\n+++ head/x.yaml\n") || strings.Contains(got, "paisans-diff-") {
+		t.Errorf("got %q", got)
 	}
 }
 
