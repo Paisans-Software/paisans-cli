@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/keystore"
+	"github.com/paisans-software/paisans-cli/internal/operatorinvite"
 )
 
 // joinFixture is carol's workstation after she answered alice's invite: the
@@ -26,9 +28,16 @@ type joinFixture struct {
 	root, head string
 	carolPub   string
 	head2      configstore.Files // the head's files
+	answer     string            // what the sites serve
+	store      store             // the sites' store
+	alicePriv  string
+	carolYAML  string // the root's paisans-stack.yaml with carol declared
 	runs       *[]string
 	report     *bytes.Buffer
 }
+
+// joinAgeSource is where the fixture's answer says it found carol's age key.
+const joinAgeSource = "the keystore item paisans-age for the fixture"
 
 // carolEntry is an operators entry for carol with key, carrying a comment.
 func carolEntry(key string) string {
@@ -80,8 +89,8 @@ func newJoinFixture(t *testing.T, listed, opens bool) joinFixture {
 		t.Fatal(err)
 	}
 	head, files := v1, f1
+	withCarol := strings.Replace(yaml, "\nsites:\n", "\n"+carolEntry(carolPub), 1)
 	if listed {
-		withCarol := strings.Replace(yaml, "\nsites:\n", "\n"+carolEntry(carolPub), 1)
 		files = snapshotted(configstore.Files{Paisans: []byte(withCarol), Secrets: secrets, SOPS: sops})
 		if head, err = s.repo.Commit(files, []string{v1}, 2, alicePriv, time.Unix(1_800_000_100, 0)); err != nil {
 			t.Fatal(err)
@@ -105,7 +114,7 @@ func newJoinFixture(t *testing.T, listed, opens bool) joinFixture {
 
 	// carol's workstation holds the recorded answer, and nothing else.
 	dir := t.TempDir()
-	if err := recordJoin(dir, invite.Bytes(), alicePub); err != nil {
+	if err := recordJoin(dir, invite.Bytes(), alicePub, ageKey{Recipient: carol.Recipient().String(), Source: joinAgeSource}); err != nil {
 		t.Fatal(err)
 	}
 	var runs []string
@@ -122,7 +131,7 @@ func newJoinFixture(t *testing.T, listed, opens bool) joinFixture {
 	agentKeys = func() []string { return []string{carolPub} }
 	configSignWith = func(string) string { return carolPriv }
 	t.Cleanup(func() { agentKeys, configSignWith = saved, savedSign })
-	return joinFixture{dir: dir, root: v1, head: head, carolPub: carolPub, head2: files, runs: &runs, report: report}
+	return joinFixture{dir: dir, root: v1, head: head, carolPub: carolPub, head2: files, answer: answer, store: s, alicePriv: alicePriv, carolYAML: withCarol, runs: &runs, report: report}
 }
 
 func (f joinFixture) register(t *testing.T, rest ...string) (string, error) {
@@ -258,6 +267,129 @@ func TestJoinSaysWhenSecretsDoNotOpen(t *testing.T) {
 	if !strings.Contains(out, "operator add --request") || !strings.Contains(out, "deployment pull") {
 		t.Fatalf("no failed check naming the remedy:\n%s", out)
 	}
+	if strings.Contains(out, joinAgeSource) {
+		t.Fatalf("secrets not encrypted to carol were blamed on her workstation:\n%s", out)
+	}
+}
+
+// Secrets encrypted to the age key the answer recorded, that do not open
+// here, are this workstation's to fix: the check names the key, where the
+// answer found it and how sops is pointed at a key, and does not send the
+// inviter to accept again.
+func TestJoinSaysWhenYourKeyIsNotReached(t *testing.T) {
+	f := newJoinFixture(t, true, true)
+	withKeystore(t, keystore.NewMemory())
+	out, err := f.register(t, "--execute")
+	if err != nil {
+		t.Fatal(problemText(err), err)
+	}
+	if !(configstore.Local{Dir: f.dir}).HasFiles() || !pushed(*f.runs) {
+		t.Fatal("the join did not complete")
+	}
+	recipient, _, err := readJoinAge(f.dir)
+	if err != nil || recipient == "" {
+		t.Fatalf("no recorded age key: %v", err)
+	}
+	for _, want := range []string{"they do not open", recipient, joinAgeSource, "SOPS_AGE_KEY_FILE", "SOPS_AGE_KEY_CMD"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "operator add --request") {
+		t.Errorf("a local failure sent the inviter to accept again:\n%s", out)
+	}
+}
+
+// A join refused once the gather ran says no configuration file was
+// written, rather than nothing, since the gather filled the store.
+func TestJoinRefusalSaysNoConfigurationFileWritten(t *testing.T) {
+	f := newJoinFixture(t, false, true)
+	_, err := f.register(t, "--execute")
+	if !strings.Contains(problemText(err), "No configuration file was written") {
+		t.Fatalf("got %s", problemText(err))
+	}
+}
+
+// A refused login can also be a host that is not the deployment's site, so
+// the advice names the invite's hosts beside asking the inviter.
+func TestJoinRefusedLoginNamesTheInvitesHosts(t *testing.T) {
+	f := newJoinFixture(t, true, true)
+	reachDestination = func(dest config.Destination) apply.Transport {
+		if dest.Host == "home-a.example.org" {
+			return &storeHost{name: dest.String(), down: true}
+		}
+		return &loginRefusedHost{storeHost{name: dest.String()}}
+	}
+	_, err := f.register(t, "--execute")
+	wantAskInviter(t, err)
+	inv, _, _ := joinRecorded(configstore.Local{Dir: f.dir})
+	text := problemText(err)
+	for _, s := range inv.Sites {
+		host := config.Destination{User: s.User, Host: s.Host, Port: s.Port}.String()
+		if !strings.Contains(text, host) {
+			t.Errorf("lacks the invite's host %s: %s", host, text)
+		}
+	}
+	if !strings.Contains(text, "deployment's sites") {
+		t.Errorf("does not say to check the hosts are the sites: %s", text)
+	}
+	f.wroteNothing(t)
+}
+
+// A fork among the sites is said as one, before either head is judged, so a
+// head that does not list carol does not read as an acceptance not applied.
+func TestJoinSaysTheSitesHoldAFork(t *testing.T) {
+	f := newJoinFixture(t, false, true)
+	root, err := f.store.repo.Files(f.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listing := snapshotted(configstore.Files{Paisans: []byte(f.carolYAML), Secrets: root.Secrets, SOPS: root.SOPS})
+	other := snapshotted(configstore.Files{Paisans: append(append([]byte{}, root.Paisans...), "# other\n"...), Secrets: root.Secrets, SOPS: root.SOPS})
+	for i, files := range []configstore.Files{listing, other} {
+		if _, err := f.store.repo.Commit(files, []string{f.root}, 2, f.alicePriv, time.Unix(1_800_000_100+int64(i), 0)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	answer := f.store.answer(t)
+	recoverHosts(t, answer)
+	allSitesUp(answer, f.runs)
+	_, err = f.register(t, "--execute")
+	if err == nil || !strings.Contains(problemText(err), "the sites hold a fork") || strings.Contains(problemText(err), "do not know you") {
+		t.Fatalf("got %s", problemText(err))
+	}
+	f.wroteNothing(t)
+	if _, statErr := os.Stat(configstore.Local{Dir: f.dir}.Incoming()); !os.IsNotExist(statErr) {
+		t.Error("a head's files were written")
+	}
+}
+
+// A join whose attestation push failed has written the files, so running
+// register again is plain register, which signs and pushes.
+func TestJoinRerunAfterFailedPush(t *testing.T) {
+	f := newJoinFixture(t, true, true)
+	answer := f.answer
+	configSiteTransport = func(name string, _ config.Site) apply.Transport {
+		return &storeHost{name: name, answer: answer, runs: f.runs, noPush: true}
+	}
+	if _, err := f.register(t, "--execute"); err == nil {
+		t.Fatal("the push did not fail")
+	}
+	l := configstore.Local{Dir: f.dir}
+	if !l.HasFiles() {
+		t.Fatal("the files were not written before the push")
+	}
+	*f.runs = nil
+	allSitesUp(answer, f.runs)
+	if out, err := f.register(t, "--execute"); err != nil {
+		t.Fatalf("%s\n%s", problemText(err), out)
+	}
+	if !pushed(*f.runs) {
+		t.Fatalf("the re-run pushed nothing: %q", *f.runs)
+	}
+	if h, _ := l.Head(); h == "" || h == f.head {
+		t.Fatalf("head %q: no attestation recorded", h)
+	}
 }
 
 // Without --execute the join reads and says what it would write, and
@@ -287,4 +419,125 @@ func TestJoinRefusesRootAndKey(t *testing.T) {
 		}
 	}
 	f.wroteNothing(t)
+}
+
+// The five steps on two workstations, through the commands themselves: alice
+// invites carol, carol answers, alice accepts, alice's files are published
+// as the sites' newest version, and carol joins. The age key carol's request
+// named opens the joined secrets, and her key signs from then on.
+func TestInviteAnswerAcceptJoin(t *testing.T) {
+	withoutAgeKey(t)
+	alicePriv, alicePub := testKey(t)
+	carolPriv, carolPub := testKey(t)
+	aliceAge, _ := age.GenerateX25519Identity()
+	aliceKeys, carolKeys := keystore.NewMemory(), keystore.NewMemory()
+	if err := aliceKeys.Put(fixtureDeploymentID, aliceAge.String(), aliceAge.Recipient().String()); err != nil {
+		t.Fatal(err)
+	}
+
+	s := newStore(t)
+	f1 := snapshotted(configstore.Files{
+		Paisans: []byte(fixtureAs(t, alicePub)),
+		Secrets: encryptedFixtureSecrets(t, aliceAge.Recipient().String()),
+		SOPS:    []byte("creation_rules:\n  - age: " + aliceAge.Recipient().String() + "\n"),
+	})
+	v1, err := s.repo.Commit(f1, nil, 1, alicePriv, time.Unix(1_800_000_000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	alice := registerWorkstation(t, s.answer(t), f1, nil, alicePub)
+	if err := alice.SetSigningKey(alicePub); err != nil {
+		t.Fatal(err)
+	}
+	if err := alice.SetRoot(v1); err != nil {
+		t.Fatal(err)
+	}
+	realSecrets(t)
+	saved, savedSign := agentKeys, configSignWith
+	t.Cleanup(func() { agentKeys, configSignWith = saved, savedSign })
+	as := func(keys *keystore.Memory, priv, pub string) {
+		config.AgeKeystore = keys
+		agentKeys = func() []string { return []string{pub} }
+		configSignWith = func(string) string { return priv }
+		signFromFile(t, priv)
+	}
+	withKeystore(t, aliceKeys)
+
+	// 1. alice invites carol.
+	as(aliceKeys, alicePriv, alicePub)
+	var invite bytes.Buffer
+	if err := runOperatorInvite(inviteArgs(alice, "carol", "--key", carolPub), &invite); err != nil {
+		t.Fatal(problemText(err))
+	}
+	inviteFile := filepath.Join(t.TempDir(), "carol.invite")
+	if err := os.WriteFile(inviteFile, invite.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. carol answers it on her own workstation.
+	as(carolKeys, carolPriv, carolPub)
+	dir := t.TempDir()
+	carolConfig := filepath.Join(dir, config.FileName)
+	var request bytes.Buffer
+	if err := runOperatorRegister([]string{"--invite", inviteFile, "--inviter-key", alicePub, "--name", "Carol Jones", "--email", "carol@example.org", "--config", carolConfig}, noTerminalStdin(), &request); err != nil {
+		t.Fatal(problemText(err))
+	}
+	q, _, err := operatorinvite.ParseRequest(request.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestFile := filepath.Join(t.TempDir(), "carol.request")
+	if err := os.WriteFile(requestFile, request.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. alice accepts it.
+	as(aliceKeys, alicePriv, alicePub)
+	if err := runOperatorAdd([]string{"--request", requestFile, "--config", filepath.Join(alice.Dir, config.FileName), "--all-sites"}, notATerminal(t), &bytes.Buffer{}); err != nil {
+		t.Fatal(problemText(err))
+	}
+
+	// 4. alice's files become the sites' newest version, as apply publishes
+	// them.
+	accepted, err := alice.Files()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.repo.Commit(snapshotted(accepted), []string{v1}, 2, alicePriv, time.Unix(1_800_000_100, 0)); err != nil {
+		t.Fatal(err)
+	}
+	answer := s.answer(t)
+	var runs []string
+	recoverHosts(t, answer)
+	allSitesUp(answer, &runs)
+	report := plainReporter(t)
+
+	// 5. carol joins.
+	as(carolKeys, carolPriv, carolPub)
+	if err := runOperator([]string{"register", "--config", carolConfig, "--execute"}, noTerminalStdin(), &bytes.Buffer{}); err != nil {
+		t.Fatalf("%s\n%s", problemText(err), report.String())
+	}
+	l := configstore.Local{Dir: dir}
+	if k, _ := l.SigningKey(); k != bare(carolPub) {
+		t.Fatalf("signing key %q, want carol's", k)
+	}
+	if r, _ := l.Root(); r != v1 {
+		t.Fatalf("root %q, want the invite's %q", r, v1)
+	}
+	if !pushed(runs) {
+		t.Fatal("no attestation pushed")
+	}
+	joined, err := os.ReadFile(filepath.Join(dir, "secrets.enc.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(config.FileRecipients(joined), q.Age) {
+		t.Fatalf("the joined secrets are not encrypted to the request's age key %s", q.Age)
+	}
+	if _, err := config.LoadDeploymentSecrets(filepath.Join(dir, "secrets.enc.yaml"), fixtureDeploymentID); err != nil {
+		t.Fatalf("carol's age key does not open the joined secrets: %v", err)
+	}
+	if !strings.Contains(report.String(), "open the secrets with your age key") || strings.Contains(report.String(), "they do not open") {
+		t.Fatalf("the join's check failed:\n%s", report.String())
+	}
 }

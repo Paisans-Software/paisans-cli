@@ -89,8 +89,19 @@ type ageKey struct {
 	// Made is true when this call made the key, false when it found one.
 	Made bool
 
-	// where is what holds a key that was made, for a failure to name.
+	// where is what holds a key that was made or a key file that was read,
+	// in full, for a failure or a record to name.
 	where string
+}
+
+// home is where the key is kept, said in full so that it reads the same from
+// any directory: a key file's absolute path, the keystore item, or the
+// variables that name it.
+func (k ageKey) home() string {
+	if k.where != "" {
+		return k.where
+	}
+	return k.Source
 }
 
 // makeAgeKey makes a new age key and keeps it in the keystore under id, or in

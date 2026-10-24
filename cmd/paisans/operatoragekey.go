@@ -102,8 +102,13 @@ func operatorAgeKey(r ui.Reporter, command, id, configPath, keyFile string) (age
 		if err != nil {
 			return ageKey{}, err
 		}
-		if _, err := os.Stat(abs); err == nil {
+		if info, err := os.Stat(abs); err == nil {
 			step := r.Step("age key")
+			if info.IsDir() {
+				err := &ui.Problem{Hint: ui.ShortPath(abs) + " is a directory", Explain: "--age-private-key-file names the file that holds the age key, or the one to make. Name a file. Nothing was made or written."}
+				step.Fail(err)
+				return ageKey{}, err
+			}
 			recipient, err := readKeyFile(abs)
 			if err != nil {
 				step.Fail(err)
@@ -111,7 +116,10 @@ func operatorAgeKey(r ui.Reporter, command, id, configPath, keyFile string) (age
 			}
 			source := ui.ShortPath(abs)
 			step.Done(source + ", public key " + recipient)
-			return ageKey{Recipient: recipient, Source: source}, nil
+			// A key file is found only through SOPS_AGE_KEY_FILE, so the
+			// operator needs the line whether the file was made or read.
+			noteKeyHome(r, keyFile, "SOPS_AGE_KEY_FILE="+shellQuote(abs))
+			return ageKey{Recipient: recipient, Source: source, where: abs}, nil
 		}
 	}
 

@@ -4,7 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -61,7 +64,7 @@ func joinInvite(r ui.Reporter, l configstore.Local, invite operatorinvite.Invite
 		if len(operatorsHolding(head, []string{invite.Key})[invite.Username]) > 0 {
 			return nil
 		}
-		return notAppliedProblem(fmt.Sprintf("The sites' newest version does not list %s under operators.%s.", key.Fingerprint, invite.Username), nil)
+		return notAppliedProblem(fmt.Sprintf("The sites' newest version does not list %s under operators.%s.", key.Fingerprint, invite.Username), "", nil)
 	}
 	held := map[string]string{key.Fingerprint: invite.Key}
 	err = recoverFiles(r, l, dests, configstore.Anchor{Root: invite.Root}, invite.Deployment, held, execute, ans, stdin, stdout, accept)
@@ -70,11 +73,18 @@ func joinInvite(r ui.Reporter, l configstore.Local, invite operatorinvite.Invite
 	case errors.As(err, &ns) || errors.Is(err, configstore.ErrNoAnchor):
 		err = &ui.Problem{
 			Hint:    "the sites serve none of the invite's root's history",
-			Explain: fmt.Sprintf("The invite names the root %s, and trust starts from it alone, so a history the sites hold under another root is not trusted. Check with the inviter that the invite is for the deployment the sites hold. Nothing was written.", invite.Root),
+			Explain: fmt.Sprintf("The invite names the root %s, and trust starts from it alone, so a history the sites hold under another root is not trusted. Check with the inviter that the invite is for the deployment the sites hold. No configuration file was written.", invite.Root),
 			Cause:   err,
 		}
 	case errors.Is(err, apply.ErrLoginRefused):
-		err = notAppliedProblem(fmt.Sprintf("No site the invite names let %s in.", key.Fingerprint), err)
+		// A site that refused the login is one the acceptance has not
+		// reached, or a host that is not the deployment's site at all.
+		var hosts []string
+		for _, d := range dests {
+			hosts = append(hosts, d.String())
+		}
+		hostsAre := "If they have, check with them that the invite's hosts, " + andList(hosts) + ", are the deployment's sites: each one not reached is named above."
+		err = notAppliedProblem(fmt.Sprintf("No site the invite names let %s in.", key.Fingerprint), hostsAre, err)
 	}
 	if err != nil {
 		return err
@@ -84,7 +94,7 @@ func joinInvite(r ui.Reporter, l configstore.Local, invite operatorinvite.Invite
 		return nil
 	}
 	path := filepath.Join(l.Dir, config.FileName)
-	checkJoinSecrets(r, filepath.Join(l.Dir, "secrets.enc.yaml"), invite.Deployment)
+	checkJoinSecrets(r, l.Dir, invite.Deployment)
 	cfg, err := config.Load(path)
 	if err != nil {
 		return err
@@ -94,25 +104,45 @@ func joinInvite(r ui.Reporter, l configstore.Local, invite operatorinvite.Invite
 
 // notAppliedProblem is a join refused because the inviter's acceptance has
 // not reached the sites: the new operator's key reaches them, and the newest
-// version lists it, only once an operator applies it.
-func notAppliedProblem(what string, cause error) error {
+// version lists it, only once an operator applies it. more, when set, follows
+// the advice to ask the inviter.
+func notAppliedProblem(what, more string, cause error) error {
+	explain := what + " The sites take you in once the inviter accepts your request and applies it. Ask the inviter whether they have run " + progname.Cmd() + " deployment apply --execute since accepting it, then run this again."
+	if more != "" {
+		explain += " " + more
+	}
 	return &ui.Problem{
 		Hint:    "the sites do not know you yet",
-		Explain: what + " The sites take you in once the inviter accepts your request and applies it. Ask the inviter whether they have run " + progname.Cmd() + " deployment apply --execute since accepting it, then run this again. Nothing was written.",
+		Explain: explain + " No configuration file was written.",
 		Cause:   cause,
 	}
 }
 
-// checkJoinSecrets says whether the recovered secrets open with this
+// checkJoinSecrets says whether the recovered secrets in dir open with this
 // workstation's age key. One that does not is a failed check and not a
-// refusal, since the files are the operator's either way.
-func checkJoinSecrets(r ui.Reporter, path, id string) {
+// refusal, since the files are the operator's either way. The age key the
+// answer recorded tells whose step is missing: secrets encrypted to it that
+// do not open are this workstation's to fix, and secrets not encrypted to it
+// are an acceptance that did not re-encrypt them.
+func checkJoinSecrets(r ui.Reporter, dir, id string) {
+	path := filepath.Join(dir, "secrets.enc.yaml")
 	s := r.Step("open the secrets with your age key")
-	if _, err := config.LoadDeploymentSecrets(path, id); err != nil {
-		s.End(ui.Failed, "they do not open")
-		hint, _ := ui.Describe(err)
-		r.Explain(fmt.Sprintf("%s. The secrets are not encrypted to your age key, so the request was not fully accepted. Any operator runs %s operator add --request with the same request again, then %s deployment apply --execute; then run %s deployment pull here.", hint, progname.Cmd(), progname.Cmd(), progname.Cmd()))
+	_, err := config.LoadDeploymentSecrets(path, id)
+	if err == nil {
+		s.Done("")
 		return
 	}
-	s.Done("")
+	s.End(ui.Failed, "they do not open")
+	hint, explain := ui.Describe(err)
+	recipient, source, rerr := readJoinAge(dir)
+	data, derr := os.ReadFile(path)
+	if rerr == nil && derr == nil && recipient != "" && slices.Contains(config.FileRecipients(data), recipient) {
+		from := ""
+		if source != "" {
+			from = ", which the answer took from " + strings.TrimPrefix(source, "from ")
+		}
+		r.Explain(fmt.Sprintf("%s. The secrets are encrypted to your age key %s%s, so this workstation does not reach that key now. %s Then run %s secrets list here to check.", hint, recipient, from, explain, progname.Cmd()))
+		return
+	}
+	r.Explain(fmt.Sprintf("%s. The secrets are not encrypted to your age key, so the request was not fully accepted. Any operator runs %s operator add --request with the same request again, then %s deployment apply --execute; then run %s deployment pull here.", hint, progname.Cmd(), progname.Cmd(), progname.Cmd()))
 }

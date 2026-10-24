@@ -940,7 +940,8 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 // from every site its newest versions name, and, with execute, writes the
 // head's files and records the root and, from held, the signing key. accept,
 // when set, runs on each head's configuration before anything is written,
-// and a refusal from it is returned as it is.
+// and a refusal from it is returned as it is; with accept, a fork is refused
+// with nothing written.
 func recoverFiles(r ui.Reporter, l configstore.Local, dests []config.Destination, a configstore.Anchor, id string, held map[string]string, execute bool, ans answerer, stdin io.Reader, stdout io.Writer, accept func(head *config.Config) error) error {
 	deploymentID, hosts, err := recoverID(r, dests, id)
 	if err != nil {
@@ -967,6 +968,11 @@ func recoverFiles(r ui.Reporter, l configstore.Local, dests []config.Destination
 		return err
 	}
 	if accept != nil {
+		// A fork is said as one before any head is judged, since each
+		// head's refusal would name only itself.
+		if g.Verdict.Fork {
+			return forkProblem(g, "An operator who holds the files publishes the merge; run this again once they have. No configuration file was written.")
+		}
 		if err := acceptHeads(l, g, accept); err != nil {
 			return err
 		}

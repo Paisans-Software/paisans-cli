@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"filippo.io/age"
+
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/keystore"
 	"github.com/paisans-software/paisans-cli/internal/operatorinvite"
@@ -84,7 +86,7 @@ func TestAnswerWritesSignedRequest(t *testing.T) {
 	if err != nil || !ok || !bytes.Equal(invite, f.invite) || key != f.inviterKey {
 		t.Fatalf("readJoin: %q %q %v %v", invite, key, ok, err)
 	}
-	for path, mode := range map[string]os.FileMode{".paisans": 0o700, ".paisans/invite": 0o600, ".paisans/inviter.pub": 0o600} {
+	for path, mode := range map[string]os.FileMode{".paisans": 0o700, ".paisans/invite": 0o600, ".paisans/inviter.pub": 0o600, ".paisans/age-recipient": 0o600} {
 		info, err := os.Stat(filepath.Join(dir, path))
 		if err != nil || info.Mode().Perm() != mode {
 			t.Errorf("%s: %v, %v, want %v", path, info, err, mode)
@@ -178,7 +180,7 @@ func TestAnswerRefusesARecordedInviteForAnotherDeployment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := recordJoin(dir, operatorinvite.Signed(body, sig), f.carolPub); err != nil {
+	if err := recordJoin(dir, operatorinvite.Signed(body, sig), f.carolPub, ageKey{}); err != nil {
 		t.Fatal(err)
 	}
 	err, out := f.answer(dir, f.inviterKey)
@@ -336,6 +338,141 @@ func TestRegisterInviteRefusesRegisteringFlags(t *testing.T) {
 		err := runOperatorRegister(append([]string{"--invite", "x"}, flag...), strings.NewReader(""), &out)
 		if err == nil || !strings.Contains(problemText(err), "--invite answers an invite") {
 			t.Errorf("%v: got %q", flag, problemText(err))
+		}
+	}
+}
+
+// answerShowing answers f's invite in dir with keyFile and stdin, and
+// returns the error, the request and what the reporter printed.
+func (f answerFixture) answerShowing(t *testing.T, dir, name, email, keyFile string, stdin io.Reader) (error, []byte, string) {
+	t.Helper()
+	var out, report bytes.Buffer
+	err := answerInvite(ui.NewPlain(&report, false), dir, f.invite, f.inviterKey, name, email, keyFile, stdin, &out)
+	return err, out.Bytes(), report.String()
+}
+
+// recordedAge is the age key and source the answer in dir recorded.
+func recordedAge(t *testing.T, dir string) (string, string) {
+	t.Helper()
+	recipient, source, err := readJoinAge(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return recipient, source
+}
+
+// An existing --age-private-key-file is read, not replaced, and the answer
+// says to export SOPS_AGE_KEY_FILE, since nothing finds a key file on its
+// own. The record names the file in full.
+func TestAnswerReadsAnExistingKeyFile(t *testing.T) {
+	f := newAnswerFixture(t)
+	identity, _ := age.GenerateX25519Identity()
+	keyFile := filepath.Join(t.TempDir(), "carol.key")
+	if err := os.WriteFile(keyFile, []byte(identity.String()+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	err, out, report := f.answerShowing(t, dir, "Carol Jones", "carol@example.org", keyFile, strings.NewReader(""))
+	if err != nil {
+		t.Fatal(problemText(err))
+	}
+	q, _, err := operatorinvite.ParseRequest(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q.Age != identity.Recipient().String() {
+		t.Fatalf("age %q, want the file's %q", q.Age, identity.Recipient())
+	}
+	if !strings.Contains(report, "export SOPS_AGE_KEY_FILE=") || !strings.Contains(report, keyFile) {
+		t.Errorf("no export line for the key file:\n%s", report)
+	}
+	if strings.Contains(report, identity.String()) {
+		t.Error("the private key was printed")
+	}
+	if got, _ := os.ReadFile(keyFile); string(got) != identity.String()+"\n" {
+		t.Error("the key file changed")
+	}
+	if len(f.keystore.Items) != 0 {
+		t.Errorf("keystore holds %v", f.keystore.Items)
+	}
+	if recipient, source := recordedAge(t, dir); recipient != q.Age || source != keyFile {
+		t.Errorf("recorded %q from %q, want %q from %q", recipient, source, q.Age, keyFile)
+	}
+}
+
+// A directory named as --age-private-key-file is refused as one, with
+// nothing made.
+func TestAnswerRefusesADirectoryAsKeyFile(t *testing.T) {
+	f := newAnswerFixture(t)
+	dir := t.TempDir()
+	err, out, _ := f.answerShowing(t, dir, "Carol Jones", "carol@example.org", t.TempDir(), strings.NewReader(""))
+	if err == nil || !strings.Contains(problemText(err), "is a directory") {
+		t.Fatalf("got %q", problemText(err))
+	}
+	f.nothingMade(t, dir, out)
+}
+
+// A SOPS_AGE_* variable's key answers the invite, and nothing is kept for
+// it: the keystore stays empty and the record names the variable.
+func TestAnswerTakesTheVariablesKey(t *testing.T) {
+	f := newAnswerFixture(t)
+	identity, _ := age.GenerateX25519Identity()
+	t.Setenv("SOPS_AGE_KEY", identity.String())
+	dir := t.TempDir()
+	err, out, report := f.answerShowing(t, dir, "Carol Jones", "carol@example.org", "", strings.NewReader(""))
+	if err != nil {
+		t.Fatal(problemText(err))
+	}
+	q, _, err := operatorinvite.ParseRequest(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q.Age != identity.Recipient().String() {
+		t.Fatalf("age %q, want the variable's %q", q.Age, identity.Recipient())
+	}
+	if len(f.keystore.Items) != 0 {
+		t.Errorf("keystore holds %v", f.keystore.Items)
+	}
+	if !strings.Contains(report, "SOPS_AGE_KEY") || strings.Contains(report, identity.String()) {
+		t.Errorf("the source is not named, or the key was printed:\n%s", report)
+	}
+	if recipient, source := recordedAge(t, dir); recipient != q.Age || !strings.Contains(source, "SOPS_AGE_KEY") {
+		t.Errorf("recorded %q from %q", recipient, source)
+	}
+}
+
+// At a terminal the name and email are asked for, with create's checks: a
+// refused answer is asked again.
+func TestAnswerAsksAtATerminal(t *testing.T) {
+	f := newAnswerFixture(t)
+	dir := t.TempDir()
+	stdin := terminalStdin(t, "Carol\nCarol Jones\ncarol@example.org\n", true)
+	err, out, _ := f.answerShowing(t, dir, "", "", "", stdin)
+	if err != nil {
+		t.Fatal(problemText(err))
+	}
+	q, _, err := operatorinvite.ParseRequest(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q.Name != "Carol Jones" || q.Email != "carol@example.org" {
+		t.Fatalf("got %q <%s>", q.Name, q.Email)
+	}
+}
+
+// Once the request is written, the answer says what comes next: send it,
+// and join with operator register --execute once it is accepted and
+// applied.
+func TestAnswerSaysWhatComesNext(t *testing.T) {
+	f := newAnswerFixture(t)
+	dir := t.TempDir()
+	err, _, report := f.answerShowing(t, dir, "Carol Jones", "carol@example.org", "", strings.NewReader(""))
+	if err != nil {
+		t.Fatal(problemText(err))
+	}
+	for _, want := range []string{"send the request to alice", "operator add --request", "deployment apply --execute", "operator register --execute"} {
+		if !strings.Contains(report, want) {
+			t.Errorf("lacks %q:\n%s", want, report)
 		}
 	}
 }

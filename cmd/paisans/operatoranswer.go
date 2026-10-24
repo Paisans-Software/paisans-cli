@@ -21,11 +21,14 @@ import (
 // workstation, checks an invite, makes their age key, gives a name and an
 // email, and writes a signed request to stdout. It reaches no host.
 
-// The invite and the inviter's key are recorded under .paisans/ for the join
-// that follows the operator's acceptance.
+// The invite, the inviter's key and the age key the request names are
+// recorded under .paisans/ for the join that follows the operator's
+// acceptance. ageRecipientFile holds the age public key on its first line and where
+// the answer found the key on its second.
 const (
-	inviteFile  = "invite"
-	inviterFile = "inviter.pub"
+	inviteFile       = "invite"
+	inviterFile      = "inviter.pub"
+	ageRecipientFile = "age-recipient"
 )
 
 // answerInvite answers the signed invite with a request on stdout, and
@@ -99,11 +102,14 @@ func answerInvite(r ui.Reporter, dir string, invite []byte, inviterKey, name, em
 	}
 	step.Done("")
 
-	if err := recordJoin(dir, invite, inviterKey); err != nil {
+	if err := recordJoin(dir, invite, inviterKey, age); err != nil {
 		return err
 	}
-	_, err = stdout.Write(operatorinvite.Signed(body, sig))
-	return err
+	if _, err := stdout.Write(operatorinvite.Signed(body, sig)); err != nil {
+		return err
+	}
+	r.Note("send the request to "+inv.Inviter.Name, "Once they have accepted it with "+progname.Cmd()+" operator add --request and applied it with "+progname.Cmd()+" deployment apply --execute, run "+progname.Cmd()+" operator register --execute in "+ui.ShortPath(dir)+".")
+	return nil
 }
 
 // flagNameAndEmail refuses a name or email that was not given, or that
@@ -178,10 +184,11 @@ func checkAnswerDir(dir string, inv operatorinvite.Invite, invite []byte) error 
 	return nil
 }
 
-// recordJoin writes the inviter's key and then the invite, verbatim, under
-// dir/.paisans/, each through a temporary file and a rename. The invite is
-// written last: readJoin takes it as the mark that the record is whole.
-func recordJoin(dir string, invite []byte, inviterKey string) error {
+// recordJoin writes the inviter's key, the age key the request names and
+// then the invite, verbatim, under dir/.paisans/, each through a temporary
+// file and a rename. The invite is written last: readJoin takes it as the
+// mark that the record is whole.
+func recordJoin(dir string, invite []byte, inviterKey string, age ageKey) error {
 	state := filepath.Join(dir, ".paisans")
 	if err := os.MkdirAll(state, 0o700); err != nil {
 		return err
@@ -189,7 +196,11 @@ func recordJoin(dir string, invite []byte, inviterKey string) error {
 	for _, f := range []struct {
 		name string
 		data []byte
-	}{{inviterFile, []byte(strings.TrimSpace(inviterKey) + "\n")}, {inviteFile, invite}} {
+	}{
+		{inviterFile, []byte(strings.TrimSpace(inviterKey) + "\n")},
+		{ageRecipientFile, []byte(age.Recipient + "\n" + age.home() + "\n")},
+		{inviteFile, invite},
+	} {
 		if err := writeFileAtomic(filepath.Join(state, f.name), f.data); err != nil {
 			return err
 		}
@@ -197,8 +208,8 @@ func recordJoin(dir string, invite []byte, inviterKey string) error {
 	return nil
 }
 
-// writeFileAtomic writes data to path at 0600 through a rename, so a reader
-// never sees half of it.
+// writeFileAtomic writes data to path at 0600 through a synced file renamed
+// over it, so a reader never sees half of it.
 func writeFileAtomic(path string, data []byte) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-")
 	if err != nil {
@@ -206,6 +217,10 @@ func writeFileAtomic(path string, data []byte) error {
 	}
 	defer os.Remove(tmp.Name())
 	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
 		tmp.Close()
 		return err
 	}
@@ -233,6 +248,20 @@ func readJoin(dir string) (invite []byte, inviterKey string, ok bool, err error)
 		return nil, "", false, err
 	}
 	return invite, string(bytes.TrimSpace(key)), true, nil
+}
+
+// readJoinAge is the age public key the answer in dir named in its request,
+// and where it found the key. Both are empty when none is recorded.
+func readJoinAge(dir string) (recipient, source string, err error) {
+	data, err := os.ReadFile(filepath.Join(dir, ".paisans", ageRecipientFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return "", "", nil
+	}
+	if err != nil {
+		return "", "", err
+	}
+	recipient, source, _ = strings.Cut(strings.TrimSpace(string(data)), "\n")
+	return strings.TrimSpace(recipient), strings.TrimSpace(source), nil
 }
 
 // registerInvite is operator register --invite: it reads the invite file and
