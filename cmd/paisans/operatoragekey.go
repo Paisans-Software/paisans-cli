@@ -62,7 +62,7 @@ func runOperatorAgeKey(args []string, stdout io.Writer) error {
 func operatorAgeKey(r ui.Reporter, id, configPath, keyFile string) (ageKey, error) {
 	if variables := config.AgeVariablesSet(); len(variables) > 0 {
 		step := r.Step("age key")
-		key, err := config.ReadVariableKey()
+		key, err := config.ReadVariableKeyFor("operator age-key")
 		if err != nil {
 			step.Fail(err)
 			return ageKey{}, err

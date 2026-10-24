@@ -226,3 +226,25 @@ func TestAgeKeyRefusesBadFile(t *testing.T) {
 		})
 	}
 }
+
+// A SOPS_AGE_* variable that holds no key is refused in words that fit an
+// operator with no .sops.yaml and no init to run.
+func TestAgeKeyBrokenVariableRefusal(t *testing.T) {
+	withoutAgeKey(t)
+	ks := keystore.NewMemory()
+	withKeystore(t, ks)
+	t.Setenv("SOPS_AGE_KEY", "not a key")
+	err, out, _ := runAgeKey(t, "--id", ageKeyTestID)
+	if err == nil {
+		t.Fatalf("age-key printed %q, want a refusal", out)
+	}
+	text := problemText(err) + err.Error()
+	for _, bad := range []string{"init", ".sops.yaml"} {
+		if strings.Contains(text, bad) {
+			t.Errorf("the refusal mentions %q:\n%s", bad, text)
+		}
+	}
+	if !strings.Contains(text, "SOPS_AGE_KEY") || len(ks.Items) != 0 {
+		t.Errorf("refusal %q, items %v", text, ks.Items)
+	}
+}

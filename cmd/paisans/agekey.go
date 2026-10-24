@@ -96,8 +96,9 @@ type ageKey struct {
 // makeAgeKey makes a new age key and keeps it in the keystore under id, or in
 // keyFile when one is named, reading it back. It is the one place a key is
 // made, for init and for operatorAgeKey. command names the caller in what it
-// tells the operator to do next: "init" or "operator age-key". whileOpen runs inside the "save age
-// key" step once the key is kept, and a failure from it fails that step.
+// tells the operator to do next: "init" or "operator age-key". whileOpen runs
+// inside the "save age key" step once the key is kept, and a failure from it
+// fails that step.
 // export is the line that points sops at a key kept in a file or reached by
 // a command, empty when there is none to give.
 func makeAgeKey(r ui.Reporter, command, id, configPath, keyFile string, whileOpen func(step ui.Step, k ageKey) error) (k ageKey, export string, err error) {
