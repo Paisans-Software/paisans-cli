@@ -248,6 +248,10 @@ func siteSummary(sites []string) string { return "on " + strings.Join(sites, ", 
 // writeDeclaration writes paisans-stack.yaml. Tests replace it.
 var writeDeclaration = config.WriteDeclaration
 
+// askNewOperator asks at a terminal for what a request leaves to the
+// approver. Tests replace it.
+var askNewOperator = create.AskNewOperator
+
 func runOperatorAddRequest(r ui.Reporter, configPath, requestPath string, sites []string, allSites bool, stdin io.Reader, stdout io.Writer) error {
 	signed, err := readRequestFile(requestPath)
 	if err != nil {
@@ -288,13 +292,13 @@ func runOperatorAddRequest(r ui.Reporter, configPath, requestPath string, sites 
 		step.Fail(err)
 		return err
 	}
-	root, err := trustedRoot(l)
+	root, err := trustedRoot(l, cfg.ID)
 	if err != nil {
 		step.Fail(err)
 		return err
 	}
 	if inv.Root != root {
-		err := &ui.Problem{Hint: "the invite names another root", Explain: fmt.Sprintf("It names the root %s, and the history this workstation trusts starts at %s. The new operator would recover a history this deployment does not have. Nothing was written.", inv.Root, root)}
+		err := &ui.Problem{Hint: "the invite names another root", Explain: fmt.Sprintf("It names the root %s, and the history this workstation trusts starts at %s. The new operator would recover a history this deployment does not have: the inviter's workstation trusts another root than this one. Ask the inviter to run %s deployment pull, check that a root's line of their %s deployment log is %s, and write a new invite. Nothing was written.", inv.Root, root, progname.Cmd(), progname.Cmd(), root)}
 		step.Fail(err)
 		return err
 	}
@@ -358,6 +362,11 @@ func runOperatorAddRequest(r ui.Reporter, configPath, requestPath string, sites 
 		// Re-encrypted to every recipient the new .sops.yaml names, the
 		// plaintext as it is, before anything is asked or written.
 		step := r.Step("re-encrypt the secrets in memory")
+		if fields := config.HandSetMetadata(oldSecrets); len(fields) > 0 {
+			err := config.HandSetMetadataProblem(secretsPath, fields)
+			step.Fail(err)
+			return err
+		}
 		recipients, err := sopsRecipients(newSOPS)
 		if err != nil {
 			step.Fail(err)
@@ -380,7 +389,7 @@ func runOperatorAddRequest(r ui.Reporter, configPath, requestPath string, sites 
 	if !already {
 		if stdinIsTerminal(stdin) {
 			p := create.NewPrompter(stdin, stdout)
-			if op, err = create.AskNewOperator(p, op, declared); err != nil {
+			if op, err = askNewOperator(p, op, declared); err != nil {
 				if errors.Is(err, create.ErrAborted) {
 					return &ui.Problem{Hint: "input ended before every question was answered", Explain: "Nothing was written."}
 				}

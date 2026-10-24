@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
+	"github.com/paisans-software/paisans-cli/internal/create"
 	"github.com/paisans-software/paisans-cli/internal/keystore"
 	"github.com/paisans-software/paisans-cli/internal/operatorinvite"
 	"github.com/paisans-software/paisans-cli/internal/validate"
@@ -578,6 +580,8 @@ func TestOperatorAddRequestRefusesOtherRoot(t *testing.T) {
 	other := d.invite
 	other.Root = strings.Repeat("ab", 20)
 	d.refused(t, d.request(t, other, d.alicePriv), "root", "--all-sites")
+	d.refused(t, d.request(t, other, d.alicePriv), "write a new invite", "--all-sites")
+	d.refused(t, d.request(t, other, d.alicePriv), d.root, "--all-sites")
 }
 
 func TestOperatorAddRequestRefusesDeclaredWithOtherKey(t *testing.T) {
@@ -637,7 +641,9 @@ func sameFiles(a, b [3][]byte) bool {
 
 // encryptPlain is plain encrypted to recipient with the sops library, byte
 // for byte as given: a secrets file this toolkit's Secrets would not write.
-func encryptPlain(t *testing.T, plain []byte, recipient string) []byte {
+// Each of tweaks changes the metadata before encrypting, as a hand-set
+// .sops.yaml rule would.
+func encryptPlain(t *testing.T, plain []byte, recipient string, tweaks ...func(*sops.Metadata)) []byte {
 	t.Helper()
 	store := &sopsyaml.Store{}
 	branches, err := store.LoadPlainFile(plain)
@@ -653,6 +659,9 @@ func encryptPlain(t *testing.T, plain []byte, recipient string) []byte {
 		group = append(group, keys.MasterKey(key))
 	}
 	tree := sops.Tree{Branches: branches, Metadata: sops.Metadata{KeyGroups: []sops.KeyGroup{group}, Version: version.Version, LastModified: time.Unix(0, 0).UTC()}}
+	for _, tweak := range tweaks {
+		tweak(&tree.Metadata)
+	}
 	dataKey, errs := tree.GenerateDataKey()
 	if len(errs) > 0 {
 		t.Fatal(errs)
@@ -755,5 +764,69 @@ func TestOperatorAddRequestAtATerminalAsksOnlySites(t *testing.T) {
 		if !siteNames(site, "carol") {
 			t.Errorf("sites.%s.ssh.keys does not name carol", name)
 		}
+	}
+}
+
+// Without a terminal, a request for an operator not yet declared needs the
+// sites as flags, and the refusal names them and the request.
+func TestOperatorAddRequestWithoutSitesNamesTheFlags(t *testing.T) {
+	d := newRequestDeployment(t)
+	req := d.request(t, d.invite, d.alicePriv)
+	d.refused(t, req, "--site or --all-sites")
+	d.refused(t, req, "operator add --request "+req+" --all-sites")
+}
+
+// At a terminal, answers that change what the request gives are refused:
+// only the sites are the approver's.
+func TestOperatorAddRequestRefusesAnswersThatChangeTheRequest(t *testing.T) {
+	d := newRequestDeployment(t)
+	saved := askNewOperator
+	t.Cleanup(func() { askNewOperator = saved })
+	askNewOperator = func(p *create.Prompter, op create.NewOperator, declared create.Declared) (create.NewOperator, error) {
+		op.Name = "Mallory Example"
+		op.Sites = declared.Sites
+		return op, nil
+	}
+	before := d.files(t)
+	err := runOperatorAdd([]string{"--request", d.request(t, d.invite, d.alicePriv), "--config", d.configPath}, answersFile(t, ""), &bytes.Buffer{})
+	if err == nil || !strings.Contains(problemText(err), "changed what the request gives") {
+		t.Fatalf("got %v", problemText(err))
+	}
+	if !sameFiles(d.files(t), before) {
+		t.Error("a file changed")
+	}
+}
+
+// A secrets file whose sops metadata sets what the toolkit never writes is
+// refused before anything is written, naming the field and sops updatekeys,
+// whether the operator is new or declared already.
+func TestOperatorAddRequestRefusesHandSetSOPSMetadata(t *testing.T) {
+	for _, declared := range []bool{false, true} {
+		t.Run(fmt.Sprintf("declared %v", declared), func(t *testing.T) {
+			d := newRequestDeployment(t)
+			if declared {
+				data, _ := os.ReadFile(d.configPath)
+				entry := config.Operator{Name: "Carol Example", Email: "carol@example.org", Keys: bare(d.carolKey) + "\n"}
+				out, err := config.AddOperatorBytes(data, "carol", entry, d.cfg.SiteNames())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := config.WriteDeclaration(d.configPath, out); err != nil {
+					t.Fatal(err)
+				}
+			}
+			plain := plaintextWith(t, d.secretsPath(), d.alice)
+			hand := encryptPlain(t, plain, d.alice.Recipient().String(), func(m *sops.Metadata) { m.EncryptedRegex = "^password$" })
+			if err := os.WriteFile(d.secretsPath(), hand, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			rest := []string{"--all-sites"}
+			if declared {
+				rest = nil
+			}
+			req := d.request(t, d.invite, d.alicePriv)
+			d.refused(t, req, "encrypted_regex", rest...)
+			d.refused(t, req, "sops updatekeys", rest...)
+		})
 	}
 }

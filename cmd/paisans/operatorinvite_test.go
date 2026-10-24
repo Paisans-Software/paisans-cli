@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -197,5 +198,112 @@ func TestInviteNeedsOneUsernameAndAKey(t *testing.T) {
 	}
 	if err := runOperatorInvite(inviteArgs(l, "carol", "dave", "--key", newPub(t)), &bytes.Buffer{}); err == nil {
 		t.Fatal("two usernames were accepted")
+	}
+}
+
+// unpinnedWorkstation is a registered workstation with no pinned root,
+// whose store holds what build commits, signed with its key: build is given
+// the store, the fixture's paisans-stack.yaml with the key in it, and the
+// private key path, and returns the files the workstation holds.
+func unpinnedWorkstation(t *testing.T, build func(s store, yaml, priv string) configstore.Files) (configstore.Local, string) {
+	t.Helper()
+	priv, pub := testKey(t)
+	s := newStore(t)
+	files := build(s, fixtureAs(t, pub), priv)
+	l := registerWorkstation(t, s.answer(t), files, nil, pub)
+	if err := l.SetSigningKey(pub); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := s.repo.Bundle()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache, err := l.Cache()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cache.FetchBundle(bundle); err != nil {
+		t.Fatal(err)
+	}
+	signFromFile(t, priv)
+	return l, pub
+}
+
+// With no pin, the invite names the one root of the newest version the
+// workstation's store holds.
+func TestInviteTakesTheRootFromTheStore(t *testing.T) {
+	var root string
+	l, pub := unpinnedWorkstation(t, func(s store, yaml, priv string) configstore.Files {
+		var f configstore.Files
+		root, f = s.commit(t, yaml, "", nil, 1, priv)
+		_, f = s.commit(t, yaml, "# edited\n", []string{root}, 2, priv)
+		return f
+	})
+	var out bytes.Buffer
+	if err := runOperatorInvite(inviteArgs(l, "carol", "--key", newPub(t)), &out); err != nil {
+		t.Fatal(problemText(err))
+	}
+	inv, err := operatorinvite.ParseInvite(out.Bytes(), pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv.Root != root {
+		t.Fatalf("root %q, want %q", inv.Root, root)
+	}
+}
+
+// A store holding a fork, or a newest version with two roots, names no one
+// root, and the invite is refused with deployment pull named.
+func TestInviteRefusesAStoreWithoutOneRoot(t *testing.T) {
+	for name, build := range map[string]func(s store, yaml, priv string) configstore.Files{
+		"fork": func(s store, yaml, priv string) configstore.Files {
+			root, f := s.commit(t, yaml, "", nil, 1, priv)
+			s.commit(t, yaml, "# one\n", []string{root}, 2, priv)
+			s.commit(t, yaml, "# two\n", []string{root}, 2, priv)
+			return f
+		},
+		"several roots": func(s store, yaml, priv string) configstore.Files {
+			a, _ := s.commit(t, yaml, "# a\n", nil, 1, priv)
+			b, _ := s.commit(t, yaml, "# b\n", nil, 1, priv)
+			_, f := s.commit(t, yaml, "# merged\n", []string{a, b}, 2, priv)
+			return f
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			l, _ := unpinnedWorkstation(t, build)
+			var out bytes.Buffer
+			err := runOperatorInvite(inviteArgs(l, "carol", "--key", newPub(t)), &out)
+			if err == nil || !strings.Contains(problemText(err), "deployment pull") {
+				t.Fatalf("got %v", problemText(err))
+			}
+			if cause := errors.Unwrap(err); cause != nil {
+				t.Fatalf("judging the store failed rather than finding no one root: %v", cause)
+			}
+			if out.Len() != 0 {
+				t.Fatalf("wrote %q", out.String())
+			}
+		})
+	}
+}
+
+// An invite changes no file: a workstation with no store has none after it,
+// whether its root is pinned or not.
+func TestInviteMakesNoStore(t *testing.T) {
+	l, _, _ := inviteWorkstation(t)
+	store := filepath.Join(l.Dir, ".paisans", "store.git")
+	if _, err := os.Stat(store); !os.IsNotExist(err) {
+		t.Fatalf("the fixture holds a store: %v", err)
+	}
+	if err := runOperatorInvite(inviteArgs(l, "carol", "--key", newPub(t)), &bytes.Buffer{}); err != nil {
+		t.Fatal(problemText(err))
+	}
+	if err := os.Remove(filepath.Join(l.Dir, ".paisans", "config-root")); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOperatorInvite(inviteArgs(l, "carol", "--key", newPub(t)), &bytes.Buffer{}); err == nil || !strings.Contains(problemText(err), "deployment pull") {
+		t.Fatalf("got %v", problemText(err))
+	}
+	if _, err := os.Stat(store); !os.IsNotExist(err) {
+		t.Fatalf("operator invite made %s: %v", store, err)
 	}
 }

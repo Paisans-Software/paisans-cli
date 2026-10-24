@@ -74,7 +74,7 @@ func runOperatorInvite(args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	root, err := trustedRoot(l)
+	root, err := trustedRoot(l, cfg.ID)
 	if err != nil {
 		return err
 	}
@@ -132,8 +132,10 @@ func inviterOf(l configstore.Local, cfg *config.Config) (string, operatorinvite.
 
 // trustedRoot is the root this workstation trusts: the pin in
 // .paisans/config-root, else the one root of the newest trusted version
-// among those it has gathered. It reads no site.
-func trustedRoot(l configstore.Local) (string, error) {
+// among those it has gathered. It reads no site and writes nothing: the
+// store is opened as it is on disk, and a workstation without one knows no
+// root.
+func trustedRoot(l configstore.Local, id string) (string, error) {
 	a, err := l.Anchor()
 	if err != nil {
 		return "", err
@@ -141,7 +143,17 @@ func trustedRoot(l configstore.Local) (string, error) {
 	if a.Root != "" {
 		return a.Root, nil
 	}
-	g, err := configstore.GatherAnchored(l, nil, "", a, configstore.GatherOptions{})
+	cache, ok, err := l.HeldStore()
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", unknownRoot(nil)
+	}
+	g, err := configstore.JudgeHeld(l, cache, id, a)
+	// A head older than one this workstation has seen still has the root
+	// it had: a rollback changes which version is newest, never where the
+	// history starts, so the root is read from the judged heads either way.
 	var rb *configstore.RollbackError
 	if err != nil && !errors.As(err, &rb) {
 		return "", unknownRoot(err)
