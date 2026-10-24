@@ -371,6 +371,14 @@ func TestJoinSaysTheSitesHoldAFork(t *testing.T) {
 	if err == nil || !strings.Contains(text, "the sites hold a fork") || strings.Contains(text, "do not know you") {
 		t.Fatalf("got %s", text)
 	}
+	for _, want := range []string{"deployment publish --merge", "operator register --execute here again", "No configuration file was written"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("lacks %q: %s", want, text)
+		}
+	}
+	if strings.Contains(text, "Merge their files by hand") {
+		t.Errorf("the join says to merge by hand: %s", text)
+	}
 	f.wroteNothing(t)
 	if _, statErr := os.Stat(configstore.Local{Dir: f.dir}.Incoming()); !os.IsNotExist(statErr) {
 		t.Error("a head's files were written")

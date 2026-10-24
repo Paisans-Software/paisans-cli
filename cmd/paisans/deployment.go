@@ -328,11 +328,16 @@ func describe(g configstore.Gathered, sha string) string {
 
 // forkProblem is the refusal for a fork, naming each head.
 func forkProblem(g configstore.Gathered, more ...string) error {
+	return &ui.Problem{Hint: "the sites hold a fork", Explain: "Two trusted versions build on one parent:\n" + forkHeads(g) + "\nMerge their files by hand, then publish with " + progname.Cmd() + " deployment publish --merge." + strings.Join(append([]string{""}, more...), " ")}
+}
+
+// forkHeads lists the heads of a fork, one line each.
+func forkHeads(g configstore.Gathered) string {
 	var heads []string
 	for _, h := range g.Verdict.Heads {
 		heads = append(heads, "- "+describe(g, h))
 	}
-	return &ui.Problem{Hint: "the sites hold a fork", Explain: "Two trusted versions build on one parent:\n" + strings.Join(heads, "\n") + "\nMerge their files by hand, then publish with " + progname.Cmd() + " deployment publish --merge." + strings.Join(append([]string{""}, more...), " ")}
+	return strings.Join(heads, "\n")
 }
 
 // signingKeyFor is the public key line a publish signs with: the recorded
@@ -940,8 +945,8 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 // from every site its newest versions name, and, with execute, writes the
 // head's files and records the root and, from held, the signing key. accept,
 // when set, runs on each head's configuration before anything is written,
-// and a refusal from it is returned as it is; with accept, a fork is refused
-// with nothing written.
+// and a refusal from it is returned as it is; with accept, which only the
+// join of operator register sets, a fork is refused with nothing written.
 func recoverFiles(r ui.Reporter, l configstore.Local, dests []config.Destination, a configstore.Anchor, id string, held map[string]string, execute bool, ans answerer, stdin io.Reader, stdout io.Writer, accept func(head *config.Config) error) error {
 	deploymentID, hosts, err := recoverID(r, dests, id)
 	if err != nil {
@@ -971,7 +976,7 @@ func recoverFiles(r ui.Reporter, l configstore.Local, dests []config.Destination
 		// A fork is said as one before any head is judged, since each
 		// head's refusal would name only itself.
 		if g.Verdict.Fork {
-			return forkProblem(g, "An operator who holds the files publishes the merge; run this again once they have. No configuration file was written.")
+			return &ui.Problem{Hint: "the sites hold a fork", Explain: "Two trusted versions build on one parent:\n" + forkHeads(g) + "\nAn operator who holds the files resolves it with " + progname.Cmd() + " deployment publish --merge; run " + progname.Cmd() + " operator register --execute here again once they have. No configuration file was written."}
 		}
 		if err := acceptHeads(l, g, accept); err != nil {
 			return err
