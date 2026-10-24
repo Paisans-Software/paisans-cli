@@ -226,7 +226,7 @@ func listLeaderCheck(r ui.Reporter, b *apply.Bootstrap) {
 // it.
 func listGrants(r ui.Reporter, b *apply.Bootstrap) {
 	for _, reader := range b.Readers {
-		r.Step("grant " + reader.Role).End(ui.Pending, "")
+		r.Step("grant "+reader.Role).End(ui.Pending, "")
 		r.Detail("SELECT on the allowlisted columns of database %s, for %s, if Patroni here leads", reader.Database, reader.App)
 	}
 }
