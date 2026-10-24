@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -911,5 +912,142 @@ func TestApplySiteRecordsTheRevisionItPublishedAtPocketID(t *testing.T) {
 	got := hosts["home-a"].record(t)
 	if got.Config == nil || got.Config.Revision != 2 || got.Config.Hash != head {
 		t.Errorf("home-a records %+v, the head is %s", got.Config, head)
+	}
+}
+
+// differenceShown is the step apply's review shows the configuration's
+// difference on, and the lines listed under it.
+func differenceShown(t *testing.T, rec *ui.Recorder) (ui.Event, []string, int) {
+	t.Helper()
+	i := rec.Index("done", "what changes in the configuration")
+	if i < 0 {
+		t.Fatalf("no difference shown:\n%s", rec.Lines())
+	}
+	var lines []string
+	for _, e := range rec.Events[i+1:] {
+		if e.Kind != "explain" {
+			break
+		}
+		lines = append(lines, e.Text)
+	}
+	return rec.Events[i], lines, i
+}
+
+// edit writes the version's files with old replaced by new in one of them.
+func (f *applyStoreFixture) edit(t *testing.T, secrets bool, old, new string) {
+	t.Helper()
+	edited := f.files[0]
+	target := &edited.Paisans
+	if secrets {
+		target = &edited.Secrets
+	}
+	if !bytes.Contains(*target, []byte(old)) {
+		t.Fatalf("the fixture lacks %q", old)
+	}
+	*target = bytes.Replace(*target, []byte(old), []byte(new), 1)
+	if err := f.l.WriteFiles(edited); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A dry run shows how paisans-stack.yaml differs from the sites' newest
+// version, as a diff from that revision to the local files, before the
+// site is reached.
+func TestApplyDryRunShowsTheConfigurationDifference(t *testing.T) {
+	f := newApplyStore(t, 1)
+	f.based(t)
+	f.edit(t, false, "hostname: wiki.example.org", "hostname: wiki2.example.org")
+	loggingSSH(t, "")
+	fakeGrants(t, grantedWith(t, f, nil))
+	rec := recordConverge(t)
+	_ = f.applySite(t, noTerminalStdin())
+	step, lines, i := differenceShown(t, rec)
+	if !strings.Contains(step.Extra, "revision 1, "+f.shas[0][:12]+", signed by alice") {
+		t.Errorf("does not name the sites' revision: %q", step.Extra)
+	}
+	text := strings.Join(lines, "\n")
+	for _, want := range []string{"-    hostname: wiki.example.org", "+    hostname: wiki2.example.org", "revision-1/paisans-stack.yaml", "local/paisans-stack.yaml"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("difference lacks %q:\n%s", want, text)
+		}
+	}
+	if site := rec.Index("section", "vm ("); site >= 0 && site < i {
+		t.Errorf("shown after the site was reached:\n%s", rec.Lines())
+	}
+}
+
+// A changed secret is named by its key, and neither its old value nor its
+// new one is printed.
+func TestApplyShowsAChangedSecretByKeyOnly(t *testing.T) {
+	f := newApplyStore(t, 1)
+	f.based(t)
+	const old, changed = "fixture-not-a-secret-standby", "rotated-standby-value-7f3e"
+	f.edit(t, true, `"`+old+`"`, `"`+changed+`"`)
+	loggingSSH(t, "")
+	fakeGrants(t, grantedWith(t, f, nil))
+	rec := recordConverge(t)
+	var out bytes.Buffer
+	printed := captureStdout(t, func() {
+		_ = runApply([]string{"--config", f.cfgPath, "--site", "vm"}, noTerminalStdin(), &out)
+	})
+	_, lines, _ := differenceShown(t, rec)
+	if !slices.Contains(lines, "secrets: cluster.standby_password differs") {
+		t.Errorf("does not name the key:\n%s", strings.Join(lines, "\n"))
+	}
+	for _, value := range []string{old, changed} {
+		if all := rec.Lines() + printed + out.String(); strings.Contains(all, value) {
+			t.Errorf("printed the value %q:\n%s", value, all)
+		}
+	}
+}
+
+// Local files equal to the sites' newest version say so in one line.
+func TestApplyShowsUnchangedFilesInOneLine(t *testing.T) {
+	f := newApplyStore(t, 1)
+	f.based(t)
+	loggingSSH(t, "")
+	fakeGrants(t, grantedWith(t, f, nil))
+	rec := recordConverge(t)
+	_ = f.applySite(t, noTerminalStdin())
+	step, lines, _ := differenceShown(t, rec)
+	if !strings.Contains(step.Extra, "unchanged from revision 1, "+f.shas[0][:12]) || len(lines) != 0 {
+		t.Errorf("result %q, lines %q", step.Extra, lines)
+	}
+}
+
+// A deployment's first version has nothing to differ from, and says so.
+func TestApplyShowsTheFirstVersionAsSuch(t *testing.T) {
+	f := newApplyStore(t, 0)
+	loggingSSH(t, "")
+	fakeGrants(t, grantedWith(t, f, nil))
+	rec := recordConverge(t)
+	_ = f.applySite(t, noTerminalStdin())
+	step, lines, _ := differenceShown(t, rec)
+	if !strings.Contains(step.Extra, "the first version") || len(lines) != 0 {
+		t.Errorf("result %q, lines %q", step.Extra, lines)
+	}
+}
+
+// --execute off a terminal, answered with --yes, shows the difference
+// before the review it approves.
+func TestApplyWithYesShowsTheDifferenceBeforeTheReview(t *testing.T) {
+	f := newApplyStore(t, 1)
+	f.based(t)
+	f.edit(t, false, "hostname: wiki.example.org", "hostname: wiki2.example.org")
+	allowYes(t)
+	loggingSSH(t, "")
+	fakeGrants(t, func(string) *grant.Record { return nil })
+	rec := recordConverge(t)
+	var out bytes.Buffer
+	captureStdout(t, func() {
+		_ = runApply([]string{"--config", f.cfgPath, "--site", "vm", "--execute", "--yes"}, noTerminalStdin(), &out)
+	})
+	_, lines, i := differenceShown(t, rec)
+	if !slices.Contains(lines, "+    hostname: wiki2.example.org") {
+		t.Errorf("difference %q", lines)
+	}
+	review := rec.Index("pending", "review what paisans-stack.yaml grants")
+	if review < 0 || i > review || !strings.Contains(out.String(), "approved") {
+		t.Errorf("difference at %d, review at %d, printed %q\n%s", i, review, out.String(), rec.Lines())
 	}
 }

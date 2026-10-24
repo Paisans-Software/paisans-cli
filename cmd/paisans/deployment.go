@@ -723,20 +723,44 @@ func pullOverEdits(r ui.Reporter, l configstore.Local, g configstore.Gathered, h
 // showDifference prints how the local files differ from the head's:
 // paisans-stack.yaml as a diff, the secrets by key name only, never a value.
 func showDifference(stdout io.Writer, local, theirs configstore.Files) error {
-	diff, err := unifiedDiff(local.Paisans, theirs.Paisans, "local/"+config.FileName, "head/"+config.FileName)
+	lines, err := difference(local, theirs, localAndHead)
 	if err != nil {
 		return err
 	}
-	if diff != "" {
-		fmt.Fprint(stdout, diff)
-	}
-	for _, line := range secretsKeyChanges(local.Secrets, theirs.Secrets) {
+	for _, line := range lines {
 		fmt.Fprintln(stdout, line)
 	}
-	if !bytesEqual(local.SOPS, theirs.SOPS) {
-		fmt.Fprintln(stdout, ".sops.yaml differs")
-	}
 	return nil
+}
+
+// sides names the two sides of a difference: dirA and dirB prefix
+// paisans-stack.yaml in the diff, and inA and inB end the line for a secret
+// only one side holds.
+type sides struct{ dirA, dirB, inA, inB string }
+
+// localAndHead is how pull and register name the sides: the local files,
+// then the head's.
+var localAndHead = sides{dirA: "local/", dirB: "head/", inA: "the local file", inB: "the head"}
+
+// difference is how b's files differ from a's, as lines: paisans-stack.yaml
+// as a unified diff, the secrets by key name only, never a value, and
+// whether .sops.yaml differs. Each line is shown as ui.Visible shows it.
+func difference(a, b configstore.Files, s sides) ([]string, error) {
+	diff, err := unifiedDiff(a.Paisans, b.Paisans, s.dirA+config.FileName, s.dirB+config.FileName)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	if diff != "" {
+		for _, line := range strings.Split(strings.TrimSuffix(diff, "\n"), "\n") {
+			out = append(out, ui.Visible(line))
+		}
+	}
+	out = append(out, secretsKeyChanges(a.Secrets, b.Secrets, s)...)
+	if !bytesEqual(a.SOPS, b.SOPS) {
+		out = append(out, ".sops.yaml differs")
+	}
+	return out, nil
 }
 
 func bytesEqual(a, b []byte) bool { return string(a) == string(b) }
@@ -762,15 +786,21 @@ func unifiedDiff(a, b []byte, nameA, nameB string) (string, error) {
 	if err != nil && !(errors.As(err, &exit) && exit.ExitCode() == 1) {
 		return "", fmt.Errorf("diff "+config.FileName+": %w", err)
 	}
-	s := strings.ReplaceAll(string(out), pa, nameA)
-	return strings.ReplaceAll(s, pb, nameB), nil
+	// git names an absolute path without its leading slash once the
+	// prefixes are empty, and either form is replaced by its name.
+	s := string(out)
+	for _, n := range [][2]string{{pa, nameA}, {pb, nameB}, {strings.TrimPrefix(pa, "/"), nameA}, {strings.TrimPrefix(pb, "/"), nameB}} {
+		s = strings.ReplaceAll(s, n[0], n[1])
+	}
+	return s, nil
 }
 
 // secretsKeyChanges names each key of the secrets file that is only on one
-// side or whose stored value differs, never a value. The file is compared
+// side, as s names the sides, or whose stored value differs, never a value.
+// The file is compared
 // as stored, encrypted, and sops's own metadata is left out; a re-encrypted
 // file differs at every key.
-func secretsKeyChanges(local, theirs []byte) []string {
+func secretsKeyChanges(local, theirs []byte, s sides) []string {
 	a, errA := flatKeys(local)
 	b, errB := flatKeys(theirs)
 	if errA != nil || errB != nil {
@@ -797,11 +827,11 @@ func secretsKeyChanges(local, theirs []byte) []string {
 		vb, inB := b[k]
 		switch {
 		case inA && !inB:
-			out = append(out, "secrets: "+k+" only in the local file")
+			out = append(out, "secrets: "+ui.Visible(k)+" only in "+s.inA)
 		case !inA && inB:
-			out = append(out, "secrets: "+k+" only in the head")
+			out = append(out, "secrets: "+ui.Visible(k)+" only in "+s.inB)
 		case va != vb:
-			out = append(out, "secrets: "+k+" differs")
+			out = append(out, "secrets: "+ui.Visible(k)+" differs")
 		}
 	}
 	return out
