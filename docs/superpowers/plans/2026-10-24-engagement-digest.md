@@ -28,23 +28,23 @@
 
 ## Review Focus
 
-1. A member who unsubscribed between two runs of the same week, or a second copy of the service started mid run: neither may produce a second email. Pinned in Task A2 (claim conflict test) and A7 (two runners, one store).
-2. A week where Mbin's tables are not yet readable (first deploy, grants not run yet): the run logs one actionable error and retries on the next tick inside the day, without claiming members. Pinned in Task A7.
-3. A featured thread whose top comment is by a user the member blocked, or by a remote user: the excerpt falls back to the next local comment or is omitted. Pinned in Task A4.
-4. A thread title or comment carrying HTML or markdown: the HTML part escapes it and the excerpt is plain text of at most 200 characters. Pinned in Task A6.
-5. An Mbin schema change that drops an allowlisted column: `apply` fails loudly on the grant instead of skipping it, once Mbin's tables exist. Pinned in Task B4.
+1. A member who unsubscribed between two runs of the same week, or a second copy of the service started mid run: neither may produce a second email. Pinned in Task 2 (claim conflict test) and A7 (two runners, one store).
+2. A week where Mbin's tables are not yet readable (first deploy, grants not run yet): the run logs one actionable error and retries on the next tick inside the day, without claiming members. Pinned in Task 7.
+3. A featured thread whose top comment is by a user the member blocked, or by a remote user: the excerpt falls back to the next local comment or is omitted. Pinned in Task 4.
+4. A thread title or comment carrying HTML or markdown: the HTML part escapes it and the excerpt is plain text of at most 200 characters. Pinned in Task 6.
+5. An Mbin schema change that drops an allowlisted column: `apply` fails loudly on the grant instead of skipping it, once Mbin's tables exist. Pinned in Task 12.
 
 ---
 
 # Part A: `paisans-engagement-service`
 
-Working copy: `/Users/wash/Developer/paisans.community/src/paisans-engagement-service`, branch `feat/weekly-digest` from `develop`. The controller creates the GitHub repository, the initial `main` and `develop` commits (README stub, MIT `LICENSE` "Copyright (c) 2026 Joseph Quigley", `.gitignore` with `.worktrees/` and `/paisans-engagement-service`) before Task A1.
+Working copy: `/Users/wash/Developer/paisans.community/src/paisans-engagement-service`, branch `feat/weekly-digest` from `develop`. The controller creates the GitHub repository, the initial `main` and `develop` commits (README stub, MIT `LICENSE` "Copyright (c) 2026 Joseph Quigley", `.gitignore` with `.worktrees/` and `/paisans-engagement-service`) before Task 1.
 
 Mirror `paisans-account-service` (`src/paisans-account-service`) wherever this plan is silent: config closures, store/migrations, storetest, mail sanitising, slog JSON, `healthcheck` subcommand, Dockerfile, workflows. Read the matching file there before writing each one.
 
 Tests needing Postgres read `ENGAGEMENT_TEST_DATABASE_URL` and skip when it is unset. Locally: `docker run -d --rm -p 55432:5432 -e POSTGRES_PASSWORD=test postgres:18` and `ENGAGEMENT_TEST_DATABASE_URL=postgres://postgres:test@localhost:55432/postgres?sslmode=disable`.
 
-### Task A1: Scaffold, config, image and CI
+### Task 1: Scaffold, config, image and CI
 
 **Files:**
 - Create: `go.mod` (module `github.com/paisans-software/paisans-engagement-service`, `go 1.25.8`), `cmd/paisans-engagement-service/main.go`, `internal/config/config.go`, `internal/config/config_test.go`, `Dockerfile`, `.dockerignore`, `.github/workflows/test.yml`, `.github/workflows/release.yml`, `.github/workflows/changelog.yml`, `CHANGELOG.md`
@@ -77,7 +77,7 @@ Tests needing Postgres read `ENGAGEMENT_TEST_DATABASE_URL` and skip when it is u
 - [ ] **Step 6: Verify** `go vet ./... && go build ./... && docker build -t engagement-test .` succeed.
 - [ ] **Step 7: Commit** `Load the service's configuration and build its image`.
 
-### Task A2: The service's own store
+### Task 2: The service's own store
 
 **Files:**
 - Create: `internal/store/store.go`, `internal/store/migrations/0001_digest.sql`, `internal/store/digest.go`, `internal/store/storetest/storetest.go`, `internal/store/digest_test.go`
@@ -111,7 +111,7 @@ CREATE TABLE sends (
 - [ ] **Step 4: Run**: PASS.
 - [ ] **Step 5: Commit** `Record unsubscribes and each member's weekly send`.
 
-### Task A3: Unsubscribe tokens
+### Task 3: Unsubscribe tokens
 
 **Files:**
 - Create: `internal/token/token.go`, `internal/token/token_test.go`
@@ -127,7 +127,7 @@ Format: `b64url(subject) + "." + b64url(HMAC-SHA256(key, "unsubscribe\x00" + sub
 - [ ] **Step 4: Run**: PASS.
 - [ ] **Step 5: Commit** `Sign unsubscribe links`.
 
-### Task A4: Choosing a member's items
+### Task 4: Choosing a member's items
 
 Pure Go, no database. This is where every rule in the spec's *Which threads, for whom* lives.
 
@@ -175,7 +175,7 @@ Rules, each a test:
 - [ ] **Step 4: Run**: PASS.
 - [ ] **Step 5: Commit** `Choose each member's featured thread and list`.
 
-### Task A5: Reading Mbin
+### Task 5: Reading Mbin
 
 **Files:**
 - Create: `internal/mbin/allowlist.go`, `internal/mbin/mbin.go`, `internal/mbin/queries.go`, `internal/mbin/mbin_test.go`, `internal/mbin/testdata/schema.sql`
@@ -194,7 +194,7 @@ func (s *Source) View(ctx context.Context, m digest.Member, from, to time.Time, 
 func (s *Source) Stats(ctx context.Context, from, to time.Time) (digest.Stats, error)
 ```
 
-`Allowlist` (the toolkit's copy in Task B4 must match it; a comment in each says so):
+`Allowlist` (the toolkit's copy in Task 12 must match it; a comment in each says so):
 
 | Table | Columns |
 |---|---|
@@ -228,7 +228,7 @@ The test fixture `testdata/schema.sql` creates exactly the allowlisted tables an
 - [ ] **Step 4: Run**: PASS.
 - [ ] **Step 5: Commit** `Read the week's threads and each member's activity from Mbin`.
 
-### Task A6: The email
+### Task 6: The email
 
 **Files:**
 - Create: `internal/mail/mail.go`, `internal/mail/render.go`, `internal/mail/templates/digest.html`, `internal/mail/templates/digest.txt`, `internal/mail/mailtest/mailtest.go`, `internal/mail/mail_test.go`, `internal/mail/render_test.go`
@@ -262,7 +262,7 @@ Copy, fixed:
 - [ ] **Step 4: Run**: PASS.
 - [ ] **Step 5: Commit** `Render and send the digest email`.
 
-### Task A7: The weekly run
+### Task 7: The weekly run
 
 **Files:**
 - Create: `internal/run/schedule.go`, `internal/run/run.go`, `internal/run/schedule_test.go`, `internal/run/run_test.go`
@@ -294,7 +294,7 @@ func Loop(ctx context.Context, r *Runner, now func() time.Time, tick time.Durati
 - [ ] **Step 4: Run**: PASS.
 - [ ] **Step 5: Commit** `Send the digest each Monday at 08:00, once per member`.
 
-### Task A8: The unsubscribe route, wiring and README
+### Task 8: The unsubscribe route, wiring and README
 
 **Files:**
 - Create: `internal/web/server.go`, `internal/web/server_test.go`
@@ -308,7 +308,7 @@ Routes: `GET /healthz` (DB ping, `ok` or 503); `GET /u/{token}` and `POST /u/{to
 
 `main.run`: config → open and migrate the store → `mbin.Open` → `mail.NewSMTP` → `go run.Loop(ctx, runner, time.Now, time.Minute)` → HTTP server with graceful shutdown, as account-service. With an empty `SMTP.Host` it logs once `"no mail host is configured, so no digest is sent"` and starts no loop; unsubscribe still answers. The toolkit warns about that deployment (`engagement-without-smtp`) rather than refusing it, so the container must stay healthy.
 
-README: intro paragraph (what it sends, when, to whom), bold lead bullets for *Who gets it*, *What it leaves out*, *Federated content*, *Unsubscribe*; a section **"Mbin must be clustered"** stating the service reads Mbin only when Mbin has `placement: cluster`, because its read only role is created in the cluster's Postgres; `## Environment` table from Task A1; `## What it reads` listing `mbin.Allowlist` and the excluded credential tables; `## Tests`.
+README: intro paragraph (what it sends, when, to whom), bold lead bullets for *Who gets it*, *What it leaves out*, *Federated content*, *Unsubscribe*; a section **"Mbin must be clustered"** stating the service reads Mbin only when Mbin has `placement: cluster`, because its read only role is created in the cluster's Postgres; `## Environment` table from Task 1; `## What it reads` listing `mbin.Allowlist` and the excluded credential tables; `## Tests`.
 
 - [ ] **Step 1: Write failing tests**: `TestUnsubscribeGet`, `TestUnsubscribePost` (one click, `List-Unsubscribe=One-Click` body), `TestBadTokenIs404`, `TestOtherPathsAre404`, `TestHealthz`.
 - [ ] **Step 2: Run**: FAIL. **Step 3: Implement.** **Step 4: Run** `go vet ./... && go test -race ./...` with the database: PASS.
@@ -320,7 +320,7 @@ README: intro paragraph (what it sends, when, to whom), bold lead bullets for *W
 
 Working copy: worktree `src/paisans-stack/.worktrees/engagement-blueprint`, branch `feat/engagement-blueprint` from `develop`. Read `AGENTS.md` first. Test packages that read blueprints blank import `internal/blueprints/coretest`; packages calling apply also `internal/apply/applytest`. Run package scoped tests per task; the full `go test ./... && go vet ./... && gofmt -l .` once at the end, then again in a fresh worktree of the pushed branch (`.gitignore` drops `.env*` files: check `git status --ignored internal/blueprints/reserved/engagement`).
 
-### Task B1: The reserved blueprint
+### Task 9: The reserved blueprint
 
 **Files:**
 - Create: `internal/blueprints/reserved/engagement/blueprint.yaml`, `compose.yaml.tmpl`, `.env.secret.tmpl`, `caddy.snippet.tmpl`
@@ -336,13 +336,13 @@ Working copy: worktree `src/paisans-stack/.worktrees/engagement-blueprint`, bran
 
 `compose.yaml.tmpl`: as account's, plus `- /etc/localtime:/etc/localtime:ro` so the service's 08:00 is the host's.
 
-`.env.secret.tmpl` renders every Task A1 variable: `ENGAGEMENT_LISTEN_ADDR=:8083`, `ENGAGEMENT_PUBLIC_URL=https://{{ .App.Hostname }}`, `ENGAGEMENT_DATABASE_URL={{ .DSN }}`, `ENGAGEMENT_SIGNING_KEY={{ .Secret "digest_signing_key" }}`, SMTP from `.SMTP.*` as account's lines 48 to 53, and the Mbin values from `.Engagement.*` (Task B3).
+`.env.secret.tmpl` renders every Task 1 variable: `ENGAGEMENT_LISTEN_ADDR=:8083`, `ENGAGEMENT_PUBLIC_URL=https://{{ .App.Hostname }}`, `ENGAGEMENT_DATABASE_URL={{ .DSN }}`, `ENGAGEMENT_SIGNING_KEY={{ .Secret "digest_signing_key" }}`, SMTP from `.SMTP.*` as account's lines 48 to 53, and the Mbin values from `.Engagement.*` (Task 11).
 
 - [ ] **Step 1: Write failing tests**: `TestEngagementBlueprintParses` (port, gate not gateable, SendsMail, the two secrets), `TestFoundationWithoutEngagementParses`, `TestEngagementSecretNamesUnique` (covered by `TestSelfRotatedSecretsAreUnique`; run it).
 - [ ] **Step 2: Run** `go test ./internal/blueprints/`: FAIL. **Step 3: Implement.** **Step 4: Run**: PASS.
 - [ ] **Step 5: Commit** `feat(engagement): add the reserved engagement blueprint`.
 
-### Task B2: Validate rules
+### Task 10: Validate rules
 
 **Files:**
 - Create: `internal/validate/engagement.go`, fixtures `internal/validate/testdata/engagement-*.yaml`
@@ -365,7 +365,7 @@ Each call passes a hint of at most 100 characters (`TestEveryCallPassesAHint`) a
 - [ ] **Step 1:** fixtures (each `valid.yaml` plus one breakage) and `TestRulesFire` rows. **Step 2:** `go test ./internal/validate/`: FAIL. **Step 3:** implement. **Step 4:** PASS, including `TestValidFixtureIsQuiet`.
 - [ ] **Step 5: Commit** `feat(engagement): refuse an engagement digest without one clustered Mbin`.
 
-### Task B3: Rendering
+### Task 11: Rendering
 
 **Files:**
 - Create: `internal/render/engagement.go`, `internal/render/engagement_test.go`
@@ -387,7 +387,7 @@ func ReaderRole(engagementApp string) string // DBIdentifier(app) + "_reader", e
 - [ ] **Step 2: Run** `go test ./internal/render/`: FAIL. **Step 3: Implement**, then `go test ./internal/render -update` and read the golden diff: only the new `digest` files and the gateway snippet change. **Step 4: Run**: PASS.
 - [ ] **Step 5: Commit** `feat(engagement): render the digest's Mbin connection and titles`.
 
-### Task B4: The read only role and its grants
+### Task 12: The read only role and its grants
 
 **Files:**
 - Create: `internal/apply/sourcegrant.go`, `internal/apply/sourcegrant_test.go`
@@ -407,11 +407,11 @@ func runSourceGrants(plan *Plan, t Transport) error
 
 `grantSQL`: `\connect <mbin db>`, then one `DO` block: if `to_regclass('public.entry') IS NULL`, `RAISE NOTICE` that Mbin has not created its tables yet and the next apply grants; otherwise `GRANT CONNECT ON DATABASE`, `GRANT USAGE ON SCHEMA public`, and `GRANT SELECT (<cols>) ON public.<table>` for each allowlist entry (quote `"user"` via `QuoteIdent`). A missing column or table at that point is an error and fails the apply (Review Focus 5). Run through `apply.Psql` on stdin with `NoStatementLog`, only where `runBootstrap` would run the primary script, after every app stack is healthy.
 
-- [ ] **Step 1: Write failing tests**: `TestAllowlistMatchesService` (the table and column set equals the Task A5 table, written out in the test), `TestAllowlistExcludesCredentials` (Global Constraints list), `TestBootstrapCreatesReadOnlyReader` (`BootstrapSQL` holds `CREATE ROLE "digest_reader" LOGIN` and `default_transaction_read_only`), `TestGrantSQLWaitsForMbinTables`, `TestGrantSQLColumnGrants` (`GRANT SELECT ("id", ... ) ON public."user"`), `TestGrantsRunAfterAppStacks` (ordering in `execute`, modelled on `TestDatabasesExistBeforeAnyAppStarts`), `TestNoPasswordIsOnACommandLine` still passes.
+- [ ] **Step 1: Write failing tests**: `TestAllowlistMatchesService` (the table and column set equals the Task 5 table, written out in the test), `TestAllowlistExcludesCredentials` (Global Constraints list), `TestBootstrapCreatesReadOnlyReader` (`BootstrapSQL` holds `CREATE ROLE "digest_reader" LOGIN` and `default_transaction_read_only`), `TestGrantSQLWaitsForMbinTables`, `TestGrantSQLColumnGrants` (`GRANT SELECT ("id", ... ) ON public."user"`), `TestGrantsRunAfterAppStacks` (ordering in `execute`, modelled on `TestDatabasesExistBeforeAnyAppStarts`), `TestNoPasswordIsOnACommandLine` still passes.
 - [ ] **Step 2: Run** `go test ./internal/apply/`: FAIL. **Step 3: Implement.** **Step 4: Run**: PASS.
 - [ ] **Step 5: Commit** `feat(engagement): give the digest a read only role on Mbin's tables`.
 
-### Task B5: Rotation
+### Task 13: Rotation
 
 **Files:**
 - Modify: `internal/secretsrotate/postgres.go` (beside `AppDatabase` at `:343`), `cmd/paisans/secretsrotate.go:604-606`, tests beside each
@@ -423,7 +423,7 @@ func runSourceGrants(plan *Plan, t Transport) error
 - [ ] **Step 2:** FAIL. **Step 3:** implement. **Step 4:** `go test ./internal/secretsrotate/ ./cmd/paisans/`: PASS.
 - [ ] **Step 5: Commit** `feat(engagement): rotate the digest's Mbin reader password`.
 
-### Task B6: Documentation
+### Task 14: Documentation
 
 **Files:**
 - Modify: `README.md` (new `### The engagement digest` after `### The account service`, and the backup table row: its database holds only unsubscribes and sends), `CHANGELOG.md` (`### Added` bullet, at most 35 words), `docs/specs/2026-10-24-engagement-digest.md` (Status: approved, implemented by this branch)
@@ -438,7 +438,7 @@ The README section says: what it sends and when; that it reads Mbin through a re
 
 Branch `feat/engagement-image` from `main` in `src/blueprints`.
 
-### Task C1: Publish the track
+### Task 15: Publish the track
 
 **Files:**
 - Modify: `foundation.yaml` (after `account`: comment "0.1, the first engagement digest." and `engagement: "ghcr.io/paisans-software/paisans-engagement-service:0.1.*"`), `README.md:38` (list `engagement` among the reserved blueprints)
