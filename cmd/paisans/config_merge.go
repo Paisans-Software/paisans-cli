@@ -34,6 +34,9 @@ type merged struct {
 	// marker the version they are now drafted from.
 	files  configstore.Files
 	marker draft.Marker
+	// was is the "drafted from" line the draft had, when marked.
+	was    draft.Marker
+	marked bool
 	// conflicts is each path the draft and that version changed
 	// differently, naming its file: "paisans-stack.yaml: sites.home-b",
 	// "secrets: external.a", ".sops.yaml: creation_rules.0".
@@ -61,8 +64,9 @@ func mergeDraft(sys configstore.Local, d draft.Draft, id, base, head string) (me
 	if err != nil {
 		return merged{}, &ui.Problem{Hint: "the draft cannot be read to merge it", Explain: "A merge reads the draft's " + config.FileName + ", secrets.enc.yaml and .sops.yaml from " + d.Dir + ". " + errLine(err) + ".", Cause: err}
 	}
-	o.Paisans = draft.StripMarker(o.Paisans)
 	out := merged{marker: m, files: configstore.Files{Blueprints: t.Blueprints}}
+	out.was, out.marked = draft.ReadMarker(o.Paisans)
+	o.Paisans = draft.StripMarker(o.Paisans)
 	var conflicts []string
 	if out.files.Paisans, conflicts, err = draftmerge.Config(b.Paisans, o.Paisans, t.Paisans); err != nil {
 		return merged{}, &ui.Problem{Hint: "the draft's " + config.FileName + " cannot be merged", Explain: errLine(err) + ". Nothing was written.", Cause: err}
@@ -154,8 +158,8 @@ func secretsMergeProblem(what string) error {
 
 // mergeForward merges the draft d, drafted from base, forward onto head,
 // the sites' newest version g holds. With execute it writes the merged
-// draft, its "drafted from" line naming head, then moves the system copy
-// to head (moveSystemCopy). It shows the merged draft against head, and
+// draft (writeMergedDraft), then moves the system copy to head
+// (moveSystemCopy). It shows the merged draft against head, and
 // returns the merge.
 func mergeForward(r ui.Reporter, sys configstore.Local, g configstore.Gathered, d draft.Draft, id, base, head, gatheredHead string, execute bool, record func(configstore.Local) error) (merged, error) {
 	m, err := mergeDraft(sys, d, id, base, head)
@@ -179,7 +183,7 @@ func mergeForward(r ui.Reporter, sys configstore.Local, g configstore.Gathered, 
 		r.Step(what).End(ui.Pending, "--execute will write it")
 	} else {
 		s := r.Step(what)
-		if err := d.Write(m.files, m.marker); err != nil {
+		if err := writeMergedDraft(d, m); err != nil {
 			s.Fail(err)
 			return m, err
 		}
@@ -194,6 +198,25 @@ func mergeForward(r ui.Reporter, sys configstore.Local, g configstore.Gathered, 
 		r.Verbatim(lines)
 	}
 	return m, nil
+}
+
+// writeMerged writes the three files of a merged draft. Tests replace it.
+var writeMerged = configstore.WriteFilesTo
+
+// writeMergedDraft writes m into d: the three files under the "drafted
+// from" line d had, then that line rewritten to name the version merged.
+// A write that fails part way leaves the draft drafted from its old base,
+// so the next merge starts again from there rather than taking files the
+// merge never finished for a draft of the newest version.
+func writeMergedDraft(d draft.Draft, m merged) error {
+	f := m.files
+	if m.marked {
+		f.Paisans = draft.WithMarker(f.Paisans, m.was)
+	}
+	if err := writeMerged(d.Dir, f); err != nil {
+		return err
+	}
+	return d.Mark(m.marker)
 }
 
 // moveSystemCopy moves the system copy to head, the sites' newest version,

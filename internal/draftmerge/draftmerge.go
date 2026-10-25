@@ -12,7 +12,8 @@
 // removed. A path removed on one side and changed on the other, or changed
 // differently on the two, is a conflict: the merge keeps ours there and
 // lists it. Comments and key order come from ours; a path only theirs adds
-// is appended under its parent, in theirs' order.
+// is appended under its parent, in theirs' order. A document with a YAML
+// anchor, an alias or a key given twice is refused.
 package draftmerge
 
 import (
@@ -33,8 +34,11 @@ func Config(base, ours, theirs []byte) (merged []byte, conflicts []string, err e
 	return run(base, ours, theirs, nil)
 }
 
-// SOPS merges .sops.yaml the same way, each creation rule one value, by its
-// place in creation_rules: a conflict in rule 0 is creation_rules.0.
+// SOPS merges .sops.yaml the same way. While base, ours and theirs hold
+// the same number of creation rules, each rule is one value, by its place
+// in creation_rules: a conflict in rule 0 is creation_rules.0. Otherwise
+// creation_rules is one value, so a rule one side removed is never put back
+// by the places of the others shifting.
 func SOPS(base, ours, theirs []byte) (merged []byte, conflicts []string, err error) {
 	return run(base, ours, theirs, func(path []string) bool {
 		return len(path) == 1 && path[0] == "creation_rules"
@@ -88,6 +92,9 @@ func canon(n *yaml.Node) (string, error) {
 }
 
 // parse is doc's document node and its root, nil for an empty document.
+// A document with an anchor, an alias or a mapping key given twice is
+// refused: the toolkit writes none, and a merge path by path cannot place
+// what they share.
 func parse(doc []byte, what string) (*yaml.Node, *yaml.Node, error) {
 	var n yaml.Node
 	if err := yaml.Unmarshal(doc, &n); err != nil {
@@ -96,7 +103,34 @@ func parse(doc []byte, what string) (*yaml.Node, *yaml.Node, error) {
 	if n.Kind != yaml.DocumentNode || len(n.Content) == 0 {
 		return nil, nil, nil
 	}
+	if err := plain(&n); err != nil {
+		return nil, nil, fmt.Errorf("%s %w", what, err)
+	}
 	return &n, n.Content[0], nil
+}
+
+// plain refuses a node tree holding an anchor, an alias or a mapping key
+// given twice.
+func plain(n *yaml.Node) error {
+	if n.Kind == yaml.AliasNode || n.Anchor != "" {
+		return fmt.Errorf("uses a YAML anchor or alias at line %d, which a merge cannot place; replace each alias with the value it names by hand, and remove the anchor", n.Line)
+	}
+	if n.Kind == yaml.MappingNode {
+		seen := map[string]bool{}
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			k := n.Content[i].Value
+			if seen[k] {
+				return fmt.Errorf("gives the key %q twice at line %d", k, n.Content[i].Line)
+			}
+			seen[k] = true
+		}
+	}
+	for _, c := range n.Content {
+		if err := plain(c); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func run(base, ours, theirs []byte, expand func(path []string) bool) ([]byte, []string, error) {
@@ -166,10 +200,7 @@ func (m *merger) value(path []string, b, o, t *yaml.Node) *yaml.Node {
 			b = nil
 		}
 		return m.mapping(path, b, o, t)
-	case m.expand != nil && m.expand(path) && o != nil && t != nil && o.Kind == yaml.SequenceNode && t.Kind == yaml.SequenceNode:
-		if b != nil && b.Kind != yaml.SequenceNode {
-			b = nil
-		}
+	case m.expand != nil && m.expand(path) && sameLength(b, o, t):
 		return m.sequence(path, b, o, t)
 	}
 	return m.leaf(path, b, o, t)
@@ -211,15 +242,21 @@ func (m *merger) mapping(path []string, b, o, t *yaml.Node) *yaml.Node {
 	return o
 }
 
-// sequence merges two sequences item by item, by place, each item one
-// value.
-func (m *merger) sequence(path []string, b, o, t *yaml.Node) *yaml.Node {
-	n := max(len(o.Content), len(t.Content))
-	if b != nil {
-		n = max(n, len(b.Content))
+// sameLength reports whether the three are sequences of one length.
+func sameLength(nodes ...*yaml.Node) bool {
+	for _, n := range nodes {
+		if n == nil || n.Kind != yaml.SequenceNode || len(n.Content) != len(nodes[0].Content) {
+			return false
+		}
 	}
+	return true
+}
+
+// sequence merges three sequences of one length item by item, by place,
+// each item one value.
+func (m *merger) sequence(path []string, b, o, t *yaml.Node) *yaml.Node {
 	var content []*yaml.Node
-	for i := range n {
+	for i := range len(o.Content) {
 		if v := m.leaf(append(slices.Clip(path), strconv.Itoa(i)), at(b, i), at(o, i), at(t, i)); v != nil {
 			content = append(content, v)
 		}
@@ -233,7 +270,7 @@ func (m *merger) sequence(path []string, b, o, t *yaml.Node) *yaml.Node {
 // that merges item by item is one value, and is listed whole.
 func (m *merger) conflict(path []string, b, o, t *yaml.Node) {
 	if len(path) > 0 && m.expand != nil && m.expand(path[:len(path)-1]) {
-		m.conflicts = append(m.conflicts, strings.Join(path, "."))
+		m.conflicts = append(m.conflicts, label(strings.Join(path, ".")))
 		return
 	}
 	sides := make([]map[string]string, 3)
@@ -258,7 +295,18 @@ func (m *merger) conflict(path []string, b, o, t *yaml.Node) {
 	if len(found) == 0 {
 		found = []string{strings.Join(path, ".")}
 	}
-	m.conflicts = append(m.conflicts, found...)
+	for _, p := range found {
+		m.conflicts = append(m.conflicts, label(p))
+	}
+}
+
+// label is a conflict's path as it is listed: the root of a document that
+// is not a mapping is the whole file.
+func label(path string) string {
+	if path == "" {
+		return "(whole file)"
+	}
+	return path
 }
 
 func keys(maps []map[string]string) []string {

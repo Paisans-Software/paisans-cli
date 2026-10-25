@@ -138,19 +138,71 @@ func TestConfigKeepsOurComments(t *testing.T) {
 }
 
 func TestSOPSRuleIsOneValue(t *testing.T) {
-	b := "creation_rules:\n  - age: age1base\n"
-	ours := "creation_rules:\n  - age: age1base,age1ours\n"
-	theirs := "creation_rules:\n  - age: age1base\n  - path_regex: other\n    age: age1theirs\n"
+	b := "creation_rules:\n  - age: age1base\n  - path_regex: other\n    age: age1other\n"
+	ours := "creation_rules:\n  - age: age1base,age1ours\n  - path_regex: other\n    age: age1other\n"
+	theirs := "creation_rules:\n  - age: age1base\n  - path_regex: other\n    age: age1other,age1theirs\n"
 	out, conflicts, err := SOPS([]byte(b), []byte(ours), []byte(theirs))
 	if err != nil || len(conflicts) != 0 {
 		t.Fatalf("%v %v", err, conflicts)
 	}
-	if want := "creation_rules:\n  - age: age1base,age1ours\n  - path_regex: other\n    age: age1theirs\n"; string(out) != want {
+	if want := "creation_rules:\n  - age: age1base,age1ours\n  - path_regex: other\n    age: age1other,age1theirs\n"; string(out) != want {
 		t.Fatalf("got\n%s", out)
 	}
-	theirs = "creation_rules:\n  - age: age1base,age1theirs\n"
+	theirs = "creation_rules:\n  - age: age1base,age1theirs\n  - path_regex: other\n    age: age1other\n"
 	out, conflicts, err = SOPS([]byte(b), []byte(ours), []byte(theirs))
 	if err != nil || !reflect.DeepEqual(conflicts, []string{"creation_rules.0"}) || string(out) != ours {
 		t.Fatalf("%v %v\n%s", err, conflicts, out)
+	}
+}
+
+// The rules merge one by one only while the three lists are the same
+// length; otherwise the list is one value, so a rule ours removed is never
+// put back by its place shifting.
+func TestSOPSRulesOfOtherLengthsAreOneValue(t *testing.T) {
+	const a, b, c = "  - age: age1a\n", "  - age: age1b\n", "  - age: age1c\n"
+	rules := func(r ...string) []byte { return []byte("creation_rules:\n" + strings.Join(r, "")) }
+	for name, tc := range map[string]struct {
+		base, ours, theirs []byte
+		want               []byte
+		conflicts          []string
+	}{
+		"ours removed one, theirs another": {rules(a, b, c), rules(a, b), rules(b, c), rules(a, b), []string{"creation_rules"}},
+		"theirs inserted one":              {rules(a, b), rules(a, b), rules(c, a, b), rules(c, a, b), nil},
+		"ours appended one":                {rules(a, b), rules(a, b, c), rules(a, b), rules(a, b, c), nil},
+		"both appended differently":        {rules(a), rules(a, b), rules(a, c), rules(a, b), []string{"creation_rules"}},
+	} {
+		out, conflicts, err := SOPS(tc.base, tc.ours, tc.theirs)
+		if err != nil || !reflect.DeepEqual(conflicts, tc.conflicts) || string(out) != string(tc.want) {
+			t.Errorf("%s: %v %v\n%s", name, err, conflicts, out)
+		}
+	}
+	// theirs inserted one while ours changed another: the list is one value.
+	if _, conflicts, _ := SOPS(rules(a, b), rules(a, "  - age: age1b,age1d\n"), rules(c, a, b)); !reflect.DeepEqual(conflicts, []string{"creation_rules"}) {
+		t.Errorf("an insert beside a change: %v", conflicts)
+	}
+}
+
+// A document with an anchor, an alias or a key given twice is refused: the
+// toolkit writes none, and a merge cannot place them.
+func TestConfigRefusesAnchorsAndDuplicateKeys(t *testing.T) {
+	changed := strings.Replace(base, "name: Example", "name: Theirs", 1)
+	for name, doc := range map[string]string{
+		"anchor":    base + "x: &a 1\n",
+		"alias":     "x: &a 1\ny: *a\n" + base,
+		"duplicate": base + "id: y\n",
+	} {
+		_, _, err := Config([]byte(base), []byte(doc), []byte(changed))
+		if err == nil || (name != "duplicate" && !strings.Contains(err.Error(), "by hand")) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// A conflict at the root of a document that is not a mapping names the
+// whole file.
+func TestConfigRootConflictNamesTheWholeFile(t *testing.T) {
+	_, conflicts := merge(t, "a\n", "b\n", "c\n")
+	if !reflect.DeepEqual(conflicts, []string{"(whole file)"}) {
+		t.Fatalf("conflicts %v", conflicts)
 	}
 }

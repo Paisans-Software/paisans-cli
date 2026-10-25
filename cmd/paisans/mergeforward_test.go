@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"maps"
 	"os"
 	"path/filepath"
@@ -249,6 +250,9 @@ func TestApplyMergesNewerThenStops(t *testing.T) {
 	if !maps.Equal(rawFiles(t, f.sys.Dir), sysBefore) || !maps.Equal(rawFiles(t, f.dir), draftBefore) {
 		t.Error("a dry run changed the system copy's files or the draft")
 	}
+	if rev, _, _ := f.sys.Seen(); rev != 0 {
+		t.Errorf("a dry run raised seen to %d", rev)
+	}
 
 	err = f.applySite(t, noTerminalStdin(), "--execute")
 	if text := problemText(err); err == nil || !strings.Contains(text, "merged revision 2 into this draft; review it and run apply again") {
@@ -256,6 +260,9 @@ func TestApplyMergesNewerThenStops(t *testing.T) {
 	}
 	if checked(logged(t, log)) || f.pushed() {
 		t.Errorf("changed a host: checked %v, pushed %v", checked(logged(t, log)), f.pushed())
+	}
+	if rec.Has("pending", "review what paisans-stack.yaml grants") || rec.Index("step", "read what was granted") >= 0 {
+		t.Errorf("reviewed before stopping:\n%s", rec.Lines())
 	}
 	wantMerged(t, f.cfgPath, 2, sha, `name: "Their Community"`, "name: Bob Draft")
 	if h, _ := f.sys.Head(); h != sha {
@@ -266,5 +273,34 @@ func TestApplyMergesNewerThenStops(t *testing.T) {
 	head, _ := f.sys.Head()
 	if cache, _ := f.sys.Cache(); head == sha || cache.Revision(head) != 3 || !f.pushed() {
 		t.Errorf("the merged draft was not deployed: head %s\n%s", head, rec.Lines())
+	}
+}
+
+// A merged draft whose write fails part way, its secrets not written, is
+// still drafted from its old base, and the system copy has not moved: the
+// next pull or apply merges again rather than deploy files the merge never
+// finished.
+func TestMergedDraftWriteFailureKeepsTheOldBase(t *testing.T) {
+	f := newApplyStore(t, 1)
+	f.based(t)
+	f.sitesHold(t, replaced(t, f.files[0], communityName, `name: "Their Community"`), f.shas[0], 2)
+	if err := f.write(replaced(t, f.files[0], bobName, "name: Bob Draft")); err != nil {
+		t.Fatal(err)
+	}
+	saved := writeMerged
+	t.Cleanup(func() { writeMerged = saved })
+	boom := errors.New("disk full")
+	writeMerged = func(dir string, files configstore.Files) error {
+		if err := os.WriteFile(filepath.Join(dir, config.FileName), files.Paisans, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return boom
+	}
+	if _, err := f.pull(t, "--execute"); !errors.Is(err, boom) {
+		t.Fatalf("got %v", err)
+	}
+	wantMerged(t, f.cfgPath, 1, f.shas[0], `name: "Their Community"`, "name: Bob Draft")
+	if h, _ := f.sys.Head(); h != f.shas[0] {
+		t.Errorf("the system copy moved to %s", h)
 	}
 }
