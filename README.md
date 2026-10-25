@@ -4668,8 +4668,8 @@ paisans deployment recover --from admin@203.0.113.9 --key ~/.ssh/id_ed25519.pub 
   head wins is for an operator to decide, never an order: an operator who holds
   the files merges it with `publish --merge`. A deployment whose system copy here
   has a version is refused, naming `checkout` and `pull`, unless `--root` names
-  another root than the one it pinned, as after the deployment was made again
-  under its id; the copy replaced is moved whole into `replaced/` of the data
+  another root than the one it pinned, or the copy pinned none, as after the
+  deployment was made again under its id; the copy replaced is moved whole into `replaced/` of the data
   directory, never removed.
 * **`deployment apply`** gathers before the review, so a fork is refused and a
   draft behind the sites' newest version is merged forward before the operator
@@ -4712,7 +4712,10 @@ paisans deployment checkout --id <id> --execute      # the same, with several sy
   `deployment publish --execute` make the version they published its files.
   Every command that gathers from the sites records what they hold in its store
   and when each version arrived; only a deploy and `deployment pull` move its
-  files to a newer head.
+  files to a newer head, and an attestation by `operator register` moves its
+  head to the attestation, whose files are the same. Every command that moves
+  the head records the version in the copy's `saved.json`, which `deployment
+  list` shows and `deployment checkout` checks the head against.
 * **It is made only from the sites or a deploy:** the first deploy of a new
   deployment, `deployment recover`, the join of `operator register`, and
   `operator register --root`, since a pinned root anchors alone; `deployment
@@ -4723,8 +4726,11 @@ paisans deployment checkout --id <id> --execute      # the same, with several sy
   `locks/` of the data directory while it writes, and a second is refused,
   naming the first.
 * **`deployment fetch` reads a host's registry, through sudo,** and gathers every
-  deployment in it, changing nothing on the host. A deployment with no system
-  copy here has no anchor, and a history found only on a host is never trusted
+  deployment in it, changing nothing on the host. A system copy with a version
+  keeps it: fetch records the versions the host holds in its store, and leaves
+  its files, head and record as they are, naming `deployment pull`, which moves
+  it. One with no version takes the newest trusted version. A deployment with
+  no system copy here has no anchor, and a history found only on a host is never trusted
   on its own, so its newest versions are set aside in the system copy, never as
   its files, and listed `unverified`. Pinning one is a recovery:
   `deployment recover --root <sha>`, with a hash checked with another
@@ -4784,8 +4790,13 @@ sites' newest.
 * `paisans-stack.yaml` and `.sops.yaml` merge path by path on their YAML node
   trees. A list is one value, and comments and key order come from the draft.
   `creation_rules` in `.sops.yaml` is always one value, since its recipients
-  decide who can read the secrets. A file with a YAML anchor or alias is refused,
-  since a merge cannot place one; replace each alias with its value by hand.
+  decide who can read the secrets. A file with a YAML anchor, an alias or a
+  merge key (`<<`) is refused, since a merge cannot place one; write out the
+  values they share by hand.
+* Versions after the base that only sign its files again, as an attestation by
+  `operator register` does, leave nothing to merge: `apply` deploys the draft
+  on the sites' newest, and `pull` rewrites only the draft's "drafted from"
+  line and says the draft is up to date.
 * The secrets merge key by key after decryption, as *Secrets are merged key by
   key* describes.
 * A path both sides changed differently is a conflict: the draft keeps its own
@@ -4810,10 +4821,13 @@ the value from before that revision the line says so:
 sites.home-b: added back; revision 15 (signed by alice) removed it.
 ```
 
-A deliberate undo and an accidental one look the same, so a flag informs and
-never refuses. A draft with no usable "drafted from" line also gets a warning
-when one of its files was last saved before the sites' newest version reached
-this workstation, since it may not include that version's changes.
+A key with a dot in it is one segment, written in brackets:
+`sites["home.b"]`. A deliberate undo and an accidental one look the same, so a
+flag informs and never refuses. A draft with no usable "drafted from" line also
+gets a warning when one of its files was last saved before the version that
+brought the sites' newest files reached this workstation, since it may not
+include that version's changes; an attestation after it brings no change, and
+is not the one the warning waits for.
 
 ### Secrets are merged key by key
 

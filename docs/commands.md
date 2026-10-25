@@ -613,7 +613,7 @@ paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # o
   before the pull. `paisans-stack.yaml` and `.sops.yaml` merge path by path on
   their YAML node trees, a list being one value and `creation_rules` always
   one value, with the draft's comments and key order kept; a file with a YAML
-  anchor or alias is refused. The secrets merge key by key, decrypted with
+  anchor, an alias or a merge key (`<<`) is refused. The secrets merge key by key, decrypted with
   this workstation's age key and encrypted again to the merged `.sops.yaml`'s
   recipients. A path both sides changed differently is a conflict: the draft
   keeps its own value, and the conflicts are listed once, a secret by its key
@@ -622,7 +622,10 @@ paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # o
   It refuses while either side has a `paisans mesh rekey` under way, naming the
   sites, until `mesh rekey` finishes it, and while either side has a
   `paisans secrets rotate` under way (`rotations` or `rotate_remaining`),
-  naming the paths, until `secrets rotate` finishes it. In a folder with no
+  naming the paths, until `secrets rotate` finishes it. Versions that only
+  sign the base's files again, as an attestation by `operator register` does,
+  leave nothing to merge: the draft is up to date, and `--execute` rewrites
+  only its "drafted from" line, to the sites' newest. In a folder with no
   draft it starts one from the sites' newest version.
 * **`recover`:** for a deployment with no system copy here, makes the system
   copy from the sites, with its root and key, and starts a draft in the
@@ -642,6 +645,11 @@ paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # o
   and is not recorded. `pull` and `recover` refuse a version whose
   `secrets.enc.yaml` is plaintext before they write any of its files or sign
   anything.
+* **The record:** every command that moves a system copy's head (a deploy, a
+  pull or an apply that merged forward, an attestation, a recovery, a join,
+  and a fetch into a copy with no version) writes its `saved.json`, the
+  version `deployment list` shows and `deployment checkout` checks the head
+  against.
 * **One writer at a time:** a command that writes a system copy holds its lock,
   in `locks/` of the data directory, while it writes; a second is refused,
   naming the first.
@@ -659,7 +667,9 @@ paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # o
   refuses a fork. A draft drafted from an older version than the sites' newest
   is merged forward as `pull` merges it; with `--execute` the merged draft is
   written and the apply stops, deploying nothing, for the operator to review
-  it and run apply again. With `--execute` it publishes the version it applies
+  it and run apply again. Versions after the base that only sign its files
+  again, as an attestation does, are no reason to merge: the draft deploys on
+  the sites' newest. With `--execute` it publishes the version it applies
   and each host records it; a host whose record holds a newer revision, or
   another version at the same revision, makes `deployment apply` ask for
   `rollback`. It needs the standard file names beside `paisans-stack.yaml` (a
@@ -695,7 +705,8 @@ paisans deployment list
 * **Made by:** the first deploy of a new deployment, `deployment recover
   --execute`, the join of `operator register`, and `operator register --root
   --execute`; `deployment fetch` fills one from a host. A deploy or `deployment
-  pull` moves one to a newer version.
+  pull` moves one to a newer version, and an attestation by `operator
+  register` moves its head to the attestation.
 * **Status:** `verified` is a version the trust rules chose; `unverified` is
   one a host served for a deployment this workstation holds no anchor for, kept
   only among the system copy's incoming versions; `fork` is two trusted heads,
@@ -745,8 +756,9 @@ paisans deployment checkout --head <sha> --config ~/work/merge/paisans-stack.yam
 
 ### `paisans deployment fetch`
 
-Fills, for every deployment in the registry of the host `--ssh` names, its
-system copy with the newest version of its configuration the host keeps.
+Records, for every deployment in the registry of the host `--ssh` names, the
+versions of its configuration the host keeps in its system copy, and fills a
+system copy with no version with the newest trusted one.
 
 ```sh
 paisans deployment fetch --ssh admin@203.0.113.9
@@ -761,8 +773,14 @@ paisans deployment fetch --ssh admin@203.0.113.9
   nothing on the host.
 * **Trust:** a deployment with a system copy here is judged from its anchor
   (the key that signed what was deployed, or the pinned root), as `deployment
-  pull` judges, and the newest trusted version becomes the system copy's. One
-  older than this workstation has seen is not saved. A deployment with no
+  pull` judges. A system copy with a version keeps it: the versions the host
+  holds are recorded in its store, with the newest revision seen, and its
+  files, head and record stay as they are, since only a deploy or
+  `deployment pull` moves it; the run names `deployment pull` when the host
+  holds a newer one, and a fork it serves is named, never recorded as the
+  copy's status. A system copy with no version takes the newest trusted one
+  as its files and head, recorded `verified`. One older than this
+  workstation has seen is not saved. A deployment with no
   system copy here has no anchor: its newest versions are set aside among the
   system copy's incoming versions, never as its own files, and it is listed
   `unverified`, with the `deployment recover --root <sha>` line that pins one

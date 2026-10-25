@@ -163,9 +163,9 @@ var helpCommands = []helpCommand{
 			"With --site: compare that site's rendered artifacts with what is on its host and show what would change.\n\n" +
 			"Changes nothing on a host without --execute; without --site, the dry run may add missing generated secrets to the local secrets file, and says so when it does.\n\n" +
 			"Both, and site prepare, review the keys and images " + config.FileName + " grants against what each host last applied; --execute asks for the word approve at a terminal when anything is added or changed, and asks nothing when nothing is. Before it, apply shows how the configuration differs from the sites' newest version: " + config.FileName + " as a diff, the secrets by key only. " +
-			"A draft drafted from an older version than the sites' newest is merged forward first, as deployment pull merges it, and with --execute the merge is written into the draft and the apply stops, deploying nothing: review the merged draft, settle any conflict it lists, and run apply again. A conflict keeps the draft's value and is listed only at the merge; on the next apply it shows only in the review's difference. " +
+			"A draft drafted from an older version than the sites' newest is merged forward first, as deployment pull merges it, and with --execute the merge is written into the draft and the apply stops, deploying nothing: review the merged draft, settle any conflict it lists, and run apply again. Versions after the draft's base that only sign its files again, as an attestation by operator register does, leave nothing to merge, and the draft deploys on the sites' newest. A conflict keeps the draft's value and is listed only at the merge; on the next apply it shows only in the review's difference. " +
 			"The review flags each change that puts back the value a path or secret key had before the newest revision that changed it, naming that revision and its signer, and never refuses one. " +
-			"A draft with no usable \"drafted from\" line is taken as drafted from the system copy's version, which the review names, and is warned about when it was last saved before the sites' newest version reached this workstation. " +
+			"A draft with no usable \"drafted from\" line is taken as drafted from the system copy's version, which the review names, and is warned about when it was last saved before the version that brought the sites' newest files reached this workstation. " +
 			"A deploy makes the deployed files the system copy and rewrites the draft's \"drafted from\" line to name the version it published.\n\n" +
 			"--yes approves the review entry by entry, and types create and rollback when apply asks for them. " + yesTopic + "\n\n" +
 			"Before anything changes, every app it starts logs in to its mail server from its site, sending nothing; one that does not log in refuses the apply.\n\n" +
@@ -363,8 +363,9 @@ var helpCommands = []helpCommand{
 		summary: "Bring the system copy and the draft to the sites' newest version.",
 		usage:   []string{"paisans deployment pull [--config " + config.FileName + "] [--id <id>] [--root <sha>] [--key <path.pub>] [--execute] [--yes]"},
 		detail: "Move the system copy to the sites' newest version and merge that version into the draft, from the version the draft was drafted from: its \"drafted from\" line names it, or, without a usable line, the system copy's version is taken. " +
-			"paisans-stack.yaml and .sops.yaml merge path by path, a list being one value, with the draft's comments and key order kept; the secrets merge key by key, decrypted with this workstation's age key and encrypted again to the merged .sops.yaml's recipients. " +
+			"paisans-stack.yaml and .sops.yaml merge path by path, a list being one value, with the draft's comments and key order kept, and a file with a YAML anchor, an alias or a merge key (<<) is refused; the secrets merge key by key, decrypted with this workstation's age key and encrypted again to the merged .sops.yaml's recipients. " +
 			"A path both sides changed differently is a conflict: the draft keeps its own value there, and the conflict is listed, a secret by its key only. The merged draft's \"drafted from\" line names the sites' newest version; review it and deploy it with deployment apply --execute. " +
+			"When the versions from the draft's base to the sites' newest only sign the base's files again, as an attestation by operator register does, the draft is up to date: only its \"drafted from\" line is rewritten, to the sites' newest. " +
 			"In a folder with no draft, start one from the sites' newest version, of the only deployment on this workstation or the one --id names. Writes nothing without --execute." +
 			configTrust + "\n\n" + keyTrust,
 	},
@@ -379,7 +380,7 @@ var helpCommands = []helpCommand{
 		summary: "Make the system copy from the sites and start a draft of it.",
 		usage:   []string{"paisans deployment recover --from <user@host[:port] or ssh alias>... [--root <sha>] [--key <path.pub>] [--id <id>]\n                       [--config " + config.FileName + "] [--execute] [--yes]"},
 		detail: "For a deployment this workstation holds no system copy of, gather from the --from hosts and every site the trusted heads name, and with --execute make the system copy the head's, with its root and key, and start a draft of it in the directory of --config, which must hold none of the three files. " +
-			"A deployment whose system copy here has a version is refused, naming deployment checkout and deployment pull, unless --root names another root than the one it pinned, as after the deployment was made again under its id; a system copy with no version, or one --root replaces, is moved aside whole into replaced/ of the data directory, never removed. A fork is refused, naming the merge with deployment publish --merge an operator who holds the files makes, and nothing is written. " +
+			"A deployment whose system copy here has a version is refused, naming deployment checkout and deployment pull, unless --root names another root than the one it pinned, or the copy pinned none, as after the deployment was made again under its id; a system copy with no version, or one --root replaces, is moved aside whole into replaced/ of the data directory, never removed. A fork is refused, naming the merge with deployment publish --merge an operator who holds the files makes, and nothing is written. " +
 			"The system copy is listed by deployment list." +
 			configTrust + "\n\n" + keyTrust + "\n\n" + sshAliasTopic,
 	},
@@ -389,7 +390,7 @@ var helpCommands = []helpCommand{
 		usage:   []string{"paisans deployment list"},
 		detail: "List every deployment's system copy on this workstation: its id, domain, revision, version, whether it is verified, where it came from and when. " +
 			"A system copy is the one copy of a deployment this workstation trusts: the files of the version it last deployed or synced, the signed versions gathered from the sites, and the root, signing key and newest revision trust is read from. " +
-			"The first deploy of a new deployment, deployment recover --execute, the join of operator register and operator register --root --execute make one, and deployment fetch fills one from a host; a deploy or deployment pull moves it to a newer version. " +
+			"The first deploy of a new deployment, deployment recover --execute, the join of operator register and operator register --root --execute make one, and deployment fetch fills one with no version from a host; a deploy or deployment pull moves it to a newer version, and an attestation by operator register moves its head to the attestation. Each records the version it moved to, which this list shows. " +
 			"System copies are kept under deployments/ in ~/Library/Application Support/Paisans on macOS, and in $XDG_DATA_HOME/paisans (~/.local/share/paisans) elsewhere, or in $" + localstore.DirVariable + " when set; locks/ there holds the lock a command takes while it writes one, and replaced/ the copies a recovery moved aside. " +
 			"Work on a deployment in a draft: deployment checkout starts one. Reads nothing else, and changes nothing.",
 	},
@@ -406,8 +407,8 @@ var helpCommands = []helpCommand{
 		name:    "deployment fetch",
 		summary: "Fill a system copy of every deployment a host holds.",
 		usage:   []string{"paisans deployment fetch --ssh <user@host[:port] or ssh alias>"},
-		detail: "Read, through sudo, the registry of the host --ssh names and, for each deployment in it, every version of its configuration the host keeps, and save the newest trusted one in the deployment's system copy (see deployment list). " +
-			"A deployment with a system copy here is judged from the key that signed it, as deployment pull judges; one with none has nothing to trust from, so its newest versions are set aside in its system copy's incoming versions, never as its own files, and listed as unverified, " +
+		detail: "Read, through sudo, the registry of the host --ssh names and, for each deployment in it, every version of its configuration the host keeps, and record them in the deployment's system copy (see deployment list). " +
+			"A deployment with a system copy here is judged from the key that signed it, as deployment pull judges. A system copy with a version keeps its files, head and record, since only a deploy or deployment pull moves it, and the run names deployment pull when the host holds a newer one; one with no version takes the newest trusted version as its own. A deployment with no system copy here has nothing to trust from, so its newest versions are set aside in its system copy's incoming versions, never as its own files, and listed as unverified, " +
 			"for deployment recover --root <sha> to pin once the hash is checked with another operator. Needs no " + config.FileName + "; changes nothing on the host.\n\n" + sshAliasTopic,
 	},
 	{

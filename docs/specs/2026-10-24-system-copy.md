@@ -78,18 +78,33 @@ It is written only by:
 * **a sync**: any command that gathers from the sites records what they hold
   in the system copy's store and when each version arrived. Only a deploy and
   `deployment pull` move the system copy's files to a newer trusted head;
-  every other sync (`log`, `register`, a dry run) records versions and
-  nothing else, so the files stay the base the next merge needs;
+  every other sync (`log`, `register`, `fetch` into a copy with a version, a
+  dry run) records versions and nothing else, so the files stay the base the
+  next merge needs;
+* **an attestation**: `operator register --execute` signs the sites' newest
+  version's files again as the next revision and moves the head to it, the
+  files unchanged;
 * **a recovery or a join**, which create the system copy from the sites;
 * **`operator register --root`**, for a deployment with no system copy here:
   a pinned root anchors alone, so register makes the system copy from the
   version the pin leads to;
-* **`deployment fetch`**, which fills a system copy from a host, judged from
-  the copy's anchor, or set aside as unverified where there is none.
+* **`deployment fetch`**, which fills a system copy with no version from a
+  host, judged from the copy's anchor, or set aside as unverified where there
+  is none. A system copy with a version keeps its files, head and record: the
+  fetch records the host's versions and the newest revision seen, and names
+  `deployment pull`, which moves it.
 
-A run that creates a system copy works in a directory of its own under the
-data directory and puts it in place under `deployments/<id>/` only once it
-records a head, so a dry run or a failed run leaves none. What the place held
+Every command that moves a system copy's head writes its `saved.json`: the
+version, its revision, `verified`, and where it came from. That is what
+`deployment list` shows and what `deployment checkout` checks the head
+against, so a deploy, a pull, an apply that merges forward, an attestation, a
+recovery, a join and a fetch into a copy with no version each write it through
+one helper.
+
+A run that creates a system copy, the first deploy among them, works in a
+directory of its own under the data directory, and its output names the
+system copy's place for it; it puts it in place under `deployments/<id>/` only
+once it records a head, so a dry run or a failed run leaves none. What the place held
 before is moved aside whole into `replaced/` of the data directory, never
 removed, and the run names where.
 
@@ -166,6 +181,10 @@ undo flags and the stale-draft warning cover a draft whatever its base.
    without a usable line, the system copy's files before the sync.
 3. **When the sites' newest version is the base**, the draft is the next
    version. The review shows it against the sites' newest version (below).
+   So it is when every version from the base to the sites' newest, by first
+   parents, has the base's three files, as an attestation leaves them: the
+   sites' newest is then taken as the base, and the deploy rewrites the
+   draft's "drafted from" line as any deploy does.
 4. **When the sites' newest version is newer than the base** (another
    operator deployed, from any workstation or another folder of this one),
    the system copy moves to it, and the draft is merged forward with a
@@ -173,8 +192,8 @@ undo flags and the stale-draft warning cover a draft whatever its base.
    theirs is the sites' newest version. `paisans-stack.yaml`
    and `.sops.yaml` merge path by path on their YAML node trees (a list is one
    value, `creation_rules` is always one value, and comments and key order
-   come from the draft); a file with a YAML anchor or alias is refused, since
-   a merge cannot place one. The secrets merge by key after decryption with
+   come from the draft); a file with a YAML anchor, an alias or a merge key
+   (`<<`) is refused, since a merge cannot place one. The secrets merge by key after decryption with
    this workstation's age key and are encrypted again to the merged
    `.sops.yaml`'s recipients; a merge is refused while either side has a mesh
    rekey or a secrets rotation under way. What does not conflict merges. On a
@@ -215,9 +234,11 @@ Before approval, `deployment apply`'s review shows:
   parents only, and the flags of every path under one key that name the same
   revision and wording fold into one line for that key.
 * **A stale-draft warning.** For a draft with no usable "drafted from" line,
-  when any of its files was last modified before the newest revision reached
-  this workstation (both times from this machine's clock, the second from the
-  system copy's arrival record), the review warns once: `This draft was last saved before revision 15 reached this
+  when any of its files was last modified before the version that brought the
+  sites' newest files reached this workstation (both times from this machine's
+  clock, the second from the system copy's arrival record; an attestation
+  brings no files, so the version is the oldest of those before the head, by
+  first parents, that hold the head's), the review warns once: `This draft was last saved before revision 15 reached this
   workstation; it may not include revision 15's changes.` It is a warning, not
   a refusal: a file copy can reset a modification time, so the signal can miss
   a stale draft but never marks a fresh one stale. A draft whose line names a
@@ -229,8 +250,11 @@ The approval prompt that exists today decides.
 ## Commands
 
 * `deployment pull` syncs the system copy, then, in a folder with a draft,
-  merges the draft forward as step 4 above, from the base step 2 finds.
-  Without a draft it starts one.
+  merges the draft forward as step 4 above, from the base step 2 finds. When
+  the versions from the base to the sites' newest only sign the base's files
+  again, as in step 3, it rewrites the draft's "drafted from" line to the
+  sites' newest, writes nothing else into the draft, and says it is up to
+  date. Without a draft it starts one.
 * `deployment checkout [--id <full id>] [--head <sha>]` starts a draft in the
   folder from the system copy, or, with `--head`, from another trusted head of
   its store, the files a hand merge for `deployment publish --merge` starts
@@ -241,9 +265,13 @@ The approval prompt that exists today decides.
   a copy only when an explicit `--root` differs from the root it pinned, or it
   pinned none, keeping the old one under `replaced/`. A fork during a recovery
   is refused and nothing is written.
-* `deployment list` lists the system copies; `deployment fetch` fills one from
-  a host as today.
-* `operator register` attests from the system copy.
+* `deployment list` lists the system copies; `deployment fetch` fills one with
+  no version from a host, and records the host's versions into one with a
+  version.
+* `operator register` attests from the system copy. An attestation no site
+  took is taken back whole, as a deploy's is: the system copy's files and
+  records are put back and the version dropped from its store, so another
+  operator's next deploy makes no fork here.
 * `--config` keeps naming the draft's `paisans-stack.yaml` for every command
   that reads or writes a draft.
 
@@ -294,4 +322,5 @@ config-store spec's *Workstation* wording follows.
   and never fails the gather.
 * Path flattening names each mapping key by its dotted path and treats a list
   as one value, the same flattening the merge, the undo flags and the review
-  use.
+  use. A key that is empty or holds a dot, a bracket or a double quote is one
+  segment in brackets, quoted: `sites["home.b"].host`.
