@@ -39,9 +39,9 @@ import (
 // directory, for an operator who keeps their data elsewhere and for tests.
 const DirVariable = "PAISANS_DATA_DIR"
 
-// savedFile is the record beside a deployment's files that says what they
+// SavedFile is the record beside a deployment's files that says what they
 // are, for deployment list.
-const savedFile = "saved.json"
+const SavedFile = "saved.json"
 
 // Status is how far a saved copy is trusted.
 type Status string
@@ -246,7 +246,7 @@ func (s Store) Record(rec Saved) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), filepath.Join(l.Dir, savedFile))
+	return os.Rename(tmp.Name(), filepath.Join(l.Dir, SavedFile))
 }
 
 // Load is deployment id's saved.json, and false when it has none.
@@ -254,7 +254,7 @@ func (s Store) Load(id string) (Saved, bool, error) {
 	if !deployment.ValidID(id) {
 		return Saved{}, false, fmt.Errorf("%q is not a deployment id", id)
 	}
-	data, err := os.ReadFile(filepath.Join(s.root(), id, savedFile))
+	data, err := os.ReadFile(filepath.Join(s.root(), id, SavedFile))
 	if errors.Is(err, os.ErrNotExist) {
 		return Saved{}, false, nil
 	}
@@ -263,7 +263,7 @@ func (s Store) Load(id string) (Saved, bool, error) {
 	}
 	var rec Saved
 	if err := json.Unmarshal(data, &rec); err != nil {
-		return Saved{}, false, fmt.Errorf("%s: %w", filepath.Join(s.root(), id, savedFile), err)
+		return Saved{}, false, fmt.Errorf("%s: %w", filepath.Join(s.root(), id, SavedFile), err)
 	}
 	return rec, true, nil
 }
@@ -306,7 +306,7 @@ func (s Store) List() ([]Listed, error) {
 		case err != nil:
 			l.Err = err
 		case !ok:
-			l.Err = fmt.Errorf("no %s", savedFile)
+			l.Err = fmt.Errorf("no %s", SavedFile)
 		}
 		if ok && err == nil {
 			l.Saved = rec

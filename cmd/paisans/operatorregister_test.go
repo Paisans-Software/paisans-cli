@@ -428,15 +428,17 @@ func TestRegisterRootKeepsADirectoryWithARecord(t *testing.T) {
 	}
 }
 
-// settle puts the made copy over a directory that holds no system copy:
-// its files first and .paisans last, what that directory's .paisans held
-// moved aside rather than removed, and its other entries kept.
+// settle puts the made copy in place of whatever the directory held, every
+// entry of it but those kept moved aside, outside deployments/, and none
+// removed.
 func TestSettleKeepsWhatWasThere(t *testing.T) {
-	staging, dest := t.TempDir(), filepath.Join(t.TempDir(), "deployments", fixtureDeploymentID)
+	base := t.TempDir()
+	staging, dest := t.TempDir(), filepath.Join(base, "deployments", fixtureDeploymentID)
 	for path, body := range map[string]string{
 		filepath.Join(staging, "paisans-stack.yaml"):      "ours\n",
 		filepath.Join(staging, ".paisans", "config-head"): "head\n",
 		filepath.Join(dest, "saved.json"):                 "{}\n",
+		filepath.Join(dest, "paisans-stack.yaml"):         "theirs\n",
 		filepath.Join(dest, ".paisans", "config-root"):    "theirs\n",
 	} {
 		os.MkdirAll(filepath.Dir(path), 0o700)
@@ -444,35 +446,73 @@ func TestSettleKeepsWhatWasThere(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	aside, err := settle(staging, dest)
+	aside, moved, err := settle(staging, dest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(filepath.Base(aside), ".paisans.replaced-") || filepath.Dir(aside) != dest {
+	if filepath.Dir(aside) != filepath.Join(base, "replaced") || !strings.HasPrefix(filepath.Base(aside), fixtureDeploymentID+"-") {
 		t.Fatalf("aside %q", aside)
 	}
+	if strings.Join(moved, ",") != ".paisans,paisans-stack.yaml,saved.json" {
+		t.Errorf("moved %q", moved)
+	}
 	for path, want := range map[string]string{
-		filepath.Join(dest, "paisans-stack.yaml"):      "ours\n",
-		filepath.Join(dest, ".paisans", "config-head"): "head\n",
-		filepath.Join(dest, "saved.json"):              "{}\n",
-		filepath.Join(aside, "config-root"):            "theirs\n",
+		filepath.Join(dest, "paisans-stack.yaml"):       "ours\n",
+		filepath.Join(dest, ".paisans", "config-head"):  "head\n",
+		filepath.Join(aside, "saved.json"):              "{}\n",
+		filepath.Join(aside, "paisans-stack.yaml"):      "theirs\n",
+		filepath.Join(aside, ".paisans", "config-root"): "theirs\n",
 	} {
 		if b, err := os.ReadFile(path); err != nil || string(b) != want {
 			t.Errorf("%s: %q, %v", path, b, err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(dest, ".paisans", "config-root")); !os.IsNotExist(err) {
-		t.Errorf("their root is still in .paisans: %v", err)
+	for _, gone := range []string{filepath.Join(dest, "saved.json"), filepath.Join(dest, ".paisans", "config-root")} {
+		if _, err := os.Stat(gone); !os.IsNotExist(err) {
+			t.Errorf("%s is still in place: %v", gone, err)
+		}
 	}
 
-	// Where dest is not there, staging itself becomes it.
+	// An entry keep names stays in place, and the made copy's entries go in
+	// beside it.
 	staging, dest = t.TempDir(), filepath.Join(t.TempDir(), "deployments", fixtureDeploymentID)
-	os.WriteFile(filepath.Join(staging, "paisans-stack.yaml"), []byte("ours\n"), 0o600)
-	if aside, err := settle(staging, dest); err != nil || aside != "" {
-		t.Fatalf("aside %q, %v", aside, err)
+	for path, body := range map[string]string{
+		filepath.Join(staging, "paisans-stack.yaml"):      "ours\n",
+		filepath.Join(staging, ".paisans", "config-head"): "head\n",
+		filepath.Join(dest, "saved.json"):                 "{}\n",
+		filepath.Join(dest, ".paisans", "config-root"):    "theirs\n",
+	} {
+		os.MkdirAll(filepath.Dir(path), 0o700)
+		os.WriteFile(path, []byte(body), 0o600)
 	}
-	if b, _ := os.ReadFile(filepath.Join(dest, "paisans-stack.yaml")); string(b) != "ours\n" {
-		t.Fatalf("got %q", b)
+	aside, moved, err = settle(staging, dest, "saved.json")
+	if err != nil || strings.Join(moved, ",") != ".paisans" {
+		t.Fatalf("moved %q, %v", moved, err)
+	}
+	for path, want := range map[string]string{
+		filepath.Join(dest, "saved.json"):               "{}\n",
+		filepath.Join(dest, "paisans-stack.yaml"):       "ours\n",
+		filepath.Join(dest, ".paisans", "config-head"):  "head\n",
+		filepath.Join(aside, ".paisans", "config-root"): "theirs\n",
+	} {
+		if b, err := os.ReadFile(path); err != nil || string(b) != want {
+			t.Errorf("%s: %q, %v", path, b, err)
+		}
+	}
+
+	// Where dest is not there, or empty, staging itself becomes it.
+	for _, empty := range []bool{false, true} {
+		staging, dest = t.TempDir(), filepath.Join(t.TempDir(), "deployments", fixtureDeploymentID)
+		if empty {
+			os.MkdirAll(dest, 0o700)
+		}
+		os.WriteFile(filepath.Join(staging, "paisans-stack.yaml"), []byte("ours\n"), 0o600)
+		if aside, moved, err := settle(staging, dest); err != nil || aside != "" || len(moved) != 0 {
+			t.Fatalf("empty %v: aside %q %q, %v", empty, aside, moved, err)
+		}
+		if b, _ := os.ReadFile(filepath.Join(dest, "paisans-stack.yaml")); string(b) != "ours\n" {
+			t.Fatalf("got %q", b)
+		}
 	}
 }
 

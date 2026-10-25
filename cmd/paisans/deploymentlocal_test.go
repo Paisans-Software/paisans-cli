@@ -197,6 +197,150 @@ func TestRecoverRefusesExistingDraft(t *testing.T) {
 	}
 }
 
+// fileContents is every regular file under dir, by its path from dir.
+func fileContents(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for p, v := range tree(t, dir) {
+		if b, err := os.ReadFile(p); err == nil && !strings.HasPrefix(v, "d") {
+			rel, _ := filepath.Rel(dir, p)
+			out[rel] = string(b)
+		}
+	}
+	return out
+}
+
+// existingCopy makes the fixture deployment's system copy what an earlier
+// run left: the sites' versions in its store and, with head set, that
+// version checked out, root pinned when given, and a record of status.
+func existingCopy(t *testing.T, st localstore.Store, answer, head, root string, status localstore.Status) configstore.Local {
+	t.Helper()
+	l, err := st.Local(fixtureID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache, err := l.Cache()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cache.FetchBundle(mustBundle(t, answer)); err != nil {
+		t.Fatal(err)
+	}
+	if head != "" {
+		if err := l.Checkout(head); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if root != "" {
+		if err := l.SetRoot(root); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if status != "" {
+		if err := st.Record(localstore.Saved{ID: fixtureID(t), SHA: head, Revision: 1, Status: status}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return l
+}
+
+// Whether a recovery may take the place of a system copy is decided from
+// the copy itself, never its record: one with a head is refused, even one
+// a fetch recorded as a fork, and so is --root naming the root it pinned;
+// --root naming another root replaces it, as does a copy with no head.
+// What is replaced is moved aside whole and named, never removed.
+func TestRecoverReplacesOnlyWhatItMay(t *testing.T) {
+	shas, answer, files, _, pub := storedHistoryKey(t, 2, 0)
+	other := strings.Repeat("ab", 20)
+	recover := func(t *testing.T, more ...string) (string, error) {
+		t.Helper()
+		recoverHosts(t, answer)
+		allSitesUp(answer, nil)
+		agentHolding(t, pub)
+		var rep bytes.Buffer
+		reporterOverride = ui.NewPlain(&rep, true)
+		args := append([]string{"recover", "--from", "ubuntu@203.0.113.9", "--config", filepath.Join(t.TempDir(), "paisans-stack.yaml"), "--execute"}, more...)
+		err := runDeployment(args, noTerminalStdin(), &bytes.Buffer{})
+		return rep.String(), err
+	}
+	refused := func(t *testing.T, l configstore.Local, more ...string) {
+		t.Helper()
+		before := tree(t, l.Dir)
+		_, err := recover(t, more...)
+		if text := problemText(err); err == nil || !strings.Contains(text, "holds the system copy of "+fixtureID(t)+" already") || !strings.Contains(text, "deployment checkout --id") {
+			t.Fatalf("%v: %v", more, text)
+		}
+		after := tree(t, l.Dir)
+		if len(after) != len(before) {
+			t.Fatalf("%v: the system copy changed", more)
+		}
+		for p, v := range before {
+			if after[p] != v {
+				t.Fatalf("%v: %s changed", more, p)
+			}
+		}
+	}
+
+	t.Run("a head a fetch recorded as a fork", func(t *testing.T) {
+		st := ownStore(t)
+		l := existingCopy(t, st, answer, shas[0], shas[0], localstore.Fork)
+		refused(t, l, "--key", pubFile(t, pub))
+	})
+	t.Run("--root naming the pinned root", func(t *testing.T) {
+		st := ownStore(t)
+		l := existingCopy(t, st, answer, shas[0], shas[0], localstore.Verified)
+		refused(t, l, "--root", shas[0])
+	})
+	t.Run("--root naming another root", func(t *testing.T) {
+		st := ownStore(t)
+		l := existingCopy(t, st, answer, shas[0], other, localstore.Verified)
+		old := fileContents(t, l.Dir)
+		out, err := recover(t, "--root", shas[0])
+		if err != nil {
+			t.Fatal(problemText(err))
+		}
+		sys := heldCopy(t)
+		if r, _ := sys.Root(); r != shas[0] {
+			t.Errorf("root %q", r)
+		}
+		if got, _ := sys.Files(); !got.Equal(files[1]) {
+			t.Error("the system copy is not the recovered head's")
+		}
+		asides, _ := filepath.Glob(filepath.Join(st.Base, "replaced", fixtureID(t)+"-*"))
+		if len(asides) != 1 {
+			t.Fatalf("moved aside: %v", asides)
+		}
+		if kept := fileContents(t, asides[0]); len(kept) != len(old) {
+			t.Errorf("kept aside %d files of %d", len(kept), len(old))
+		} else {
+			for rel, v := range old {
+				if kept[rel] != v {
+					t.Errorf("%s was not kept aside as it was", rel)
+				}
+			}
+		}
+		for _, want := range []string{"moved aside to " + asides[0], "paisans-stack.yaml", ".paisans", "saved.json", "its pinned root " + other + " is not the root --root names"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("the warning lacks %q:\n%s", want, out)
+			}
+		}
+	})
+	t.Run("no head", func(t *testing.T) {
+		st := ownStore(t)
+		existingCopy(t, st, answer, "", "", localstore.Unverified)
+		out, err := recover(t, "--root", shas[0])
+		if err != nil {
+			t.Fatal(problemText(err))
+		}
+		if h, _ := heldCopy(t).Head(); h != shas[1] {
+			t.Errorf("head %q", h)
+		}
+		if !strings.Contains(out, "it held no version") {
+			t.Errorf("the warning does not say why:\n%s", out)
+		}
+	})
+}
+
 // A deployment saved before is fetched as pull would take it: the host's
 // newer version, judged from the saved anchor, becomes the saved copy.
 func TestFetchUpdatesASavedDeployment(t *testing.T) {

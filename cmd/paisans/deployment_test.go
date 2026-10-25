@@ -767,7 +767,7 @@ func TestConfigForgedVersionsChangeNoFiles(t *testing.T) {
 }
 
 // A recovery that finds a fork refuses, choosing neither head, and names the
-// merge an operator who holds the system copy makes: it makes no system
+// merge an operator who holds the files makes: it makes no system
 // copy, writes nothing in the folder, and leaves no directory it worked in.
 func TestRecoverForkRefuses(t *testing.T) {
 	withDataDir(t)
@@ -788,10 +788,13 @@ func TestRecoverForkRefuses(t *testing.T) {
 		}
 		err := runDeployment(args, noTerminalStdin(), &bytes.Buffer{})
 		text := problemText(err)
-		for _, want := range []string{"the sites hold a fork", "deployment checkout --head", "deployment publish --merge", "recover again"} {
+		for _, want := range []string{"the sites hold a fork", "deployment publish --merge", "run this recovery again"} {
 			if err == nil || !strings.Contains(text, want) {
 				t.Errorf("execute %v: lacks %q: %v", execute, want, text)
 			}
+		}
+		if strings.Contains(text, "checkout") {
+			t.Errorf("execute %v: names a checkout with no system copy to check out from: %v", execute, text)
 		}
 		entries, _ := os.ReadDir(dir)
 		if len(entries) != 0 {

@@ -371,7 +371,7 @@ var helpCommands = []helpCommand{
 		summary: "Make the system copy from the sites and start a draft of it.",
 		usage:   []string{"paisans deployment recover --from <user@host[:port] or ssh alias>... [--root <sha>] [--key <path.pub>] [--id <id>]\n                       [--config " + config.FileName + "] [--execute] [--yes]"},
 		detail: "For a deployment this workstation holds no system copy of, gather from the --from hosts and every site the trusted heads name, and with --execute make the system copy the head's, with its root and key, and start a draft of it in the directory of --config, which must hold none of the three files. " +
-			"A deployment whose system copy is here already is refused, naming deployment checkout and deployment pull; a fork is refused, naming the merge an operator who holds the system copy makes, and nothing is written. " +
+			"A deployment whose system copy here has a version is refused, naming deployment checkout and deployment pull, unless --root names another root than the one it pinned, as after the deployment was made again under its id; a system copy with no version, or one --root replaces, is moved aside whole into replaced/ of the data directory, never removed. A fork is refused, naming the merge with deployment publish --merge an operator who holds the files makes, and nothing is written. " +
 			"The system copy is listed by deployment list." +
 			configTrust + "\n\n" + keyTrust + "\n\n" + sshAliasTopic,
 	},

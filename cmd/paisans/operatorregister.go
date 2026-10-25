@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
@@ -173,7 +172,7 @@ func registerSystem(r ui.Reporter, configPath, id string, d draft.Draft, root st
 			return sys, nil, done, err
 		}
 		if !ok {
-			sys, staged, err := stageSystem(r, st, "register", c.ID, release, nil)
+			sys, staged, err := stageSystem(r, st, "register", c.ID, "it held no system copy, only what a run that made none left.", []string{localstore.SavedFile}, release, nil)
 			if err != nil {
 				return sys, nil, done, err
 			}
@@ -205,9 +204,13 @@ func registerSystem(r ui.Reporter, configPath, id string, d draft.Draft, root st
 // when it fails. done puts the directory in place as the system copy only
 // when the run recorded a head there, as a dry run does not, then runs
 // placed, when set, on the system copy in its place, and removes the
-// directory. It returns the run's error, runErr, naming the system copy
-// where it named the directory, or why the system copy is not in place.
-func stageSystem(r ui.Reporter, st localstore.Store, command, id string, release func(), placed func(sys configstore.Local) error) (configstore.Local, func(runErr error) error, error) {
+// directory. What the system copy's place held, but the entries keep
+// names, is moved aside, never
+// removed, and a warning names each entry, where it went, and why, which
+// says why that is no system copy to keep. done returns the run's error,
+// runErr, naming the system copy where it named the directory, or why the
+// system copy is not in place.
+func stageSystem(r ui.Reporter, st localstore.Store, command, id, why string, keep []string, release func(), placed func(sys configstore.Local) error) (configstore.Local, func(runErr error) error, error) {
 	staging, err := os.MkdirTemp(st.Base, command+"-"+id+"-")
 	if err != nil {
 		release()
@@ -219,16 +222,16 @@ func stageSystem(r ui.Reporter, st localstore.Store, command, id string, release
 		defer release()
 		var after error
 		if head, err := sys.Head(); err == nil && head != "" {
-			aside, err := settle(staging, dest)
-			if aside != "" {
-				r.Warn("what "+dest+" recorded is moved aside to "+aside, "That directory held no trusted version, and the system copy this run made is in its place. Remove "+aside+" once you know nothing in it is needed.")
+			aside, moved, err := settle(staging, dest, keep...)
+			if len(moved) > 0 {
+				r.Warn("what "+dest+" held is moved aside to "+aside, "It held "+strings.Join(moved, ", ")+"; "+why+" The system copy this run made is in its place, and nothing was removed. Remove "+aside+" once you know nothing in it is needed.")
 			}
 			if err != nil {
 				what := "and pushed it as reported above"
 				if runErr != nil {
 					what = "and stopped before the sites were known to hold it (" + errLine(runErr) + "); they may not have it"
 				}
-				p := &ui.Problem{Hint: "the new system copy of " + id + " could not be put in place", Explain: "This run recorded its head, " + shortSHA(head) + ", in " + staging + ", " + what + ". Move that directory's contents into " + dest + ", the paisans state directory .paisans last: " + errLine(err) + ".", Cause: err}
+				p := &ui.Problem{Hint: "the new system copy of " + id + " could not be put in place", Explain: "This run recorded its head, " + shortSHA(head) + ", in " + staging + ", " + what + ". Move its entries into " + dest + ", the paisans state directory .paisans last: " + errLine(err) + ".", Cause: err}
 				r.Warn(p.Hint, p.Explain)
 				return p
 			}
@@ -246,50 +249,68 @@ func stageSystem(r ui.Reporter, st localstore.Store, command, id string, release
 	}, nil
 }
 
-// settle puts the system copy made in staging at dest: the directory
-// itself when dest is not there, else each of its entries in place of
-// dest's, which holds no trusted version. What dest's .paisans held is moved
-// aside, never removed, and aside names where. .paisans, which holds the
-// head, goes in last, so dest is a system copy only once its files are
-// there.
-func settle(staging, dest string) (aside string, err error) {
+// settle puts the system copy made in staging at dest. Whatever dest holds
+// is moved aside first, entry by entry, never removed, into a directory of
+// its own under replaced/ of the data directory, outside deployments/, so
+// it is never read as a system copy; aside names it, and moved each entry
+// it took. The entries keep names stay in dest. When nothing stays, staging
+// itself becomes dest by one rename; otherwise its entries go in one by
+// one, .paisans, which holds the head, last, so dest is a system copy only
+// once its files are there.
+func settle(staging, dest string, keep ...string) (aside string, moved []string, err error) {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
-		return "", err
+		return "", nil, err
 	}
-	if _, err := os.Lstat(dest); errors.Is(err, os.ErrNotExist) {
-		return "", os.Rename(staging, dest)
+	entries, err := os.ReadDir(dest)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", nil, err
 	}
-	entries, err := os.ReadDir(staging)
+	kept := 0
+	for _, e := range entries {
+		if slices.Contains(keep, e.Name()) {
+			kept++
+			continue
+		}
+		if aside == "" {
+			replaced := filepath.Join(filepath.Dir(filepath.Dir(dest)), "replaced")
+			if err := os.MkdirAll(replaced, 0o700); err != nil {
+				return "", nil, err
+			}
+			if aside, err = os.MkdirTemp(replaced, filepath.Base(dest)+"-"); err != nil {
+				return "", nil, err
+			}
+		}
+		if err := os.Rename(filepath.Join(dest, e.Name()), filepath.Join(aside, e.Name())); err != nil {
+			return aside, moved, err
+		}
+		moved = append(moved, e.Name())
+	}
+	if kept == 0 {
+		if err := os.Remove(dest); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return aside, moved, err
+		}
+		return aside, moved, os.Rename(staging, dest)
+	}
+	made, err := os.ReadDir(staging)
 	if err != nil {
-		return "", err
+		return aside, moved, err
 	}
 	const state = ".paisans"
 	var names []string
-	for _, e := range entries {
+	for _, e := range made {
 		if e.Name() != state {
 			names = append(names, e.Name())
 		}
 	}
-	if len(names) < len(entries) {
+	if len(names) < len(made) {
 		names = append(names, state)
 	}
 	for _, name := range names {
-		target := filepath.Join(dest, name)
-		if name == state {
-			if _, err := os.Lstat(target); err == nil {
-				aside = filepath.Join(dest, fmt.Sprintf("%s.replaced-%d", state, time.Now().Unix()))
-				if err := os.Rename(target, aside); err != nil {
-					return "", err
-				}
-			}
-		} else if err := os.RemoveAll(target); err != nil {
-			return aside, err
-		}
-		if err := os.Rename(filepath.Join(staging, name), target); err != nil {
-			return aside, err
+		if err := os.Rename(filepath.Join(staging, name), filepath.Join(dest, name)); err != nil {
+			return aside, moved, err
 		}
 	}
-	return aside, nil
+	return aside, moved, nil
 }
 
 // renamed is err with each mention of the directory from, where the run

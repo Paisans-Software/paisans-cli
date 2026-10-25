@@ -985,7 +985,7 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 		}
 		dests = append(dests, dest)
 	}
-	_, done, err := recoverFiles(r, d, dests, a, *id, held, *execute, ans, stdin, stdout, nil, "recovered into "+d.Dir)
+	_, done, err := recoverFiles(r, d, dests, a, *id, held, *execute, ans, stdin, stdout, recovery{source: "recovered into " + d.Dir, root: *root})
 	return done(err)
 }
 
@@ -994,17 +994,18 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 // with no draft: it finds the deployment (id when given), gathers from
 // every site its newest versions name, and, with execute, makes the system
 // copy the head's, recording there the root and, from held, the signing
-// key. accept, when set, runs on each head's configuration before anything
-// is recorded, and a refusal from it is returned as it is; with accept,
-// which only the join of operator register sets, a fork is said as one
-// before any head is judged.
+// key. how.accept, when set, runs on each head's configuration before
+// anything is recorded, and a refusal from it is returned as it is; with
+// accept, which only the join of operator register sets, a fork is said as
+// one before any head is judged.
 //
 // The run holds the system copy's lock and works in a directory of its own
 // (stageSystem), sys; done ends it as stageSystem's done does, and, once
-// the system copy is in place, records source as where it came from and
-// starts a draft of its head in d. done is never nil, and the caller
+// the system copy is in place, runs how.promoted, records how.source as
+// where it came from and starts a draft of its head in d. done is never nil, and the caller
 // returns what it returns.
-func recoverFiles(r ui.Reporter, d draft.Draft, dests []config.Destination, a configstore.Anchor, id string, held map[string]string, execute bool, ans answerer, stdin io.Reader, stdout io.Writer, accept func(head *config.Config) error, source string) (sys configstore.Local, done func(runErr error) error, err error) {
+func recoverFiles(r ui.Reporter, d draft.Draft, dests []config.Destination, a configstore.Anchor, id string, held map[string]string, execute bool, ans answerer, stdin io.Reader, stdout io.Writer, how recovery) (sys configstore.Local, done func(runErr error) error, err error) {
+	accept := how.accept
 	done = func(runErr error) error { return runErr }
 	if files := draftFiles(d); len(files) > 0 {
 		return sys, done, &ui.Problem{Hint: "there is a draft in " + d.Dir + " already", Explain: "It holds " + strings.Join(files, ", ") + ". A recovery starts a draft only in a folder without one, so it never overwrites a file. Use " + progname.Cmd() + " deployment pull where the draft is, or name an empty directory with --config."}
@@ -1021,12 +1022,16 @@ func recoverFiles(r ui.Reporter, d draft.Draft, dests []config.Destination, a co
 	if err != nil {
 		return sys, done, err
 	}
-	if err := heldAlready(st, deploymentID); err != nil {
+	why, err := heldAlready(st, deploymentID, how.root)
+	if err != nil {
 		release()
 		return sys, done, err
 	}
-	sys, staged, err := stageSystem(r, st, "recover", deploymentID, release, func(sys configstore.Local) error {
-		m, err := startRecovered(r, st, sys, d, source)
+	sys, staged, err := stageSystem(r, st, "recover", deploymentID, why, nil, release, func(sys configstore.Local) error {
+		if how.promoted != nil {
+			how.promoted()
+		}
+		m, err := startRecovered(r, st, sys, d, how.source)
 		if err == nil && accept == nil {
 			r.Result("recovered revision %d, %s, into %s, and started a draft of it in %s", m.Revision, shortSHA(m.SHA), sys.Dir, d.Dir)
 		}
@@ -1069,7 +1074,7 @@ func recoverFiles(r ui.Reporter, d draft.Draft, dests []config.Destination, a co
 	// A fork has no one version to make the system copy from, and the
 	// versions gathered go with the directory the run worked in.
 	if g.Verdict.Fork {
-		return sys, done, forkProblem(g, "This workstation holds no system copy to check the heads out from, so an operator who holds one makes the merge; once it is published, recover again. Nothing was written.")
+		return sys, done, &ui.Problem{Hint: "the sites hold a fork", Explain: "Two trusted versions build on one parent:\n" + forkHeads(g) + "\nAn operator who holds the files merges them into one version with " + progname.Cmd() + " deployment publish --merge; once they have, run this recovery again. Nothing was written."}
 	}
 	head := g.Verdict.Heads[0]
 	pin := a.Root
@@ -1099,28 +1104,53 @@ func recoverFiles(r ui.Reporter, d draft.Draft, dests []config.Destination, a co
 	return sys, done, nil
 }
 
+// recovery is how recoverFiles goes beyond a plain recovery.
+type recovery struct {
+	// accept, when set, judges each head's configuration (the join's).
+	accept func(head *config.Config) error
+	// source is where the system copy came from, as deployment list shows.
+	source string
+	// root is the root --root pinned, "" when none was given.
+	root string
+	// promoted, when set, runs once the system copy is in place.
+	promoted func()
+}
+
 // heldAlready refuses a recovery or a join of deployment id when this
-// workstation holds its system copy: they make one where there is none,
-// and never replace one. A system copy with no head, or one a fetch
-// recorded as unverified or a fork, holds no version to start a draft
-// from, and the recovery takes its place.
-func heldAlready(st localstore.Store, id string) error {
+// workstation holds its system copy, judged from the copy's own state: they
+// make one where there is none. A copy with no head holds no version, only
+// a store a fetch set aside, and the recovery takes its place. A copy with
+// a head is taken over only by a --root, root, that differs from the root
+// it pinned, as after the deployment was made again under the same id. why
+// says, for the warning that names what is moved aside, why the old copy
+// is not kept in place.
+func heldAlready(st localstore.Store, id, root string) (why string, err error) {
 	sys, ok, err := st.Held(id)
 	if err != nil || !ok {
-		return err
+		return "", err
 	}
 	head, err := sys.Head()
-	if err != nil || head == "" {
-		return err
-	}
-	rec, ok, err := st.Load(id)
 	if err != nil {
-		return err
+		return "", err
 	}
-	if ok && (rec.Status == localstore.Unverified || rec.Status == localstore.Fork) {
-		return nil
+	if head == "" {
+		return "it held no version, only what a fetch or a run set aside, so there was no system copy to keep.", nil
 	}
-	return &ui.Problem{Hint: "this workstation holds the system copy of " + id + " already", Explain: "A recovery or a join makes a system copy where there is none, and never replaces one; it is in " + sys.Dir + ". Start a draft from it with " + progname.Cmd() + " deployment checkout --id " + id + " --config <empty directory>/" + config.FileName + " --execute, and bring a draft to the sites' newest version with " + progname.Cmd() + " deployment pull."}
+	pinned, err := sys.Root()
+	if err != nil {
+		return "", err
+	}
+	if root != "" && root != pinned {
+		if pinned == "" {
+			return "it pinned no root, and --root names " + root + ", so the history it trusted is not known to be the one recovered.", nil
+		}
+		return "its pinned root " + pinned + " is not the root --root names, " + root + ", so the history it trusted is not the one recovered.", nil
+	}
+	again := "Start a draft from it with " + progname.Cmd() + " deployment checkout --id " + id + " --config <empty directory>/" + config.FileName + " --execute, and bring a draft to the sites' newest version with " + progname.Cmd() + " deployment pull."
+	if root != "" {
+		again += " --root replaces it only when it names another root than the one it pinned."
+	}
+	return "", &ui.Problem{Hint: "this workstation holds the system copy of " + id + " already", Explain: "A recovery or a join makes a system copy where there is none; it is in " + sys.Dir + ", at " + shortSHA(head) + ". " + again}
 }
 
 // startRecovered ends a recovery once its system copy, sys, is in place:
