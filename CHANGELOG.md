@@ -10,6 +10,8 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+## [0.3.0-rc.9] - 2026-10-25
+
 ### Added
 
 - A homeserver's `hostnames.wellknown` may be another app's own hostname, Eg: the account app on the apex; the gateway sends `/.well-known/matrix/*` there to the homeserver and everything else to that app.
@@ -300,7 +302,8 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.
 - The gateway refuses any request to Pocket ID that carries an `X-API-Key` header with 403, so Pocket ID's API keys work only on the mesh.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.8...develop
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.9...develop
+[0.3.0-rc.9]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.8...v0.3.0-rc.9
 [0.3.0-rc.8]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.7...v0.3.0-rc.8
 [0.3.0-rc.7]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.6...v0.3.0-rc.7
 [0.3.0-rc.6]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.5...v0.3.0-rc.6
