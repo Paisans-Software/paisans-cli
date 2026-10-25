@@ -10,6 +10,8 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+## [0.3.0-rc.10] - 2026-10-25
+
 ### Fixed
 
 - An operator removed and then added back by another operator signs again with the same key; only versions beside the removal stay barred, so a removed key still cannot undo its own removal.
@@ -307,7 +309,8 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.
 - The gateway refuses any request to Pocket ID that carries an `X-API-Key` header with 403, so Pocket ID's API keys work only on the mesh.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.9...develop
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.10...develop
+[0.3.0-rc.10]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.9...v0.3.0-rc.10
 [0.3.0-rc.9]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.8...v0.3.0-rc.9
 [0.3.0-rc.8]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.7...v0.3.0-rc.8
 [0.3.0-rc.7]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.6...v0.3.0-rc.7
