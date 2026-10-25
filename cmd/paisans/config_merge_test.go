@@ -167,10 +167,9 @@ func TestConfigPullMergesSecretsEditedOnBothSides(t *testing.T) {
 	if !strings.Contains(out, "--execute will write it") {
 		t.Errorf("the dry run does not say what --execute does:\n%s", out)
 	}
-	for _, want := range []string{"secrets: external.a", "secrets: external.b"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("the dry run does not name %s:\n%s", want, out)
-		}
+	// The merged draft against revision 2: a is ours, b is theirs already.
+	if !strings.Contains(out, "secrets: external.a differs") || strings.Contains(out, "secrets: external.b") {
+		t.Errorf("the dry run does not name external.a alone:\n%s", out)
 	}
 	noValues(t, out)
 	m.unchanged(t)

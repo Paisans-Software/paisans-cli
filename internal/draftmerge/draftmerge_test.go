@@ -245,3 +245,100 @@ func TestInlineMergeKeyRefused(t *testing.T) {
 		t.Fatalf("a quoted key: %v", err)
 	}
 }
+
+// The blank lines between keys survive a merge: ours' where ours has a key,
+// theirs' before a key only theirs adds, and none where neither has one.
+func TestConfigKeepsBlankLines(t *testing.T) {
+	base := `# header
+
+version: 1
+community:
+  name: x
+
+sites:
+  solo:
+    keys: [john]
+
+apps:
+  auth:
+    app_name: Test
+`
+	ours := `# header
+
+version: 1
+community:
+  name: x
+
+sites:
+  solo:
+    keys: [john]
+
+# john: a comment of ours.
+apps:
+  auth:
+    app_name: Test
+`
+	theirs := `# header
+
+version: 1
+community:
+  name: x
+
+sites:
+  solo:
+    keys: [john]
+
+apps:
+  auth:
+    app_name: Theirs
+
+storage:
+  garage: {}
+`
+	want := `# header
+
+version: 1
+community:
+  name: x
+
+sites:
+  solo:
+    keys: [john]
+
+# john: a comment of ours.
+apps:
+  auth:
+    app_name: Theirs
+
+storage:
+  garage: {}
+`
+	got, conflicts := merge(t, base, ours, theirs)
+	if len(conflicts) != 0 {
+		t.Fatalf("conflicts %v", conflicts)
+	}
+	if got != want {
+		t.Errorf("merged:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// A comment only theirs changed is theirs in the merge, as a value is; one
+// both changed keeps ours.
+func TestConfigTakesACommentOnlyTheirsChanged(t *testing.T) {
+	base := "sites:\n  solo:\n    keys: [john]\n\n# the cluster\ncluster:\n  port: 5000\napps:\n  auth:\n    app_name: Test # the name\n"
+	ours := strings.Replace(base, "app_name: Test", "app_name: Ours", 1)
+	theirs := strings.Replace(strings.Replace(base, "# the cluster", "# john: the cluster, untouched", 1), "# the name", "# what members see", 1)
+	want := "sites:\n  solo:\n    keys: [john]\n\n# john: the cluster, untouched\ncluster:\n  port: 5000\napps:\n  auth:\n    app_name: Ours # what members see\n"
+	got, conflicts := merge(t, base, ours, theirs)
+	if len(conflicts) != 0 {
+		t.Fatalf("conflicts %v", conflicts)
+	}
+	if got != want {
+		t.Errorf("merged:\n%s\nwant:\n%s", got, want)
+	}
+
+	ours = strings.Replace(ours, "# the cluster", "# ours: the cluster", 1)
+	if got, _ := merge(t, base, ours, theirs); !strings.Contains(got, "# ours: the cluster\n") || strings.Contains(got, "untouched") {
+		t.Errorf("a comment both changed is not ours:\n%s", got)
+	}
+}

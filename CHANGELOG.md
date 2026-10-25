@@ -28,6 +28,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Fixed
 
+- `--age-private-key-file` refuses a path inside a git repository that does not ignore it, and accepts one in a directory holding no `paisans-stack.yaml`, as `operator register --invite` runs in.
 - The visibility gate keeps sessions in a Valkey beside it, so a refreshed session survives the gateway's `forward_auth` instead of signing members out an hour after sign in, mid-form.
 
 ### Removed

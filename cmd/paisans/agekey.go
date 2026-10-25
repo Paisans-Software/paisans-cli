@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -242,16 +243,18 @@ func keyNotUsed(command string) string {
 	return "Nothing was encrypted to it."
 }
 
-// writeKeyFile writes key to path at 0600, never over an existing file and
+// writeKeyFile writes key to path at 0600, never over an existing file,
 // never inside the directory that holds the configuration, which is usually
-// a git repository: there the key would be one `git add .` from being
-// committed. It reads the key back, and returns the absolute path.
+// a git repository, and never inside a git repository that does not ignore
+// it: there the key would be one `git add .` from being committed. It reads
+// the key back, and returns the absolute path.
 func writeKeyFile(command, id, configPath, path, key string) (string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return "", err
 	}
-	if inside(filepath.Dir(configPath), abs) {
+	suggested := fmt.Sprintf("Eg: ~/.config/paisans/%s.key once ~/.config/paisans exists.", deployment.Deployment{ID: id}.Token())
+	if _, err := os.Stat(configPath); err == nil && inside(filepath.Dir(configPath), abs) {
 		// The directory is named in full: shortened relative to the
 		// current directory it is often ".", which says nothing.
 		dir := filepath.Dir(configPath)
@@ -260,7 +263,13 @@ func writeKeyFile(command, id, configPath, path, key string) (string, error) {
 		}
 		return "", &ui.Problem{
 			Hint:    "the age key file would sit beside " + config.FileName,
-			Explain: fmt.Sprintf("%s is inside %s, which is usually a git repository, so the key would be one git add from being committed. Name a path in an existing directory outside it, Eg: ~/.config/paisans/%s.key once ~/.config/paisans exists.", ui.ShortPath(abs), dir, deployment.Deployment{ID: id}.Token()),
+			Explain: fmt.Sprintf("%s is inside %s, which is usually a git repository, so the key would be one git add from being committed. Name a path in an existing directory outside it, %s", ui.ShortPath(abs), dir, suggested),
+		}
+	}
+	if repo, real := gitRepoOf(abs); repo != "" && !gitIgnores(repo, real) {
+		return "", &ui.Problem{
+			Hint:    "the age key file would be inside a git repository",
+			Explain: fmt.Sprintf("%s is inside %s, a git repository that does not ignore it, so the key would be one git add from being committed. Name a path in an existing directory outside it, %s", ui.ShortPath(abs), repo, suggested),
 		}
 	}
 	f, err := os.OpenFile(abs, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
@@ -289,6 +298,36 @@ func writeKeyFile(command, id, configPath, path, key string) (string, error) {
 		}
 	}
 	return abs, nil
+}
+
+// gitRepoOf is the top of the git working tree that holds path, or "" when
+// none does: the nearest directory above it with a .git entry, a directory
+// or, in a worktree, a file. real is path with its directory's symlinks
+// resolved, as the top is.
+func gitRepoOf(path string) (repo, real string) {
+	dir := filepath.Dir(path)
+	if r, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = r
+	}
+	real = filepath.Join(dir, filepath.Base(path))
+	for {
+		if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
+			return dir, real
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", real
+		}
+		dir = parent
+	}
+}
+
+// gitIgnores reports whether git ignores path in the working tree repo. A
+// git that cannot answer ignores nothing, so the key is kept out.
+func gitIgnores(repo, path string) bool {
+	cmd := exec.Command("git", "-C", repo, "check-ignore", "-q", "--", path)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	return cmd.Run() == nil
 }
 
 // shellQuote quotes s for a POSIX shell, so a printed export line can be

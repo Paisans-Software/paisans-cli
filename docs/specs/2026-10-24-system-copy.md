@@ -191,8 +191,9 @@ undo flags and the stale-draft warning cover a draft whatever its base.
    three-way merge: base is the base found in step 2, ours is the draft,
    theirs is the sites' newest version. `paisans-stack.yaml`
    and `.sops.yaml` merge path by path on their YAML node trees (a list is one
-   value, `creation_rules` is always one value, and comments and key order
-   come from the draft); a file with a YAML anchor, an alias or a merge key
+   value, `creation_rules` is always one value, and key order, the blank
+   lines between keys and comments come from the draft, but for a comment
+   only theirs changed); a file with a YAML anchor, an alias or a merge key
    (`<<`) is refused, since a merge cannot place one. The secrets merge by key after decryption with
    this workstation's age key and are encrypted again to the merged
    `.sops.yaml`'s recipients; a merge is refused while either side has a mesh

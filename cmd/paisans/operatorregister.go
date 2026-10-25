@@ -66,7 +66,7 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) (err 
 	name := fs.String("name", "", "with --invite: your full name, first and last; asked for at a terminal when not given")
 	email := fs.String("email", "", "with --invite: your email address; asked for at a terminal when not given")
 	id := fs.String("id", "", "with no files here: join the invite pending for this deployment id, when invites to several are pending")
-	ageFile := fs.String("age-private-key-file", "", "with --invite: keep a new age key in this file, outside the configuration's directory, rather than the keystore; an existing file is read")
+	ageFile := fs.String("age-private-key-file", "", "with --invite: keep a new age key in this file, outside the configuration's directory and any git repository that does not ignore it, rather than the keystore; an existing file is read")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
