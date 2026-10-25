@@ -17,6 +17,11 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/validate"
 )
 
+// rotateKeyHost is how `storage rotate-key` reaches a site. Tests replace it.
+var rotateKeyHost = func(name string, site config.Site) apply.Transport {
+	return siteTransport(name, site, "")
+}
+
 // runStorageRotateKey replaces one app's Garage S3 key, stage by stage:
 // internal/rotatekey. It is modelled on runStorageAdd: it reaches the first
 // Garage site and every site running the app through their own ssh sections,
@@ -81,7 +86,7 @@ func runStorageRotateKey(args []string) error {
 
 	transports := map[string]apply.Transport{}
 	for _, name := range cfg.SiteNames() {
-		transports[name] = siteTransport(name, cfg.Sites[name], "")
+		transports[name] = rotateKeyHost(name, cfg.Sites[name])
 	}
 	// The switch is an apply of the app on every site it runs on, so each
 	// of those is host checked first, as apply checks it.

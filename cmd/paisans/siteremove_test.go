@@ -46,7 +46,7 @@ func TestSiteRemoveDeleteDataNeedsATerminal(t *testing.T) {
 	w.WriteString("home-b\n")
 	w.Close()
 	defer r.Close()
-	err = runSiteRemove([]string{"home-b", "--config", fixtureConfig(), "--delete-data", "--execute"}, r, &bytes.Buffer{})
+	err = runSiteRemove([]string{"home-b", "--config", fixtureDraft(t, fixtureDeploymentID), "--delete-data", "--execute"}, r, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "stdin is not a terminal") {
 		t.Errorf("err = %v", err)
 	}
@@ -61,7 +61,7 @@ func TestSiteRemoveRefusesBeforeReachingAHost(t *testing.T) {
 		"home-b --host-gone --delete-data":       "cannot be used together",
 		"home-b --execute --host-gone extra-arg": "one site",
 	} {
-		err := runSiteRemove(append(strings.Fields(args), "--config", fixtureConfig()), strings.NewReader(""), &bytes.Buffer{})
+		err := runSiteRemove(append(strings.Fields(args), "--config", fixtureDraft(t, fixtureDeploymentID)), strings.NewReader(""), &bytes.Buffer{})
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: err = %v, want %q", args, err, want)
 		}
@@ -124,7 +124,7 @@ func TestSiteRemoveForceRefusesBeforeReachingAHost(t *testing.T) {
 		"home-b --force --execute":                                    "terminal",
 		"never --force --ssh admin@192.0.2.1 --execute --delete-data": "terminal",
 	} {
-		err := runSiteRemove(append(strings.Fields(args), "--config", fixtureConfig()), strings.NewReader("home-b\n"), &bytes.Buffer{})
+		err := runSiteRemove(append(strings.Fields(args), "--config", fixtureDraft(t, fixtureDeploymentID)), strings.NewReader("home-b\n"), &bytes.Buffer{})
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: err = %v, want %q", args, err, want)
 		}
@@ -364,7 +364,7 @@ func TestSiteRemoveHostGoneRefusesBeforeReachingAHost(t *testing.T) {
 		"home-b --host-gone --delete-data":         "--host-gone and --delete-data cannot be used together",
 		"home-b --host-gone --execute":             "stdin is not a terminal",
 	} {
-		err := runSiteRemove(append(strings.Fields(args), "--config", fixtureConfig()), strings.NewReader("home-b\n"), &bytes.Buffer{})
+		err := runSiteRemove(append(strings.Fields(args), "--config", fixtureDraft(t, fixtureDeploymentID)), strings.NewReader("home-b\n"), &bytes.Buffer{})
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: err = %v, want %q", args, err, want)
 		}

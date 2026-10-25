@@ -13,20 +13,45 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/draft"
+	"github.com/paisans-software/paisans-cli/internal/registry"
 )
+
+// sitesDown replaces every way a command reaches a site with one that finds
+// the site down, so no test reaches the network.
+func sitesDown(t *testing.T) {
+	t.Helper()
+	down := func(name string) *storeHost { return &storeHost{name: name, down: true} }
+	savedSite, savedRotate, savedKey, savedRekey, savedRemove := configSiteTransport, rotateHost, rotateKeyHost, rekeyHost, removeSiteHost
+	savedRegistry, savedDoctor := registryHost, doctorTransport
+	t.Cleanup(func() {
+		configSiteTransport, rotateHost, rotateKeyHost, rekeyHost, removeSiteHost = savedSite, savedRotate, savedKey, savedRekey, savedRemove
+		registryHost, doctorTransport = savedRegistry, savedDoctor
+	})
+	fake := func(name string, _ config.Site) apply.Transport { return down(name) }
+	configSiteTransport, rotateHost, rotateKeyHost, rekeyHost, removeSiteHost = fake, fake, fake, fake, fake
+	registryHost = func(name string, _ config.Site, _ string) registry.Runner { return down(name) }
+	doctorTransport = func(tr apply.SSHTransport) apply.Transport { return down(tr.Site) }
+}
 
 // writerCopy is the fixture deployment's system copy, whose head holds the
 // fixture's paisans-stack.yaml and secrets, and the head's files. Every site
 // is down, so a command that goes on to reach hosts finds none.
 func writerCopy(t *testing.T) (configstore.Local, configstore.Files) {
 	t.Helper()
-	l := withSystemCopy(t, fixtureDeploymentID)
-	key, pub := testKey(t)
+	_, pub := testKey(t)
 	secrets, err := os.ReadFile(fixtureSecretsPath())
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := snapshotted(configstore.Files{Paisans: []byte(fixtureAs(t, pub)), Secrets: secrets, SOPS: []byte("creation_rules: []\n")})
+	return systemCopyOf(t, snapshotted(configstore.Files{Paisans: []byte(fixtureAs(t, pub)), Secrets: secrets, SOPS: []byte("creation_rules: []\n")}))
+}
+
+// systemCopyOf is the fixture deployment's system copy, whose head holds f,
+// on a workstation reaching no site.
+func systemCopyOf(t *testing.T, f configstore.Files) (configstore.Local, configstore.Files) {
+	t.Helper()
+	l := withSystemCopy(t, fixtureDeploymentID)
+	key, pub := testKey(t)
 	s := newStore(t)
 	sha, err := s.repo.Commit(f, nil, 1, key, time.Unix(1_800_000_000, 0))
 	if err != nil {
@@ -48,12 +73,9 @@ func writerCopy(t *testing.T) (configstore.Local, configstore.Files) {
 	if err := l.Remember(1, sha); err != nil {
 		t.Fatal(err)
 	}
-	savedSite, savedR := configSiteTransport, reporterOverride
-	t.Cleanup(func() { configSiteTransport, reporterOverride = savedSite, savedR })
-	configSiteTransport = func(name string, _ config.Site) apply.Transport {
-		return &storeHost{name: name, down: true}
-	}
-	reporterOverride = nil
+	sitesDown(t)
+	savedR := reporterOverride
+	t.Cleanup(func() { reporterOverride = savedR })
 	plainReporter(t)
 	return l, f
 }
@@ -167,7 +189,7 @@ func TestWritersStartADraft(t *testing.T) {
 			if after := sysFiles(t, sys); !mapsEqual(before, after) {
 				t.Error("the system copy's files changed")
 			}
-			if string(head.Paisans) != before[config.FileName] && before[config.FileName] != "" {
+			if before[config.FileName] != string(head.Paisans) {
 				t.Error("the system copy's paisans-stack.yaml is not the head's")
 			}
 			noFolderState(t, dir)
@@ -206,61 +228,110 @@ func TestInitNewDeploymentHasNoSystemCopyUntilDeploy(t *testing.T) {
 }
 
 // init in an empty folder, on a workstation holding a deployment's system
-// copy, starts the draft from it first.
+// copy, starts the draft from it first and makes its secrets there.
 func TestInitInAnEmptyFolderStartsADraft(t *testing.T) {
-	sys, _ := writerCopy(t)
+	example, err := os.ReadFile(filepath.Join("..", "..", "examples", "paisans-stack.example.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sys, _ := systemCopyOf(t, configstore.Files{Paisans: example})
+	initWorld(t, nil, fakeSites(), []byte{212, 37})
+	before := sysFiles(t, sys)
 	dir := t.TempDir()
-	_ = runInit([]string{"--config", filepath.Join(dir, config.FileName)}, strings.NewReader(""), io.Discard)
-	m, ok := draft.ReadMarker(must(draft.Draft{Dir: dir}.Files()).Paisans)
-	if !ok || m.Revision != 1 {
+	var runErr error
+	captureStdout(t, func() {
+		runErr = runInit([]string{"--config", filepath.Join(dir, config.FileName)}, strings.NewReader(""), io.Discard)
+	})
+	if runErr != nil {
+		t.Fatal(problemText(runErr), runErr)
+	}
+	got, err := draft.Draft{Dir: dir}.Files()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m, ok := draft.ReadMarker(got.Paisans); !ok || m.Revision != 1 {
 		t.Errorf("the draft's line is %+v (%v)", m, ok)
 	}
-	_ = sys
-}
-
-// The writers that run beside a draft without being asked for (the secrets
-// apply's dry run fills, the user a login records, the architectures a
-// pre-flight reads) write the draft and never the system copy.
-func TestHiddenWritersLeaveTheSystemCopy(t *testing.T) {
-	sys, _ := writerCopy(t)
-	before := sysFiles(t, sys)
-	dir := filepath.Join(t.TempDir(), "work")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	p := filepath.Join(dir, config.FileName)
-	if _, err := ensureDraft(p, ""); err != nil {
-		t.Fatal(problemText(err), err)
-	}
-	// The fixture's first site records its architecture; this draft does not.
-	body, err := os.ReadFile(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(p, bytes.Replace(body, []byte("    arch: amd64\n"), nil, 1), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := config.Load(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Sites["home-a"].Arch != "" {
-		t.Fatal("the fixture's first site is not home-a, or records no arch")
-	}
-	if _, _, _, err := convergeGenerate(cfg, filepath.Join(dir, configstore.FileSecrets)); err != nil {
-		t.Log(problemText(err))
-	}
-	savedLogins := recordLogins
-	recordLogins = true
-	t.Cleanup(func() { recordLogins = savedLogins })
-	recordSSHUser(p, "home-a", "ubuntu")()
-	if _, err := recordArchitectures(stdoutReporter(), p, cfg, map[string]string{"home-a": "amd64"}, true); err != nil {
-		t.Fatal(err)
-	}
-	if c, err := config.Load(p); err != nil || c.Sites["home-a"].Arch != "amd64" {
-		t.Error("the draft records no architecture")
+	if len(got.Secrets) == 0 {
+		t.Error("init made no secrets in the draft")
 	}
 	if after := sysFiles(t, sys); !mapsEqual(before, after) {
 		t.Error("the system copy's files changed")
 	}
+	noFolderState(t, dir)
+}
+
+// site remove names the draft folder, not --id, which names a host there,
+// when the workstation holds several deployments and the folder no draft.
+func TestSiteRemoveSeveralDeploymentsDoesNotOfferID(t *testing.T) {
+	systemCopyOf(t, configstore.Files{Paisans: []byte("id: " + fixtureDeploymentID + "\n")})
+	addSystemCopy(t, otherID)
+	err := runSiteRemove([]string{"home-b", "--config", filepath.Join(t.TempDir(), config.FileName)}, strings.NewReader(""), io.Discard)
+	text := problemText(err)
+	if err == nil || !strings.Contains(text, "more than one deployment") || strings.Contains(text, "Name one with --id") || !strings.Contains(text, "deployment checkout") {
+		t.Errorf("%v\n%s", err, text)
+	}
+}
+
+// The writers that run beside a draft without being asked for leave the
+// system copy alone: an apply's dry run fills the secrets it lacks into the
+// draft, and an apply with --execute records the users it logs in as there.
+func TestHiddenWritersLeaveTheSystemCopy(t *testing.T) {
+	t.Run("dry run generates secrets", func(t *testing.T) {
+		configPath, secretsPath := encryptedDeployment(t, dropGenerated)
+		dir := filepath.Dir(configPath)
+		head, err := draft.Draft{Dir: dir}.Files()
+		if err != nil {
+			t.Fatal(err)
+		}
+		sys, _ := systemCopyOf(t, head)
+		before := sysFiles(t, sys)
+		dryRun(t, configPath, secretsPath)
+		after := mustSecrets(t, secretsPath)
+		if after.Cluster.AdminPassword == "" || after.Sites["home-a"].HeartbeatToken == "" {
+			t.Error("the draft lacks the generated secrets")
+		}
+		if got := sysFiles(t, sys); !mapsEqual(before, got) {
+			t.Error("the system copy's files changed")
+		}
+	})
+	t.Run("execute records the ssh user", func(t *testing.T) {
+		path := fixtureWithoutUsers(t)
+		secrets, err := os.ReadFile(fixtureSecretsPath())
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sys, _ := systemCopyOf(t, snapshotted(configstore.Files{Paisans: body, Secrets: secrets}))
+		before := sysFiles(t, sys)
+		fakeConverge(t, nil)
+		archReadLogsIn(t)
+		recordConverge(t)
+		gatherFiles(t)
+		failingSSH(t)
+		loginNotes(t)
+		fake := convergeRun
+		convergeRun = func(args []string) error {
+			if isApply(args) {
+				return nil
+			}
+			return fake(args)
+		}
+		var runErr error
+		captureStdout(t, func() {
+			runErr = runApply([]string{"--config", path, "--secrets", fixtureSecretsPath(), "--execute"}, noTerminalStdin(), io.Discard)
+		})
+		if runErr != nil {
+			t.Fatal(problemText(runErr), runErr)
+		}
+		if got, _ := os.ReadFile(path); strings.Count(string(got), "user: paisans-") != 4 {
+			t.Errorf("the draft records no ssh user:\n%s", got)
+		}
+		if got := sysFiles(t, sys); !mapsEqual(before, got) {
+			t.Error("the system copy's files changed")
+		}
+	})
 }

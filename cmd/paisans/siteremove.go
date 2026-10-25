@@ -101,6 +101,9 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 		return runSiteRemoveForced(r, site, forcedArgs{config: *configPath, secrets: *secretsPath, ssh: *sshFlag, execute: *execute, deleteData: *deleteData, answers: ans}, stdin, stdout)
 	}
 	if _, err := ensureDraft(*configPath, ""); err != nil {
+		if errors.Is(err, errSeveralDeployments) {
+			return &ui.Problem{Hint: "this workstation holds more than one deployment", Explain: "There is no draft beside " + *configPath + " to say which, and --id here names a host to clean. Run site remove with --config in the folder of a draft, started with " + progname.Cmd() + " deployment checkout --id <id> --config <folder>/" + config.FileName + " --execute."}
+		}
 		return err
 	}
 

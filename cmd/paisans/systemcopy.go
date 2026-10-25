@@ -46,6 +46,11 @@ func recoverHint(id string) string {
 	return "Recover it from the sites: " + progname.Cmd() + " deployment recover --from <user@host> --id " + id + " --root <sha> --config <empty directory>/" + config.FileName + " --execute. Invited to it, join it with " + progname.Cmd() + " operator register --execute in an empty directory."
 }
 
+// errSeveralDeployments is the cause of systemFor's refusal to choose among
+// the deployments a workstation holds, for a command whose --id means
+// something else to word it for itself.
+var errSeveralDeployments = errors.New("this workstation holds more than one deployment")
+
 // systemFor finds the deployment of the draft at configPath (its id), or,
 // with no draft there, the one id names, or the only system copy on the
 // workstation. It refuses a missing system copy, and creates nothing: a
@@ -93,7 +98,7 @@ func systemFor(configPath, id string) (sys configstore.Local, d draft.Draft, dep
 			for _, l := range listed {
 				ids = append(ids, l.ID)
 			}
-			return sys, d, "", &ui.Problem{Hint: "this workstation holds more than one deployment", Explain: "There is no draft in " + d.Dir + " to say which. Name one with --id: " + strings.Join(ids, ", ") + "."}
+			return sys, d, "", &ui.Problem{Hint: "this workstation holds more than one deployment", Explain: "There is no draft in " + d.Dir + " to say which. Name one with --id: " + strings.Join(ids, ", ") + ".", Cause: errSeveralDeployments}
 		}
 	}
 	sys, ok, err := st.Held(deploymentID)
@@ -199,15 +204,8 @@ func ensureNewDraft(configPath, id string) (draft.Draft, error) {
 
 // ensureDraft is startDraft when the folder of configPath has no draft, and
 // otherwise nothing; every command that writes the three files calls it
-// first, so its change is made to a draft. A configuration already at
-// configPath is changed where it is.
+// first, so its change is made to a draft.
 func ensureDraft(configPath, id string) (draft.Draft, error) {
-	// A file already at configPath is the configuration to change, under
-	// whatever name it has.
-	if _, err := os.Lstat(configPath); err == nil {
-		dir, err := filepath.Abs(filepath.Dir(configPath))
-		return draft.Draft{Dir: dir}, err
-	}
 	d, err := draftAt(configPath)
 	if err != nil || d.Has() {
 		return d, err
