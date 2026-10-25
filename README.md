@@ -4877,8 +4877,9 @@ is the version the "drafted from" line names, ours is the draft, theirs is the
 sites' newest.
 
 * `paisans-stack.yaml` and `.sops.yaml` merge path by path on their YAML node
-  trees. A list is one value, and comments, key order and the blank lines
-  between keys come from the draft.
+  trees. A list is one value, and key order, the blank lines between keys and
+  comments come from the draft, except a comment only the sites' newest
+  changed, which comes from it, as a value does.
   `creation_rules` in `.sops.yaml` is always one value, since its recipients
   decide who can read the secrets. A file with a YAML anchor, an alias or a
   merge key (`<<`) is refused, since a merge cannot place one; write out the

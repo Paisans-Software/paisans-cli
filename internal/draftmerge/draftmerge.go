@@ -11,9 +11,10 @@
 // sides is taken; a path removed on one side and unchanged on the other is
 // removed. A path removed on one side and changed on the other, or changed
 // differently on the two, is a conflict: the merge keeps ours there and
-// lists it. Comments, key order and the blank lines before keys come from
-// ours; a path only theirs adds is appended under its parent, in theirs'
-// order, with theirs' blank line before it. A document with a YAML
+// lists it. Key order and the blank lines before keys come from ours, and
+// so do comments, except one only theirs changed, which is theirs; a path
+// only theirs adds is appended under its parent, in theirs' order, with
+// theirs' blank line before it. A document with a YAML
 // anchor, an alias, a merge key (<<) or a key given twice is refused.
 package draftmerge
 
@@ -354,8 +355,15 @@ func (m *merger) leaf(path []string, b, o, t *yaml.Node) *yaml.Node {
 func (m *merger) mapping(path []string, b, o, t *yaml.Node) *yaml.Node {
 	var content []*yaml.Node
 	for i := 0; i+1 < len(o.Content); i += 2 {
-		k := o.Content[i]
-		if v := m.value(append(slices.Clip(path), k.Value), get(b, k.Value), o.Content[i+1], get(t, k.Value)); v != nil {
+		k, ov := o.Content[i], o.Content[i+1]
+		bk, bv := entry(b, k.Value)
+		tk, tv := entry(t, k.Value)
+		m.comments(bk, k, tk)
+		v := m.value(append(slices.Clip(path), k.Value), bv, ov, tv)
+		if v == ov {
+			m.comments(bv, ov, tv)
+		}
+		if v != nil {
 			content = append(content, k, v)
 		}
 	}
@@ -370,6 +378,25 @@ func (m *merger) mapping(path []string, b, o, t *yaml.Node) *yaml.Node {
 	}
 	o.Content = content
 	return o
+}
+
+// comments gives o each comment theirs changed and ours did not, b, o and
+// t being one key or value as base, ours and theirs hold it. A side without
+// it, or a comment changed on both, keeps ours.
+func (m *merger) comments(b, o, t *yaml.Node) {
+	if b == nil || o == nil || t == nil {
+		return
+	}
+	for _, c := range []struct{ b, o, t *string }{
+		{&b.HeadComment, &o.HeadComment, &t.HeadComment},
+		{&b.LineComment, &o.LineComment, &t.LineComment},
+		{&b.FootComment, &o.FootComment, &t.FootComment},
+	} {
+		if *c.o == *c.b && *c.t != *c.b {
+			*c.o = *c.t
+			m.changed = true
+		}
+	}
 }
 
 // conflict lists the paths under path that conflict: each value below it
@@ -450,13 +477,20 @@ func (m *merger) fail(err error) {
 
 // get is the value under key in the mapping n, nil when there is none.
 func get(n *yaml.Node, key string) *yaml.Node {
+	_, v := entry(n, key)
+	return v
+}
+
+// entry is the key node and value under key in the mapping n, nils when
+// there is none.
+func entry(n *yaml.Node, key string) (*yaml.Node, *yaml.Node) {
 	if n == nil || n.Kind != yaml.MappingNode {
-		return nil
+		return nil, nil
 	}
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		if n.Content[i].Value == key {
-			return n.Content[i+1]
+			return n.Content[i], n.Content[i+1]
 		}
 	}
-	return nil
+	return nil, nil
 }
