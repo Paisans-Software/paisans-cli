@@ -232,6 +232,16 @@ type route struct {
 	// the blueprint's GateSpec. Empty on a hostname that does not use the gate.
 	// See docs/specs/2026-10-08-visibility-gate.md.
 	Bypass gateBypass
+	// Shared is another app's routing on this hostname, under paths of its
+	// own, written ahead of everything else in the host block (see
+	// hostBlocks).
+	Shared []sharedRoute
+}
+
+// sharedRoute is one app's routing inside another app's host block: the paths
+// it owns there and the snippet that serves them.
+type sharedRoute struct {
+	App, Role, Path, Snippet string
 }
 
 // gateBypass is what reaches a gated app without a gate session, in the order
@@ -466,7 +476,7 @@ func (p *planner) renderSite(site *siteView) ([]File, error) {
 		}
 		caddyfile, err := p.renderTemplate("Caddyfile.tmpl", map[string]any{
 			"Domain":          p.cfg.Community.Domain,
-			"Routes":          routes,
+			"Routes":          hostBlocks(routes),
 			"GateSnippets":    mounts,
 			"TrustedProxies":  p.mesh,
 			"ACMEDirective":   acme.Directive(p.cfg.ACME.Provider),
@@ -982,6 +992,38 @@ func (p *planner) routesFor(site *siteView) []route {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Hostname < out[j].Hostname })
+	return out
+}
+
+// hostBlocks is the Caddyfile's host blocks: one per hostname, from routes
+// sorted by hostname. A homeserver's wellknown route on another app's primary
+// hostname, which validate allows and nothing else, is folded into that app's
+// block as a shared route rather than given a block of its own, because Caddy
+// refuses two site blocks for one address. Its snippet is still rendered from
+// routes, unchanged.
+func hostBlocks(routes []route) []route {
+	primary := map[string]int{}
+	var out []route
+	for _, r := range routes {
+		if r.Role == blueprints.PrimaryRole {
+			primary[r.Hostname] = len(out)
+		}
+		if r.Role != blueprints.WellknownRole {
+			out = append(out, r)
+		}
+	}
+	for _, r := range routes {
+		if r.Role != blueprints.WellknownRole {
+			continue
+		}
+		i, ok := primary[r.Hostname]
+		if !ok || out[i].App == r.App {
+			out = append(out, r)
+			continue
+		}
+		out[i].Shared = append(out[i].Shared, sharedRoute{App: r.App, Role: r.Role, Path: blueprints.WellknownPath, Snippet: r.Snippet})
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Hostname < out[j].Hostname })
 	return out
 }
 

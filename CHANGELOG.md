@@ -12,6 +12,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Added
 
+- A homeserver's `hostnames.wellknown` may be another app's own hostname, Eg: the account app on the apex; the gateway sends `/.well-known/matrix/*` there to the homeserver and everything else to that app.
 - A reserved `engagement` blueprint runs the weekly digest email: it reads a clustered Mbin through a read only `<app>_reader` role, and `validate` and `secrets rotate` cover it.
 - `operator add` declares an operator in `paisans-stack.yaml` and names them in the chosen sites' `ssh.keys`, asking at a terminal and taking `--name`, `--email`, `--key` and `--site` or `--all-sites` without one.
 - `operator invite` writes a signed invite, `operator register --invite` answers it with a signed request and the operator's age key, and `operator add --request` declares them and re-encrypts the secrets.

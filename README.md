@@ -3601,6 +3601,34 @@ that was duplicated. This is easiest to hit because an app can declare
 several: setting one app's `hostname` to the value another app already uses for
 a role reads as two unrelated lines.
 
+**The one shared name is a homeserver's `wellknown` on another app's own
+hostname.**
+
+```yaml
+apps:
+  account:
+    blueprint: account
+    hostname: example.org
+  chat:
+    blueprint: synapse
+    hostname: matrix.example.org
+    hostnames:
+      wellknown: example.org
+```
+
+The name members are known by is usually the apex, and the apex usually
+already belongs to the community's own site. The delegation documents are
+paths under `/.well-known/matrix/` and nothing else, so the gateway renders one
+host block for the name: those paths go to the homeserver's `wellknown`
+snippet, and every other path to the app that holds the name. The shared
+handle is the first in the block, ahead of a gate and its bypasses, because a
+federating server fetching delegation is a machine and will not follow a
+redirect to a passkey prompt. Sharing needs the one Caddy routing both apps,
+so a name an app on a monitor holds is refused, and one name holds one
+homeserver's delegation, because a user identifier names one homeserver.
+Every other second claim, a `wellknown` on the homeserver's own hostname or on
+another app's media or join hostname among them, is still refused.
+
 **For a homeserver, `hostnames.wellknown` is not only routing. It is
 `server_name`.** It becomes the part after the colon in every user identifier
 the homeserver ever mints, and it is written into every room that homeserver
