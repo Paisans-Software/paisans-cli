@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"sort"
 	"strings"
 
@@ -52,7 +53,12 @@ type VariableKey struct {
 // variable that is set and cannot be read, or holds no key, is refused too:
 // sops would fail on it later, and a key made in its place would be one the
 // operator never chose. The private key is never kept or shown.
-func ReadVariableKey() (VariableKey, error) {
+func ReadVariableKey() (VariableKey, error) { return ReadVariableKeyFor("init") }
+
+// ReadVariableKeyFor is ReadVariableKey for command, which names the caller
+// in what a refusal tells the operator to do: "init", or another command that
+// takes the key and writes no .sops.yaml.
+func ReadVariableKeyFor(command string) (VariableKey, error) {
 	sources := map[string][]string{}
 	var order []string
 	for _, name := range AgeVariablesSet() {
@@ -60,7 +66,7 @@ func ReadVariableKey() (VariableKey, error) {
 		if err != nil {
 			return VariableKey{}, &ui.Problem{
 				Hint:    name + " is set, but no age key could be read from it",
-				Explain: fmt.Sprintf("init uses the key a SOPS_AGE_* variable names rather than making one, and does not make one in its place. Fix %s, or unset it to have init make a key, and re-run init.", name),
+				Explain: variableUnreadable(command, name),
 				Cause:   err,
 			}
 		}
@@ -84,9 +90,38 @@ func ReadVariableKey() (VariableKey, error) {
 		lines[i] = "- " + r + ", from " + strings.Join(sources[r], " and ")
 	}
 	return VariableKey{}, &ui.Problem{
-		Hint:    fmt.Sprintf("the SOPS_AGE_* variables hold %d age keys, and init needs one", len(order)),
-		Explain: fmt.Sprintf("init names one public key in %s, and cannot tell which of these is this deployment's:\n%s\nSet the variables so they hold the one key, or write %s yourself, naming each public key to encrypt to under creation_rules, and re-run init.", SOPSConfigName, strings.Join(lines, "\n"), SOPSConfigName),
+		Hint:    fmt.Sprintf("the SOPS_AGE_* variables hold %d age keys, and %s needs one", len(order), command),
+		Explain: variablesHoldSeveral(command, strings.Join(lines, "\n")),
 	}
+}
+
+// VariablesHolding is every set SOPS_AGE_* variable that holds the key
+// whose public key is recipient, among others or alone, in the order
+// ageVariables lists them. A variable that cannot be read holds nothing
+// here: it is looked through, not judged.
+func VariablesHolding(recipient string) []string {
+	var out []string
+	for _, name := range AgeVariablesSet() {
+		recipients, err := variableRecipients(name, os.Getenv(name))
+		if err == nil && slices.Contains(recipients, recipient) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+func variableUnreadable(command, name string) string {
+	if command == "init" {
+		return fmt.Sprintf("init uses the key a SOPS_AGE_* variable names rather than making one, and does not make one in its place. Fix %s, or unset it to have init make a key, and re-run init.", name)
+	}
+	return fmt.Sprintf("%s uses the key a SOPS_AGE_* variable names rather than making one, and does not make one in its place. Fix %s, or unset it to have %s use the keystore or make a key, and run it again.", command, name, command)
+}
+
+func variablesHoldSeveral(command, lines string) string {
+	if command == "init" {
+		return fmt.Sprintf("init names one public key in %s, and cannot tell which of these is this deployment's:\n%s\nSet the variables so they hold the one key, or write %s yourself, naming each public key to encrypt to under creation_rules, and re-run init.", SOPSConfigName, lines, SOPSConfigName)
+	}
+	return fmt.Sprintf("%s needs one public key, and cannot tell which of these is this deployment's:\n%s\nSet the variables so they hold the one key, and run it again.", command, lines)
 }
 
 // variableRecipients is the public key of every identity the variable name,
@@ -143,7 +178,7 @@ func ageRecipients(text string) ([]string, error) {
 		case *age.HybridIdentity:
 			r = id.Recipient().String()
 		default:
-			return nil, errors.New("it holds an age plugin identity, whose public key init cannot work out")
+			return nil, errors.New("it holds an age plugin identity, whose public key cannot be worked out")
 		}
 		if !seen[r] {
 			seen[r] = true

@@ -53,14 +53,16 @@ func checkOperatorID(s string) error {
 	return nil
 }
 
-func checkFullName(s string) error {
+// CheckFullName refuses a name that is not a first and a last name.
+func CheckFullName(s string) error {
 	if first, last, _ := strings.Cut(s, " "); first == "" || strings.TrimSpace(last) == "" {
 		return errors.New("a first and a last name, separated by a space")
 	}
 	return nil
 }
 
-func checkEmail(s string) error {
+// CheckEmail refuses anything but one email address alone.
+func CheckEmail(s string) error {
 	if addr, err := mail.ParseAddress(s); err != nil || addr.Address != s {
 		return errors.New("an email address alone, Eg: alice@example.org")
 	}

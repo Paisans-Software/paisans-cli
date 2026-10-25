@@ -148,3 +148,18 @@ func TestKeystoreBypassed(t *testing.T) {
 		})
 	}
 }
+
+// VariablesHolding names each set variable that holds the recipient's key,
+// among others or alone, and passes over one that cannot be read.
+func TestVariablesHolding(t *testing.T) {
+	a, b := identity(t), identity(t)
+	noAgeVariables(t)
+	t.Setenv("SOPS_AGE_KEY", b.String()+" "+a.String())
+	t.Setenv("SOPS_AGE_KEY_FILE", filepath.Join(t.TempDir(), "missing"))
+	if got := VariablesHolding(a.Recipient().String()); len(got) != 1 || got[0] != "SOPS_AGE_KEY" {
+		t.Fatalf("got %v", got)
+	}
+	if got := VariablesHolding(identity(t).Recipient().String()); len(got) != 0 {
+		t.Fatalf("a key no variable holds: got %v", got)
+	}
+}

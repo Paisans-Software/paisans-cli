@@ -167,11 +167,11 @@ func (w *Wizard) operators() error {
 		if err != nil {
 			return err
 		}
-		name, err := w.p.Text("Full name (first and last)", d.Name, checkFullName)
+		name, err := w.p.Text("Full name (first and last)", d.Name, CheckFullName)
 		if err != nil {
 			return err
 		}
-		email, err := w.p.Text("Email", d.Email, checkEmail)
+		email, err := w.p.Text("Email", d.Email, CheckEmail)
 		if err != nil {
 			return err
 		}
@@ -682,7 +682,7 @@ func (w *Wizard) mail() error {
 	if port, err = w.p.Text("SMTP port", port, checkPort); err != nil {
 		return err
 	}
-	from, err := w.p.Text("From address", d.FromAddress, checkEmail)
+	from, err := w.p.Text("From address", d.FromAddress, CheckEmail)
 	if err != nil {
 		return err
 	}

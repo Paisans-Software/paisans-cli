@@ -402,11 +402,34 @@ var helpCommands = []helpCommand{
 	{
 		name:    "operator add",
 		summary: "Declare one more operator in " + config.FileName + ".",
-		usage:   []string{"paisans operator add [<username>] [--name <first last>] [--email <address>]\n                     [--key <path.pub or key line>]... [--site <name>]... [--all-sites]\n                     [--config " + config.FileName + "]"},
+		usage: []string{
+			"paisans operator add [<username>] [--name <first last>] [--email <address>]\n                     [--key <path.pub or key line>]... [--site <name>]... [--all-sites]\n                     [--config " + config.FileName + "]",
+			"paisans operator add --request <file> [--site <name>]... [--all-sites] [--config " + config.FileName + "]",
+		},
 		detail: "Write the operator's entry under operators, after the last one, and name them in the ssh.keys of each site --site gives, or of every site with --all-sites, leaving every other line of the file as it was. " +
 			"At a terminal it asks, with create's questions, for whatever the flags did not give or give in a form the file would refuse, and which sites the operator may log in to. Without a terminal it asks nothing: the username, --name, --email, at least one --key and the sites must all be given, or nothing is written. " +
 			"A --key is a .pub file, every line of which but blank lines and comments is a key, or one key line itself. " +
-			"Writes the file only when validate refuses nothing the addition introduced. Reaches no host: the next deployment apply --execute gives the operator their sites, publishes the change and makes their Pocket ID account. Their age key, to read the secrets, is added to .sops.yaml by hand.",
+			"Writes the file only when validate refuses nothing the addition introduced. Reaches no host: the next deployment apply --execute gives the operator their sites, publishes the change and makes their Pocket ID account. Their age key, to read the secrets, is added to .sops.yaml by hand, with sops updatekeys; operator invite and operator add --request do that for a new operator.\n\n" +
+			"With --request, accept the signed request a new operator's operator register --invite wrote, on any operator's workstation: the request must be signed by the key its invite names, and the invite by a key an operator of this deployment lists, for this deployment and the root this workstation trusts. " +
+			"It declares the operator with the request's username, name, email and key, asking only for the sites, adds their age key to .sops.yaml and re-encrypts secrets.enc.yaml to every recipient there, its contents unchanged, decrypting with your own age key. An operator declared already keeps their sites, so --site and --all-sites are refused for them. " +
+			"Refuses a .sops.yaml whose creation rule uses key_groups or has no age field, which is left to you, and a secrets file whose sops metadata sets what the toolkit never writes, such as encrypted_regex or keys other than age, which sops updatekeys re-encrypts by hand. Every check is made before the first file is written, and a write that fails puts back the files written before it. The username, --name, --email and --key are refused beside --request. " +
+			"Accepting the same request again adds the age key or re-encrypts if either is missing, and otherwise changes nothing.",
+	},
+	{
+		name:    "operator age-key",
+		summary: "Show your age public key for a deployment, making the key first if there is none.",
+		usage:   []string{"paisans operator age-key [--id <deployment id>] [--config " + config.FileName + "]\n                       [--age-private-key-file <path>]"},
+		detail: "Print your age public key for the deployment, on a line of its own at the end of the output. The id comes from --id, or from " + config.FileName + " beside it. " +
+			"The key is the first of these that is present: the one key a SOPS_AGE_* variable holds, the keystore item for the deployment id, the file --age-private-key-file names when it exists, and otherwise a new key, kept in that file when one is named and in the keystore when not. " +
+			"A key file, made or read, comes with the export SOPS_AGE_KEY_FILE line that points sops at it; a directory is refused. Never prints the private key, and never replaces a keystore item or a key file. Reaches no host and changes nothing in the configuration.",
+	},
+	{
+		name:    "operator invite",
+		summary: "Write a signed invite for a new operator to stdout.",
+		usage:   []string{"paisans operator invite <username> --key <path.pub or key line> [--config " + config.FileName + "]"},
+		detail: "Write an invite for the operator <username> will be, signed through your ssh-agent with the key .paisans/signing-key records. " +
+			"The invite names the deployment, its domain, the root of the history this workstation trusts, the new operator's key without its comment, and each site's ssh host, port and user. It holds nothing secret.\n\n" +
+			"Refuses a username or key an operator already has, a workstation with no recorded signing key or whose ssh-agent does not hold it (run operator register), and one that does not know its root, from .paisans/config-root or a single root among the versions it has gathered (run deployment pull). Reaches no host and changes no file.",
 	},
 	{
 		name:    "operator magic-link",
@@ -426,10 +449,18 @@ var helpCommands = []helpCommand{
 	{
 		name:    "operator register",
 		summary: "Sign the sites' newest version with your own key.",
-		usage:   []string{"paisans operator register [--config " + config.FileName + "] [--key <path.pub>] [--root <sha>]\n                          [--execute] [--yes]"},
+		usage: []string{
+			"paisans operator register [--config " + config.FileName + "] [--key <path.pub>] [--root <sha>]\n                          [--id <deployment id>] [--execute] [--yes]",
+			"paisans operator register --invite <file> --inviter-key <path.pub or key line>\n                          [--name <first last>] [--email <address>] [--age-private-key-file <path>]\n                          [--config " + config.FileName + "] > <file>.request",
+		},
 		detail: "Sign an attestation of the sites' newest version with your own key, so trust starts from your signature: the key in your ssh-agent listed under your entry in operators, or the one --key names. " +
 			"Signs only a version equal to your local files, or, with no files and a root pinned, the one the pin leads to, and then writes its files. " +
 			"Records the key in .paisans/signing-key, which deployment publish signs with from then on.\n\n" +
+			"With --invite, answer the signed invite an operator wrote with operator invite, in any directory, since nothing there is read or written: check it against --inviter-key, which must be the key that signed it, and that the ssh-agent holds the key it names; find or make your age key for its deployment, from a SOPS_AGE_* variable, the keystore item, --age-private-key-file, or a new keystore item, in that order; ask for your full name and email at a terminal or take --name and --email; and write the signed request to stdout. " +
+			"The invite and the inviter's key wait as the deployment's pending invite in invites/<deployment id>/ of the workstation's data directory, where deployment list's saved deployments live, and the first answer binds the age key it named to the deployment in age/<deployment id>.recipient there. Every later answer for the deployment searches all the sources for the bound key and uses the one that holds it, and is refused, with no key made, when none does; removing the binding file starts over with another key. " +
+			"Reaches no host and takes no --key, --root, --id or --execute. Refuses an invite to a deployment whose pending invite is a different one, naming the file to remove to abandon it, before anything is made. A key kept in a file comes with the export SOPS_AGE_KEY_FILE line that points sops at it, and the request is followed on stderr by what comes next.\n\n" +
+			"Run without --invite in a directory without the files, with an invite pending, it joins: the one invite pending, or the one --id names when several are. --key or --root without --id registers instead. With several pending and no --id it refuses and lists their directories; removing one abandons that invite. " +
+			"The join recovers the files from the invite's root and sites once an operator has accepted the request (operator add --request) and applied it (deployment apply --execute), and refuses before that with advice to ask the inviter. It signs your attestation with the invite's key and removes the pending invite once the files are written. It then says whether the secrets open with your age key and, when they do not, whether the fix is this workstation's or the acceptance's. Writing needs --execute; without it, the join says what it would write.\n\n" +
 			"Changes only the sites' configuration stores, and nothing without --execute. It goes ahead on whichever sites answer, and with --execute it asks for the word rollback at a terminal when the newest version is older than one seen here before; --yes types it. " + yesTopic,
 	},
 	{

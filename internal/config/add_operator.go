@@ -13,6 +13,11 @@ import (
 // its mode kept. A command that checked the edited bytes writes those bytes.
 func WriteDeclaration(path string, data []byte) error { return replaceFile(path, data) }
 
+// ReplaceFile is WriteDeclaration for a file beside the declaration, Eg:
+// .sops.yaml: data written over path through a synced file beside it,
+// renamed over it, with its mode kept.
+func ReplaceFile(path string, data []byte) error { return replaceFile(path, data) }
+
 // AddOperatorBytes is data with operators.<id> written in and id named in
 // the ssh.keys of each of sites, every other byte as it was, so a command can
 // check the result before writing it with WriteDeclaration. It is how

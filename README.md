@@ -548,11 +548,45 @@ under `operators` and their name in the `ssh.keys` of the sites they may log
 in to, and leaves every other line of `paisans-stack.yaml` as it was. At a
 terminal it asks `create`'s questions for whatever its flags did not give;
 without one it takes `--name`, `--email`, `--key` and `--site` (one site,
-or several separated by commas) or `--all-sites` and asks nothing. It reaches no host: the next `deployment apply
---execute` gives them their sites and their Pocket ID account, and their age
-public key goes into `.sops.yaml` by hand, followed by `sops updatekeys
-secrets.enc.yaml`. See *`paisans operator add`* in
-[docs/commands.md](docs/commands.md).
+or several separated by commas) or `--all-sites` and asks nothing. It reaches
+no host: the next `deployment apply --execute` gives them their sites and their
+Pocket ID account. Their age public key goes into `.sops.yaml` by hand,
+followed by `sops updatekeys secrets.enc.yaml`.
+
+**A new operator joins by a signed invite, in five steps,** once the two hold
+each other's SSH public key:
+
+1. The existing operator runs `paisans operator invite carol --key carol.pub >
+   carol.invite`. The invite names the deployment, its domain, the root of the
+   history they trust and each site, and holds nothing secret.
+2. The new operator runs `paisans operator register --invite carol.invite
+   --inviter-key wash.pub > carol.request`, in any directory. It checks the
+   invite against the inviter's key, takes their age key for the deployment's
+   id from a `SOPS_AGE_*` variable, an existing keystore item or
+   `--age-private-key-file`, or else makes a new keystore item, and writes a
+   signed request. The invite waits as pending, and the age key stays bound to
+   the deployment, in the workstation's data directory beside its saved
+   deployments: `invites/<deployment-id>/` and `age/<deployment-id>.recipient`.
+   Answering again names the bound key, wherever it is found.
+3. The existing operator, or any other, runs `paisans operator add --request
+   carol.request`. It checks the request and its invite, declares the operator,
+   names their age key in `.sops.yaml` and re-encrypts `secrets.enc.yaml` to
+   it, with the plaintext unchanged. Accepting the same request again changes
+   only what is missing.
+4. The inviter runs `paisans deployment apply --execute`, which gives the new
+   operator their sites and their Pocket ID account.
+5. The new operator runs `paisans operator register --execute` in an empty
+   directory, which takes the pending invite, or the one `--id <deployment-id>`
+   names when several are pending. It recovers the deployment from the invite's
+   root and sites, trusting no other root, signs their attestation, and says
+   whether the secrets open with their age key, and if not, whose step is
+   missing.
+
+Neither party edits `.sops.yaml` or runs `sops`, and both files travel over
+any channel since each is signed. `paisans operator age-key` shows an
+operator's age public key for a deployment, making it first when there is none.
+See *`paisans operator add`*, *`paisans operator invite`* and *`paisans operator
+register`* in [docs/commands.md](docs/commands.md).
 
 ### Who manages accounts: `management`
 

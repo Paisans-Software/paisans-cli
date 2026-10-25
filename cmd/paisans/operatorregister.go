@@ -30,6 +30,12 @@ func runOperator(args []string, stdin io.Reader, stdout io.Writer) error {
 	if len(args) > 0 && args[0] == "register" {
 		return runOperatorRegister(args[1:], stdin, stdout)
 	}
+	if len(args) > 0 && args[0] == "age-key" {
+		return runOperatorAgeKey(args[1:], stdout)
+	}
+	if len(args) > 0 && args[0] == "invite" {
+		return runOperatorInvite(args[1:], stdout)
+	}
 	if len(args) > 0 && args[0] == "magic-link" {
 		return runOperatorMagicLink(args[1:])
 	}
@@ -37,9 +43,9 @@ func runOperator(args []string, stdin io.Reader, stdout io.Writer) error {
 		return runOperatorGrants(args[1:])
 	}
 	if len(args) == 0 {
-		return &ui.Problem{Hint: "operator takes one subcommand", Explain: "Use add, register, magic-link or grants."}
+		return &ui.Problem{Hint: "operator takes one subcommand", Explain: "Use add, register, age-key, invite, magic-link or grants."}
 	}
-	return &ui.Problem{Hint: fmt.Sprintf("operator has no subcommand %q", args[0]), Explain: "Use add, register, magic-link or grants."}
+	return &ui.Problem{Hint: fmt.Sprintf("operator has no subcommand %q", args[0]), Explain: "Use add, register, age-key, invite, magic-link or grants."}
 }
 
 func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error {
@@ -50,11 +56,28 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 	root := fs.String("root", "", "pin this version as the root, the version trust starts from")
 	execute := fs.Bool("execute", false, "sign the attestation, push it to the sites, and record the key")
 	answers := yesFlag(fs)
+	invite := fs.String("invite", "", "answer this invite file with a signed request on stdout, instead of registering")
+	inviterKey := fs.String("inviter-key", "", "with --invite: the inviting operator's public key, a .pub file or the key line")
+	name := fs.String("name", "", "with --invite: your full name, first and last; asked for at a terminal when not given")
+	email := fs.String("email", "", "with --invite: your email address; asked for at a terminal when not given")
+	id := fs.String("id", "", "with no files here: join the invite pending for this deployment id, when invites to several are pending")
+	ageFile := fs.String("age-private-key-file", "", "with --invite: keep a new age key in this file, outside the configuration's directory, rather than the keystore; an existing file is read")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
 		return &ui.Problem{Hint: "operator register takes no argument", Explain: "Got " + strings.Join(fs.Args(), " ") + "."}
+	}
+	if *invite != "" {
+		if *keyPath != "" || *root != "" || *execute || *id != "" {
+			return &ui.Problem{Hint: "--invite answers an invite and registers nothing", Explain: "--key, --root, --id and --execute belong to registering, which comes after the invite is accepted."}
+		}
+		return registerInvite(*invite, *inviterKey, *name, *email, *ageFile, *configPath, stdin, stdout)
+	}
+	for _, stray := range []struct{ flag, value string }{{"--inviter-key", *inviterKey}, {"--name", *name}, {"--email", *email}, {"--age-private-key-file", *ageFile}} {
+		if stray.value != "" {
+			return &ui.Problem{Hint: stray.flag + " needs --invite", Explain: "It answers an invite: " + progname.Cmd() + " operator register --invite <file> --inviter-key <key>."}
+		}
 	}
 	ans, err := answers()
 	if err != nil {
@@ -63,6 +86,25 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 	l, err := workstationOf(*configPath)
 	if err != nil {
 		return err
+	}
+	// Where the files are not there and an answer left an invite pending,
+	// register joins: the invite names the root and the key. --key or --root
+	// without --id is a plain register, which a pending invite does not
+	// take over.
+	if l.HasFiles() && *id != "" {
+		return &ui.Problem{Hint: "--id selects a pending invite to join, and " + ui.ShortPath(l.Dir) + " holds the files", Explain: "A join writes the files into a directory without them. Here register registers, and reads the deployment from " + config.FileName + "; run it without --id."}
+	}
+	if !l.HasFiles() && (*id != "" || (*keyPath == "" && *root == "")) {
+		invite, ok, err := selectPending(*id)
+		if err != nil {
+			return err
+		}
+		if ok {
+			if *keyPath != "" || *root != "" {
+				return &ui.Problem{Hint: "--key and --root do not apply to a join", Explain: "The pending invite names the key you sign with and the root trust starts from."}
+			}
+			return joinInvite(reporter(), l, invite, *execute, ans, stdin, stdout)
+		}
 	}
 	a, err := anchorFor(l, *root)
 	if err != nil {
@@ -80,13 +122,21 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 	k, _, _ := config.ParseKeyLine(key)
 	r := reporter()
 	r.Section("register " + k.Fingerprint + " for " + *configPath)
+	return attest(r, l, cfg, key, pin, *execute, ans, stdin, stdout)
+}
+
+// attest signs, with execute, an attestation of the sites' newest version
+// with key, once it equals the files l holds, pushes it to cfg's sites, and
+// records the key. Trust starts from pin and from any version key signed.
+func attest(r ui.Reporter, l configstore.Local, cfg *config.Config, key, pin string, execute bool, ans answerer, stdin io.Reader, stdout io.Writer) error {
+	k, _, _ := config.ParseKeyLine(key)
 
 	// Trust starts from the pin, and from any version this key signed
 	// before; with neither, the sites' history alone is never trusted.
 	anchor := configstore.Anchor{Root: pin, Signers: []string{k.Fingerprint}}
 	sites := configTransports(cfg)
 	m := gatherMode{
-		execute:  *execute,
+		execute:  execute,
 		answers:  ans,
 		noAnchor: "Pin the first version you trust with --root <sha>; an operator who has one can read its hash from " + progname.Cmd() + " deployment log.",
 	}
@@ -121,7 +171,7 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 	}
 	own := g.Versions[head].SignerFP == k.Fingerprint
 
-	if !*execute {
+	if !execute {
 		if own {
 			r.Step("attest "+describe(g, head)).End(ui.Pending, "your key signed it already")
 		} else {
