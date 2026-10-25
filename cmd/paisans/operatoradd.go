@@ -33,6 +33,7 @@ func runOperatorAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("operator add", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, configHelp)
+	id := idFlag(fs)
 	name := fs.String("name", "", "the operator's full name, first and last")
 	email := fs.String("email", "", "the operator's email address")
 	var keys pathList
@@ -43,6 +44,9 @@ func runOperatorAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	request := fs.String("request", "", "accept this signed request, which answers an invite and gives the username, name, email and keys")
 	pos, err := parseAll(fs, args)
 	if err != nil {
+		return err
+	}
+	if _, err := ensureDraft(*configPath, *id); err != nil {
 		return err
 	}
 	if *request != "" {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -167,10 +168,46 @@ func draftFiles(d draft.Draft) []string {
 	return held
 }
 
+// idFlag is the --id of a command that writes the deployment's files: which
+// deployment a draft is started from, in a folder with none, when the
+// workstation holds several.
+func idFlag(fs *flag.FlagSet) *string {
+	return fs.String("id", "", "the deployment, in a folder with no draft, when this workstation holds more than one")
+}
+
+// ensureNewDraft is ensureDraft for a command that may start a new
+// deployment's draft: with no draft and no system copy to start one from, the
+// deployment is a new one and there is nothing to start.
+func ensureNewDraft(configPath, id string) (draft.Draft, error) {
+	d, err := draftAt(configPath)
+	if err != nil || d.Has() || len(draftFiles(d)) > 0 {
+		return ensureDraft(configPath, id)
+	}
+	st, err := openStore()
+	if err != nil {
+		return d, err
+	}
+	if id != "" {
+		if _, ok, err := st.Held(id); err == nil && !ok {
+			return d, nil
+		}
+	} else if listed, err := st.List(); err == nil && len(listed) == 0 {
+		return d, nil
+	}
+	return ensureDraft(configPath, id)
+}
+
 // ensureDraft is startDraft when the folder of configPath has no draft, and
 // otherwise nothing; every command that writes the three files calls it
-// first, so its change is made to a draft.
+// first, so its change is made to a draft. A configuration already at
+// configPath is changed where it is.
 func ensureDraft(configPath, id string) (draft.Draft, error) {
+	// A file already at configPath is the configuration to change, under
+	// whatever name it has.
+	if _, err := os.Lstat(configPath); err == nil {
+		dir, err := filepath.Abs(filepath.Dir(configPath))
+		return draft.Draft{Dir: dir}, err
+	}
 	d, err := draftAt(configPath)
 	if err != nil || d.Has() {
 		return d, err

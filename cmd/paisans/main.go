@@ -276,6 +276,7 @@ func runInit(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("init", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
+	fromID := idFlag(fs)
 	secretsPath := fs.String("secrets", "", "path to the secrets file (default: secrets.enc.yaml beside the config)")
 	ageKeyFile := fs.String("age-private-key-file", "", "keep a newly made age private key in this file instead of the keystore")
 	answers := yesFlag(fs)
@@ -285,6 +286,9 @@ func runInit(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	ans, err := answers()
 	if err != nil {
+		return err
+	}
+	if _, err := ensureNewDraft(*configPath, *fromID); err != nil {
 		return err
 	}
 	r := reporter()

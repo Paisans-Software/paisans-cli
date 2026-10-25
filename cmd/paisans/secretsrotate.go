@@ -99,6 +99,7 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("secrets rotate", flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
+	id := idFlag(fs)
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually rotate, one secret at a time, stopping at the first gate that fails")
 	all := fs.Bool("all", false, "rotate every secret in scope the deployment has, in the order the spec gives")
@@ -126,6 +127,9 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 		return &ui.Problem{Hint: "--restart takes --all", Explain: "--restart starts an --all run's full list again, discarding what an earlier --all run left. " + rotateUsage()}
 	case !*all && len(named) == 0:
 		return &ui.Problem{Hint: "secrets rotate needs a secret", Explain: "It names the secrets to rotate by their paths in the secrets file, Eg: " + progname.Cmd() + " secrets rotate cluster.standby_password, or apps.<app>.<unit> for a unit of secrets an app's blueprint groups, such as apps.talk.oauth; or --all for every one. " + rotateUsage()}
+	}
+	if _, err := ensureDraft(*configPath, *id); err != nil {
+		return err
 	}
 	cfg, err := config.Load(*configPath)
 	if err != nil {

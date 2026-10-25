@@ -100,6 +100,9 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	if *force {
 		return runSiteRemoveForced(r, site, forcedArgs{config: *configPath, secrets: *secretsPath, ssh: *sshFlag, execute: *execute, deleteData: *deleteData, answers: ans}, stdin, stdout)
 	}
+	if _, err := ensureDraft(*configPath, ""); err != nil {
+		return err
+	}
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {

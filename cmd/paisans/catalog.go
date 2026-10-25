@@ -85,9 +85,13 @@ func runCatalogAdd(args []string) error {
 	fs := newFlagSet("catalog add", flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, configHelp)
+	id := idFlag(fs)
 	tag := fs.String("tag", "", "the release to pin (default: the newest tag)")
 	pos, err := parseAll(fs, args)
 	if err != nil {
+		return err
+	}
+	if _, err := ensureDraft(*configPath, *id); err != nil {
 		return err
 	}
 	name, url, err := catalogAddArgs(pos)
@@ -173,6 +177,7 @@ func runCatalogUpdate(args []string) error {
 	fs := newFlagSet("catalog update", flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, configHelp)
+	id := idFlag(fs)
 	tag := fs.String("tag", "", "the release to move to (default: the newest tag); needs one catalog named")
 	pos, err := parseAll(fs, args)
 	if err != nil {
@@ -180,6 +185,9 @@ func runCatalogUpdate(args []string) error {
 	}
 	if len(pos) > 1 || (*tag != "" && len(pos) != 1) {
 		return &ui.Problem{Hint: "catalog update takes at most one catalog, and --tag only with one", Explain: progname.Cmd() + " catalog update [<name>] [--tag <tag>]"}
+	}
+	if _, err := ensureDraft(*configPath, *id); err != nil {
+		return err
 	}
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -250,6 +258,7 @@ func runCatalogRemove(args []string) error {
 	fs := newFlagSet("catalog remove", flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, configHelp)
+	id := idFlag(fs)
 	pos, err := parseAll(fs, args)
 	if err != nil {
 		return err
@@ -258,6 +267,9 @@ func runCatalogRemove(args []string) error {
 		return &ui.Problem{Hint: "catalog remove takes one catalog", Explain: progname.Cmd() + " catalog remove <name>"}
 	}
 	name := pos[0]
+	if _, err := ensureDraft(*configPath, *id); err != nil {
+		return err
+	}
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		return err
