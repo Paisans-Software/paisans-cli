@@ -163,7 +163,7 @@ var helpCommands = []helpCommand{
 			"With --site: compare that site's rendered artifacts with what is on its host and show what would change.\n\n" +
 			"Changes nothing on a host without --execute; without --site, the dry run may add missing generated secrets to the local secrets file, and says so when it does.\n\n" +
 			"Both, and site prepare, review the keys and images " + config.FileName + " grants against what each host last applied; --execute asks for the word approve at a terminal when anything is added or changed, and asks nothing when nothing is. Before it, apply shows how the configuration differs from the sites' newest version: " + config.FileName + " as a diff, the secrets by key only.\n\n" +
-			"--yes approves the review entry by entry, and types create, partial and rollback when apply asks for them. " + yesTopic + "\n\n" +
+			"--yes approves the review entry by entry, and types create and rollback when apply asks for them. " + yesTopic + "\n\n" +
 			"Before anything changes, every app it starts logs in to its mail server from its site, sending nothing; one that does not log in refuses the apply.\n\n" +
 			"Every run, --site included, reaches every site's host to classify it, and runs on the sites it has: a site whose host has not admitted the deployment is left out, a joined site that does not answer is kept with its own steps skipped, and the run ends degraded. --require-all: exit 1 when the run is degraded: a site pending or down.\n\n" +
 			"--hold-apps: start none of the site's app stacks, a pinned one included, and apply its mesh, its infrastructure and its Caddy. Without --site, apply runs it on each gateway outside etcd.members before the data sites are founded, so their apps reach Pocket ID through the gateway as they start.",
@@ -430,7 +430,7 @@ var helpCommands = []helpCommand{
 		detail: "Sign an attestation of the sites' newest version with your own key, so trust starts from your signature: the key in your ssh-agent listed under your entry in operators, or the one --key names. " +
 			"Signs only a version equal to your local files, or, with no files and a root pinned, the one the pin leads to, and then writes its files. " +
 			"Records the key in .paisans/signing-key, which deployment publish signs with from then on.\n\n" +
-			"Changes only the sites' configuration stores, and nothing without --execute. With --execute it asks for the word partial at a terminal when no more than half the sites answered directly, and for rollback when the newest version is older than one seen here before; --yes types either. " + yesTopic,
+			"Changes only the sites' configuration stores, and nothing without --execute. It goes ahead on whichever sites answer, and with --execute it asks for the word rollback at a terminal when the newest version is older than one seen here before; --yes types it. " + yesTopic,
 	},
 	{
 		name:    "secrets list",
@@ -517,8 +517,8 @@ const yesTopic = "--yes answers each confirmation as typing it would, with no te
 // sentence.
 const configTrust = "\n\n" +
 	"The signed copies of " + config.FileName + ", secrets.enc.yaml and .sops.yaml every site keeps. Each config command gathers every site's versions first and trusts them from your own signing key or a root pinned with --root.\n\n" +
-	"With --execute, pull, recover, a publish of the first version, apply and operator register ask for the word partial at a terminal when no more than half the sites answered directly; publish, pull, recover, apply and operator register ask for rollback when the newest version is older than one seen here before, and log only warns. " +
-	"--yes types partial and rollback for each command but log, which asks nothing. " + yesTopic + " " +
+	"Publish, pull, recover, apply and operator register go ahead on whichever sites answer. With --execute, publish, pull, recover, apply and operator register ask for rollback when the newest version is older than one seen here before, and log only warns. " +
+	"--yes types rollback for each command but log, which asks nothing. " + yesTopic + " " +
 	"With --execute each site first syncs with its peers; without it, and in log, no site is changed and only .paisans/ here is written."
 
 // keyTrust is how pull, log and recover start trust from --key on a

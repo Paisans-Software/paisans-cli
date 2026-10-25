@@ -21,6 +21,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 - The visibility gate keeps sessions in a Valkey beside it, so a refreshed session survives the gateway's `forward_auth` instead of signing members out an hour after sign in, mid-form.
 
+### Removed
+
+- `deployment apply`, `publish`, `pull`, `recover` and `operator register` no longer ask for `partial` when few sites answer; each goes ahead on whichever sites do.
+
 ## [0.3.0-rc.8] - 2026-10-23
 
 ### Fixed

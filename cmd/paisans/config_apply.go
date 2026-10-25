@@ -118,7 +118,7 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *confi
 	}
 	r.Section("configuration store")
 	sites := configTransports(cfg)
-	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{execute: execute, answers: ans}, stdin, stdout)
+	g, err := gatherAt(r, l, sites, cfg.ID, a, gatherMode{execute: execute, answers: ans}, stdin, stdout)
 	if err != nil {
 		return nil, err
 	}
@@ -144,13 +144,6 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *confi
 	}
 	if len(g.Direct()) == 0 && execute {
 		return nil, &ui.Problem{Hint: "no site answered", Explain: "apply publishes the version it applies before the first change, and no site can take it. Nothing was applied.", Cause: configstore.UnreachedError(g)}
-	}
-	if execute {
-		if err := confirmPartial(ans, stdin, stdout, g, len(sites)); err != nil {
-			return nil, err
-		}
-	} else if !g.Majority {
-		r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "--execute will ask for the word "+partialWord+" at a terminal.")
 	}
 	v := &gathered{l: l, g: g, sites: sites, key: key, files: files, parents: parents, revision: 1, answers: ans}
 	if v.same, err = showChange(r, l, g, parents, files); err != nil {

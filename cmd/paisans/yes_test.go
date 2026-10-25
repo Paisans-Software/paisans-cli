@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
-	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -28,7 +27,7 @@ var yes = answerer{yes: true}
 // agrees to.
 func TestYesAnswersEveryTypedWord(t *testing.T) {
 	withTerminal(t, false)
-	for _, word := range []string{approveWord, "create", rollbackWord, partialWord, "prune", "sign out", "home-b", "paisans-f2a9", "talk", "revoked", "lose writes", "lose objects"} {
+	for _, word := range []string{approveWord, "create", rollbackWord, "prune", "sign out", "home-b", "paisans-f2a9", "talk", "revoked", "lose writes", "lose objects"} {
 		var out bytes.Buffer
 		if err := confirmWord(yes, strings.NewReader(""), &out, word, "This does something to "+word+"."); err != nil {
 			t.Errorf("%s: %v", word, err)
@@ -55,15 +54,11 @@ func TestWithoutYesTheWordIsStillTyped(t *testing.T) {
 	}
 }
 
-// The words that go through helpers of their own: the partial gather, the
-// app's name, the site's name, and each question of a removal with --host-gone.
+// The words that go through helpers of their own: the app's name, the site's
+// name, and each question of a removal with --host-gone.
 func TestYesAnswersTheWordsBehindTheirHelpers(t *testing.T) {
 	withTerminal(t, false)
 	var out bytes.Buffer
-	if err := confirmPartial(yes, nil, &out, configstore.Gathered{}, 3); err != nil || !strings.Contains(out.String(), "approved by --yes: "+partialWord+"\n") {
-		t.Errorf("partial: %v %q", err, out.String())
-	}
-	out.Reset()
 	if err := confirmName(yes, nil, &out, "talk"); err != nil || !strings.Contains(out.String(), "approved by --yes: talk\n") {
 		t.Errorf("app remove: %v %q", err, out.String())
 	}

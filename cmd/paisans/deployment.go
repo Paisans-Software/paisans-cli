@@ -32,12 +32,6 @@ import (
 // which version to trust is made here, on the workstation, from the
 // operator's own anchor; the sites only store.
 
-// partialWord is what the operator types to go on with fewer than a majority
-// of sites reached directly: a site that lies can hide newer versions only
-// from a workstation that reaches no honest site, and a majority makes that
-// unlikely.
-const partialWord = "partial"
-
 // configSiteTransport is how a config command reaches a site paisans-stack.yaml
 // declares: its ssh section. Tests replace it.
 var configSiteTransport = func(name string, site config.Site) apply.Transport {
@@ -256,9 +250,9 @@ type gatherMode struct {
 // rollback at a terminal. Nothing is written to the seen record here: the
 // gather carries the change (a newer head, or the accepted older one), and
 // the command records it with Local.RecordSeen once it commits its change.
-func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transport, configured int, id string, a configstore.Anchor, m gatherMode, stdin io.Reader, stdout io.Writer) (configstore.Gathered, error) {
+func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transport, id string, a configstore.Anchor, m gatherMode, stdin io.Reader, stdout io.Writer) (configstore.Gathered, error) {
 	s := r.Step("gather the versions every site holds")
-	g, err := configstore.GatherAnchored(l, sites, configured, id, a, configstore.GatherOptions{Sync: m.execute})
+	g, err := configstore.GatherAnchored(l, sites, id, a, configstore.GatherOptions{Sync: m.execute})
 	var rb *configstore.RollbackError
 	if errors.As(err, &rb) {
 		s.End(ui.Warned, "older than this workstation has seen")
@@ -298,13 +292,13 @@ func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transpo
 		}
 		return g, err
 	}
-	done := fmt.Sprintf("%d of %d sites answered directly", len(g.Direct()), configured)
+	done := fmt.Sprintf("%d of %d sites answered directly", len(g.Direct()), len(sites))
 	if at := g.Verdict.AnchorAt; at != "" && slices.Contains(a.Signers, g.Versions[at].SignerFP) {
 		done += ", anchored on " + g.Versions[at].SignerFP
 	}
 	s.Done(done)
 	// A stack of one site has no peers, so a sync would bring nothing.
-	if !m.execute && configured > 1 {
+	if !m.execute && len(sites) > 1 {
 		r.Note("the sites were not asked to sync with their peers first", "A dry run changes no site. --execute will start each site's sync before reading it, so versions only its peers hold arrive too.")
 	}
 	for _, rc := range g.Reached {
@@ -339,16 +333,6 @@ func forkProblem(g configstore.Gathered, more ...string) error {
 		heads = append(heads, "- "+describe(g, h))
 	}
 	return &ui.Problem{Hint: "the sites hold a fork", Explain: "Two trusted versions build on one parent:\n" + strings.Join(heads, "\n") + "\nMerge their files by hand, then publish with " + progname.Cmd() + " deployment publish --merge." + strings.Join(append([]string{""}, more...), " ")}
-}
-
-// confirmPartial asks for partial when fewer than a majority of the
-// configured sites answered directly, before anything is written. a
-// answers it, as confirmWord's does.
-func confirmPartial(a answerer, stdin io.Reader, stdout io.Writer, g configstore.Gathered, configured int) error {
-	if g.Majority {
-		return nil
-	}
-	return confirmWord(a, stdin, stdout, partialWord, fmt.Sprintf("Only %d of the %d sites answered directly. A site that answered could be serving an older version and hiding newer ones, which only the sites that did not answer would show.", len(g.Direct()), configured))
 }
 
 // signingKeyFor is the public key line a publish signs with: the recorded
@@ -484,7 +468,7 @@ func runDeploymentPublish(args []string, stdin io.Reader, stdout io.Writer) erro
 		if err != nil {
 			return err
 		}
-		g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{noAnchor: noAnchorPublish()}, stdin, stdout)
+		g, err := gatherAt(r, l, sites, cfg.ID, a, gatherMode{noAnchor: noAnchorPublish()}, stdin, stdout)
 		if err != nil {
 			return err
 		}
@@ -505,9 +489,6 @@ func runDeploymentPublish(args []string, stdin io.Reader, stdout io.Writer) erro
 			return err
 		}
 		what := "the first version"
-		if len(parents) == 0 && !g.Majority {
-			r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "A first version starts the deployment's history, so --execute will ask for the word "+partialWord+" at a terminal.")
-		}
 		if len(parents) > 0 {
 			var on []string
 			for _, p := range parents {
@@ -522,21 +503,9 @@ func runDeploymentPublish(args []string, stdin io.Reader, stdout io.Writer) erro
 	if err != nil {
 		return err
 	}
-	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{execute: true, answers: ans, noAnchor: noAnchorPublish()}, stdin, stdout)
+	g, err := gatherAt(r, l, sites, cfg.ID, a, gatherMode{execute: true, answers: ans, noAnchor: noAnchorPublish()}, stdin, stdout)
 	if err != nil {
 		return err
-	}
-	// A first version starts the history. A site that answered empty may be
-	// hiding one the sites that did not answer hold, so without a majority
-	// the operator says partial before a second history begins.
-	head, err := l.Head()
-	if err != nil {
-		return err
-	}
-	if parents, err := configstore.Parents(g, head, *merge); err == nil && len(parents) == 0 && len(g.Direct()) > 0 {
-		if err := confirmPartial(ans, stdin, stdout, g, len(sites)); err != nil {
-			return err
-		}
 	}
 	s := r.Step("sign and push the version, signed with " + k.Fingerprint)
 	sha, pushed, err := configstore.PublishFrom(l, g, sites, key, configSignWith(key), *merge, configNow())
@@ -603,7 +572,7 @@ func runDeploymentPull(args []string, stdin io.Reader, stdout io.Writer) error {
 	noteKeyIgnored(r, ignored)
 	sites := configTransports(cfg)
 	m := gatherMode{execute: *execute, answers: ans, noAnchor: noAnchorNamed(", or run " + progname.Cmd() + " operator register to sign the version you hold")}
-	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, m, stdin, stdout)
+	g, err := gatherAt(r, l, sites, cfg.ID, a, m, stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -654,20 +623,14 @@ func runDeploymentPull(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		return nil
 	case edited:
-		if handled, err := pullMergingSecrets(r, l, g, cfg.ID, head, base, *root, held, len(sites), localFiles, headFiles, *execute, ans, stdin, stdout); handled {
+		if handled, err := pullMergingSecrets(r, l, g, cfg.ID, head, base, *root, held, localFiles, headFiles, *execute, ans, stdin, stdout); handled {
 			return err
 		}
 		return pullOverEdits(r, l, g, head, base, localFiles, headFiles, *execute, stdout)
 	}
 	if !*execute {
 		r.Step("move the local files to "+describe(g, head)).End(ui.Pending, "--execute will write them")
-		if !g.Majority {
-			r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "--execute will ask for the word "+partialWord+" at a terminal.")
-		}
 		return nil
-	}
-	if err := confirmPartial(ans, stdin, stdout, g, len(sites)); err != nil {
-		return err
 	}
 	if err := l.Checkout(head); err != nil {
 		return err
@@ -898,7 +861,7 @@ func runDeploymentLog(args []string, stdin io.Reader, stdout io.Writer) error {
 	noteKeyIgnored(r, ignored)
 	sites := configTransports(cfg)
 	m := gatherMode{log: true, noAnchor: noAnchorNamed(", or run " + progname.Cmd() + " operator register to sign the version you hold")}
-	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, m, stdin, stdout)
+	g, err := gatherAt(r, l, sites, cfg.ID, a, m, stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -1003,7 +966,7 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 		return err
 	}
 	noAnchor := noAnchorNamed("")
-	g, err := gatherAt(r, l, hosts, len(hosts), deploymentID, a, gatherMode{execute: *execute, answers: ans, noAnchor: noAnchor}, stdin, stdout)
+	g, err := gatherAt(r, l, hosts, deploymentID, a, gatherMode{execute: *execute, answers: ans, noAnchor: noAnchor}, stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -1011,14 +974,14 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 		return &ui.Problem{Hint: "no host named holds a version", Explain: "Nothing was recovered. Name another host with --from.", Cause: configstore.UnreachedError(g)}
 	}
 	// Every site a trusted head names is reached, not only the hosts given,
-	// so a host serving an old version is outvoted by the rest. With a fork,
-	// every head's sites are reached.
+	// so a host serving an old version is superseded by the newer versions the
+	// rest hold. With a fork, every head's sites are reached.
 	sites, err := recoverSites(l, g, deploymentID)
 	if err != nil {
 		return err
 	}
 	r.Section("every site the newest versions name")
-	g, err = gatherAt(r, l, sites, len(sites), deploymentID, a, gatherMode{execute: *execute, accepted: g.Seen, answers: ans, noAnchor: noAnchor}, stdin, stdout)
+	g, err = gatherAt(r, l, sites, deploymentID, a, gatherMode{execute: *execute, accepted: g.Seen, answers: ans, noAnchor: noAnchor}, stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -1048,13 +1011,7 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 	}
 	if !*execute {
 		r.Step("write the files of "+describe(g, head)).End(ui.Pending, "--execute will write them")
-		if !g.Majority {
-			r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "--execute will ask for the word "+partialWord+" at a terminal.")
-		}
 		return nil
-	}
-	if err := confirmPartial(ans, stdin, stdout, g, len(sites)); err != nil {
-		return err
 	}
 	if err := l.Checkout(head); err != nil {
 		return err

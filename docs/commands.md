@@ -78,7 +78,7 @@ Every command that asks for a confirmation takes `--yes`: `deployment apply`,
 `app remove`. No other command takes it.
 
 * **What it answers:** every word a command asks to have typed (`approve`,
-  `create`, `partial`, `rollback`, `prune`, `sign out`, `revoked`,
+  `create`, `rollback`, `prune`, `sign out`, `revoked`,
   `lose writes`, `lose objects`, a site's, an app's or a user's name) and
   every y/N question (`site admit`'s grants and, with `--site`, its ufw
   question), each as typing it would. None needs a terminal on stdin.
@@ -559,7 +559,7 @@ paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # o
   | `--from <user@host[:port] or ssh alias>` | `recover` (required, repeatable) | a host of the deployment to recover from; every site the trusted heads name is reached after it |
   | `--id <id>` | `recover` | the deployment, when the logins' admission records name more than one; it must be a deployment id |
   | `--execute` | `publish`, `pull`, `recover` | do it; `log` takes none |
-  | `--yes` | `publish`, `pull`, `recover` | type `partial` and `rollback` when asked for; `log` asks nothing and takes none |
+  | `--yes` | `publish`, `pull`, `recover` | type `rollback` when asked for; `log` asks nothing and takes none |
 
   And the flags every command shares.
 * **Hosts:** every site, over ssh as the site's ssh user, and each is
@@ -627,14 +627,15 @@ paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # o
   key named with `--key` anchors and is not recorded. `pull` and `recover`
   refuse a version whose `secrets.enc.yaml` is plaintext before they write
   any of its files or sign anything.
-* **Words typed at a terminal:** `partial` when fewer than a majority of sites
-  answered directly (no more than half), for `deployment apply --execute`, `deployment pull`,
-  `deployment recover`, `deployment publish` of a first version and `operator register`;
-  `rollback` when the newest version is older than one this workstation has
-  seen. `--yes` types either. An accepted `rollback` re-bases `.paisans/config-seen` to the head
-  chosen once the command commits its change; a run that stops leaves it as it
-  was. `log` asks for neither: it warns and lists. A dry run says what
-  `--execute` will ask.
+* **Sites that answer:** `deployment apply`, `deployment pull`,
+  `deployment recover`, `deployment publish` and `operator register` go ahead
+  on whichever sites answer, once at least one does, and name each site that
+  did not, with its error. A command that reaches no site is refused.
+* **Words typed at a terminal:** `rollback` when the newest version is older
+  than one this workstation has seen. `--yes` types it. An accepted
+  `rollback` re-bases `.paisans/config-seen` to the head chosen once the
+  command commits its change; a run that stops leaves it as it was. `log` does
+  not ask: it warns and lists. A dry run says what `--execute` will ask.
 * **In `deployment apply`:** `deployment apply` gathers before its review and refuses a fork or a base
   older than the sites' newest version, naming `deployment pull`. With `--execute`
   it publishes the version it applies and each host records it; a host whose
@@ -799,7 +800,7 @@ paisans operator register --key ~/.ssh/id_ed25519.pub --execute
   changes.
 * **Flags:** `--config`, `--key <path.pub>` (the key to sign with; the ssh-agent
   must hold its private half), `--root <sha>` (pin the first version you trust),
-  `--execute`, `--yes` (types `partial` and `rollback`).
+  `--execute`, `--yes` (types `rollback`).
 * **Hosts:** every site, as `deployment pull` does.
 * **The key:** `--key`, else the one `.paisans/signing-key` records, else the
   one key in the ssh-agent that is listed under an operator of `paisans-stack.yaml`. It
@@ -813,10 +814,10 @@ paisans operator register --key ~/.ssh/id_ed25519.pub --execute
   the pin leads to and writes its files. A head your key signed already is
   pushed again, not attested again.
 * **`--execute`:** signs, pushes the attestation to every site it reaches, and
-  writes the key to `.paisans/signing-key`; `deployment publish` and `deployment apply` sign
-  with it from then on. It asks for `partial` when fewer than a majority of
-  sites answered directly, which `--yes` types. Without it, nothing is signed or recorded, and no
-  site is changed.
+  writes the key to `.paisans/signing-key`; `deployment publish` and
+  `deployment apply` sign with it from then on. It goes ahead on whichever
+  sites answer. Without it, nothing is signed or recorded, and no site is
+  changed.
 
 See *Every site keeps signed copies of the configuration* in `README.md`.
 
@@ -1367,13 +1368,13 @@ images it superseded* in `README.md`).
   ask for. Each step records its part once it has succeeded.
 * **Configuration store:** before the review, every site's versions are gathered
   (under `configuration store`) and a fork, a base older than the sites' newest
-  version, or a key no operator lists is refused, naming `deployment pull` or `deployment
-  publish --merge`. Under `what changes in the configuration` the review shows
-  how the local files differ from the sites' newest version, its revision and
-  signer named: `paisans-stack.yaml` as a diff, the secrets by key only.
-  With `--execute`, it asks for `partial` when fewer than a
-  majority of sites answered directly. A dry run changes no site and starts no
-  sync. After the approval, a host whose record holds a newer revision, or
+  version, or a key no operator lists is refused, naming `deployment pull` or
+  `deployment publish --merge`. Under `what changes in the configuration` the
+  review shows how the local files differ from the sites' newest version, its
+  revision and signer named: `paisans-stack.yaml` as a diff, the secrets by key
+  only. It goes ahead on whichever sites answer. A dry run changes no site and
+  starts no sync. After the approval, a host whose record holds a newer
+  revision, or
   another version at the same revision, asks for `rollback`. `--execute` then
   publishes the version, signed with the recorded key, after the `site prepare`
   steps; a version that reaches no site refuses, naming `site prepare`. See
@@ -1431,7 +1432,7 @@ starts, restarts or recreates what changed.
   | `--min-free <size>` | `3G` | free space Docker's data root must have before a stack pulls an image |
   | `--keep-images` | off | leave the images this apply supersedes on the host, and skip the sweep |
   | `--hold-apps` | off | start none of the site's app stacks, a pinned one included: apply its mesh, its infrastructure and its Caddy, without asking Pocket ID anything; not with `--only` or `--overwrite`, and it does not sweep |
-  | `--yes` | off | approve the review entry by entry, and type `create`, `partial` and `rollback` when asked for |
+  | `--yes` | off | approve the review entry by entry, and type `create` and `rollback` when asked for |
 
   And `--config`, `--secrets`, `--execute`.
 * **Hosts:** the site's own, and every other site's host to classify it (see

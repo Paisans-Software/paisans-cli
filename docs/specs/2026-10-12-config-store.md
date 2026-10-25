@@ -201,12 +201,6 @@ prove a version is the newest; these make an old one visible:
   and lists, and a dry run reports the rollback and what `--execute` will ask.
   A root pinned for one run with `--root` and not recorded does not raise the
   record, so a mistaken pin cannot poison it.
-* **A majority of sites.** A pull, a recovery, `admin register`, the publish of
-  a first version and `apply --execute` report how many sites they reached
-  directly, and with fewer than a majority (no more than half) the operator
-  types `partial` to go on. A first version, with no trusted head among the
-  sites that answered, starts the history, and a workstation reaching only an
-  empty site must not start a second one silently.
 * **Hosts are witnesses.** Each host's grant record
   (docs/specs/2026-10-11-config-review.md) also holds the hash and revision of
   the version last applied to it, and `apply` refuses to apply an older revision
@@ -286,10 +280,8 @@ the same way before deciding anything:
 3. **Union, then verify.** Every copy is combined before the rules run, and only
    then is the head chosen.
 
-The majority in *Rollback* counts only sites reached directly over ssh. A
-version that arrived through another site's sync counts toward finding the
-newest, but "these peers answered" is that site's word, and a site that lies
-could inflate it.
+A command goes ahead on whichever sites answer, once at least one does, and
+reports each that did not; one that reaches no site is refused.
 
 | Command | Does |
 |---|---|
@@ -351,6 +343,6 @@ not accept, is edited with `sops`.
   publish after some sites failed.
 * The daemon and timer units in the golden render tree.
 * Gathering: a site reached directly, a version arriving only through another
-  site's sync, the majority counting only direct reaches.
+  site's sync.
 * The witness refusal and `rollback`, through the fake terminal.
 * Each secrets merge case.
