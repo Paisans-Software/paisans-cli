@@ -194,6 +194,7 @@ func Check(cfg *config.Config) Result {
 	c.accountCodeOfConduct()
 	c.accountSettingInvalid()
 	c.accountSettingUnknown()
+	c.engagement()
 
 	c.evenVoters()
 	c.oneVoterNoFailover()
@@ -1519,6 +1520,16 @@ func (c *checker) mediaHostnameUnderAnAppHostname() {
 // app's `hostname` to the value another app already uses for a role is not.
 // This is the same failure unknown-hostname-role and gate-without-a-gate-app
 // exist to prevent, arrived at from a different direction.
+//
+// One claim is not a collision: a homeserver's wellknown hostname on another
+// app's primary hostname. The delegation documents are two paths under
+// /.well-known/matrix/, and the community's own site usually holds the apex
+// that user identifiers end in, so the gateway renders one host block for the
+// name and routes those paths to the homeserver's snippet ahead of the other
+// app's (see blueprints.WellknownPath). That needs the one Caddy routing both
+// apps, and a name holds one homeserver's delegation only, because a user
+// identifier names one homeserver. The wellknown claims are checked after
+// every other, so the outcome does not depend on which app sorts first.
 func (c *checker) duplicateHostname() {
 	type claim struct {
 		key, hostname string
@@ -1528,6 +1539,10 @@ func (c *checker) duplicateHostname() {
 		// it was derived from.
 		derived bool
 		from    string
+		// app is the app making the claim, and primary is set for its own
+		// hostname, the one claim a delegation may share.
+		app     string
+		primary bool
 	}
 	describe := func(cl claim) string {
 		if cl.derived {
@@ -1536,9 +1551,10 @@ func (c *checker) duplicateHostname() {
 		return cl.key
 	}
 	first := map[string]claim{} // hostname -> the claim that took it first
+	var delegations []claim
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
-		claims := []claim{{key: fmt.Sprintf("apps.%s.hostname", name), hostname: app.Hostname}}
+		claims := []claim{{key: fmt.Sprintf("apps.%s.hostname", name), hostname: app.Hostname, app: name, primary: true}}
 		if app.Derived {
 			// The gate, which the toolkit adds when an app sets gated or
 			// auto_login, at a name under the community's domain.
@@ -1552,7 +1568,11 @@ func (c *checker) duplicateHostname() {
 		// on join.example.org with an account app's join hostname, and
 		// neither line in the file says so.
 		for _, rh := range blueprints.RoleHostnames(c.cfg, app) {
-			cl := claim{key: fmt.Sprintf("apps.%s.hostnames.%s", name, rh.Role), hostname: rh.Hostname, derived: rh.Derived}
+			cl := claim{key: fmt.Sprintf("apps.%s.hostnames.%s", name, rh.Role), hostname: rh.Hostname, derived: rh.Derived, app: name}
+			if rh.Role == blueprints.WellknownRole {
+				delegations = append(delegations, cl)
+				continue
+			}
 			if rh.Derived {
 				cl.from = "the app's own hostname"
 				if rh.Role == blueprints.JoinRole {
@@ -1570,15 +1590,64 @@ func (c *checker) duplicateHostname() {
 				if cl.derived {
 					said = fmt.Sprintf("is not declared, so it is derived as %q", cl.hostname)
 				}
-				c.refuse("duplicate-hostname", cl.key,
-					"two apps claim the same hostname",
-					"%s, which %s already claims. Every hostname becomes a site address in the gateway's Caddyfile, and Caddy refuses a configuration where two site blocks claim one address rather than choosing between them, so this takes every hostname in the deployment down rather than these two. Give each name to one app and one role; a media or join hostname can be chosen with hostnames.media or hostnames.join.",
-					said, describe(earlier))
+				c.refuseDuplicateHostname(cl.key, said, describe(earlier))
 				continue
 			}
 			first[cl.hostname] = cl
 		}
 	}
+	shared := map[string]claim{} // hostname -> the delegation sharing it
+	for _, cl := range delegations {
+		if cl.hostname == "" {
+			continue
+		}
+		said := fmt.Sprintf("is %q", cl.hostname)
+		earlier, taken := first[cl.hostname]
+		if !taken {
+			first[cl.hostname] = cl
+			continue
+		}
+		if other, ok := shared[cl.hostname]; ok {
+			c.refuseDuplicateHostname(cl.key, said, describe(other))
+			continue
+		}
+		if !earlier.primary || earlier.derived || earlier.app == cl.app {
+			c.refuseDuplicateHostname(cl.key, said, describe(earlier))
+			continue
+		}
+		if !c.sameCaddy(earlier.app, cl.app) {
+			c.refuse("duplicate-hostname", cl.key,
+				"a homeserver's delegation shares a hostname another Caddy routes",
+				"%s, which %s already claims, and the two apps are not routed by the same Caddy: an app pinned to a monitor is served by that monitor rather than the gateway, and a monitor whose web server is managed_by: external runs no Caddy at all. The delegation documents can share a hostname only in the one host block that routes it. Give hostnames.wellknown a name of its own, or place both apps where one Caddy routes them.",
+				said, describe(earlier))
+			continue
+		}
+		shared[cl.hostname] = cl
+	}
+}
+
+// refuseDuplicateHostname is duplicate-hostname's refusal for two claims on
+// one site address.
+func (c *checker) refuseDuplicateHostname(key, said, earlier string) {
+	c.refuse("duplicate-hostname", key,
+		"two apps claim the same hostname",
+		"%s, which %s already claims. Every hostname becomes a site address in the gateway's Caddyfile, and Caddy refuses a configuration where two site blocks claim one address rather than choosing between them, so this takes every hostname in the deployment down rather than these two. Give each name to one app and one role; a media or join hostname can be chosen with hostnames.media or hostnames.join, and a homeserver's hostnames.wellknown may sit on one other app's own hostname.",
+		said, earlier)
+}
+
+// sameCaddy reports whether one Caddy routes both apps' hostnames: the
+// gateway's for two apps no monitor serves, or one monitor's own when it
+// serves both and runs Caddy.
+func (c *checker) sameCaddy(a, b string) bool {
+	byA, onA := render.ServedBy(c.cfg, a)
+	byB, onB := render.ServedBy(c.cfg, b)
+	if byA != byB || onA != onB {
+		return false
+	}
+	if _, _, external := render.ExternalListen(c.cfg, a); external {
+		return false
+	}
+	return true
 }
 
 // hostnameRoles refuses a hostname role the blueprint ships no snippet for.

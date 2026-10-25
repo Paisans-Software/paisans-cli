@@ -379,14 +379,14 @@ func TestHAProxyRestartsWithItsDatabaseAppsStopped(t *testing.T) {
 	rec := &ui.Recorder{Verbose_: true}
 	p.Show(rec)
 	for _, want := range []struct{ kind, text string }{
-		{"pending", "stop account, auth, talk, wiki on home-a"},
-		{"detail", "home-a: account, auth, talk, wiki: they reach the database through this HAProxy"},
+		{"pending", "stop account, auth, digest, talk, wiki on home-a"},
+		{"detail", "home-a: account, auth, digest, talk, wiki: they reach the database through this HAProxy"},
 		{"pending", "restart HAProxy on home-a"},
 		{"detail", "home-a: HAProxy alone"},
-		{"pending", "start account, auth, talk, wiki on home-a"},
-		{"detail", "home-a: account, auth, talk, wiki (docker compose -f /srv/paisans/f2a9/account/compose.yaml up -d;"},
-		{"pending", "check account, auth, talk, wiki on home-a"},
-		{"detail", "home-a: account, auth, talk, wiki: every container running"},
+		{"pending", "start account, auth, digest, talk, wiki on home-a"},
+		{"detail", "home-a: account, auth, digest, talk, wiki (docker compose -f /srv/paisans/f2a9/account/compose.yaml up -d;"},
+		{"pending", "check account, auth, digest, talk, wiki on home-a"},
+		{"detail", "home-a: account, auth, digest, talk, wiki: every container running"},
 	} {
 		if !rec.Has(want.kind, want.text) {
 			t.Errorf("the plan has no %s %q:\n%s", want.kind, want.text, rec.Lines())

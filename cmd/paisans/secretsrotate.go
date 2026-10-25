@@ -99,12 +99,13 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("secrets rotate", flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
+	id := idFlag(fs)
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually rotate, one secret at a time, stopping at the first gate that fails")
 	all := fs.Bool("all", false, "rotate every secret in scope the deployment has, in the order the spec gives")
 	restart := fs.Bool("restart", false, "with --all: discard what an earlier --all run left and rotate every secret again (refused while a rotation is pending)")
-	var replaced pathList
-	fs.Var(&replaced, "replaced", "a pasted secret already replaced at its issuer and applied, which every host using it runs: listed, not rotated (repeatable)")
+	var replaced nameList
+	fs.Var(&replaced, "replaced", "a pasted secret already replaced at its issuer and applied, which every host using it runs: listed, not rotated (repeatable, or comma-separated)")
 	answers := yesFlag(fs)
 	var named []string
 	for len(args) > 0 && !strings.HasPrefix(args[0], "-") {
@@ -126,6 +127,9 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 		return &ui.Problem{Hint: "--restart takes --all", Explain: "--restart starts an --all run's full list again, discarding what an earlier --all run left. " + rotateUsage()}
 	case !*all && len(named) == 0:
 		return &ui.Problem{Hint: "secrets rotate needs a secret", Explain: "It names the secrets to rotate by their paths in the secrets file, Eg: " + progname.Cmd() + " secrets rotate cluster.standby_password, or apps.<app>.<unit> for a unit of secrets an app's blueprint groups, such as apps.talk.oauth; or --all for every one. " + rotateUsage()}
+	}
+	if _, err := ensureDraft(*configPath, *id); err != nil {
+		return err
 	}
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -591,6 +595,10 @@ func rotatorFor(path string, w rotateWiring) (secretsrotate.Rotator, error) {
 			return secretsrotate.AppS3(app, w.s3Run), nil
 		case "database_password":
 			return secretsrotate.AppDatabase(app), nil
+		case "source_database_password":
+			if w.cfg != nil && w.cfg.Apps[app].Blueprint == config.BlueprintEngagement {
+				return secretsrotate.SourceReader(app), nil
+			}
 		case "admin_password":
 			return secretsrotate.UptimeAdmin(app), nil
 		case "operators_heartbeat_token", "dns_super_admins_heartbeat_token", "dns_2fa_heartbeat_token":
@@ -755,6 +763,13 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 	for _, app := range cfg.AppNames() {
 		if blueprints.UsesPostgres(cfg.Apps[app].Blueprint) && has("apps."+app+".database_password") {
 			rs = append(rs, secretsrotate.AppDatabase(app))
+		}
+	}
+	// The password of the read only role an engagement app reads its
+	// source's database as, altered in the same cluster.
+	for _, app := range cfg.EngagementApps() {
+		if has("apps." + app + ".source_database_password") {
+			rs = append(rs, secretsrotate.SourceReader(app))
 		}
 	}
 	// Each secret a blueprint changes inside the running app.

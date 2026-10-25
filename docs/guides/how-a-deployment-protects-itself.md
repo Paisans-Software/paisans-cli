@@ -234,18 +234,22 @@ fetches from its peers over the mesh every 15 minutes, so one that was down
 catches up. A version is tens of kilobytes and nothing is pruned.
 
 The sites only store; the workstation decides what to trust, because someone
-with root on a site can write anything there:
+with root on a site can write anything there. It decides from its system copy
+of the deployment, one per deployment in Paisans' data directory, never from
+the folder the operator edits in: that folder holds a draft of the three files
+and nothing else, so two folders of one deployment never judge the sites
+differently.
 
 * **Trust starts from something only the operator holds:** the newest version
   signed by their own SSH key, or a root hash they pin with `--root`. Their key
-  is the one `.paisans/signing-key` records or, on a workstation that records
+  is the signing key the system copy records or, on a workstation that records
   none, the one they name with `--key`, which anchors only on versions it
   signed itself, under one root, that the rules below already trust from that
   root. A history
   found only on the sites is never trusted, however consistent, because whoever
   holds those sites could have written it and listed themselves as an operator. An
   operator who has never published gets an anchor of their own with `paisans operator
-  register`, which signs the version they already hold.
+  register`, which signs the version the system copy holds.
 * **A version counts only when signed by an operator listed in its parent.**
   Someone who is not an operator cannot extend the history, however many sites
   they control.
@@ -255,37 +259,35 @@ with root on a site can write anything there:
 
 A version that was really published stays valid forever, so someone holding a
 site can hide the newer ones and serve an old one, whose secrets an apply would
-put back. No signature can prove a version is the newest, so three memories make
+put back. No signature can prove a version is the newest, so two memories make
 an old one visible instead:
 
-* **The workstation** remembers the newest revision it has seen, and refuses an
-  older head until the operator types `rollback`.
-* **A majority of sites.** `deployment pull`, `deployment recover`, `operator register`,
-  the publish of a first version and `deployment apply --execute` count the sites they
-  reached directly over ssh, and ask for `partial` when that is no more than
-  half. A lying site can hide newer versions only from a workstation that
-  reaches no honest one.
+* **The workstation's system copy** remembers the newest revision it has seen,
+  and refuses an older head until the operator types `rollback`. Every gather
+  combines what all the sites that answer hold, so a lying site can hide newer
+  versions only from a workstation that reaches no honest one.
 * **The hosts.** Each host records the version last applied to it, and `deployment apply`
   asks for `rollback` before giving it an older one.
 
 When the workstation is gone, `paisans deployment recover --from <user@host>
 --key <path.pub> --execute` in an empty directory gathers from the hosts named
-and then every site the trusted heads name, and writes the three files. Trust
+and then every site the trusted heads name, makes the system copy, and starts a
+draft of the three files in the directory. Trust
 starts from the newest version your operator key, named with `--key`, signed
 under one root, among those the rules trust from that root. Every head must be
 signed by that key and list it, and every trusted version must declare the
 deployment's id: a key alone cannot tell this deployment's history from one it
 signed before a redeploy under the same id, so a newer version by another
 operator, or the key's versions under two roots, need `--root`. The key is
-recorded in `.paisans/signing-key` for the
+recorded as the system copy's signing key for the
 publishes that follow when the ssh-agent holds it and an operator of the head
 lists it. Without the key, `--root <sha>` pins the hash of a version the
 operator trusts, as `paisans deployment log` prints it; keep that hash
-somewhere other than the workstation, or commit `.paisans/config-root`, which
-the operators may share. A pinned root anchors alone. When the sites hold two
-trusted heads, or the named key's versions lead to different heads, `recover`
-writes each head to `.paisans/incoming/<sha>/` and leaves the choice to an
-operator.
+somewhere other than the workstation, such as with the other operators, who can
+read it from their own `deployment log`. A pinned root anchors alone. When the
+sites hold two trusted heads, or the named key's versions lead to different
+heads, `recover` writes nothing and leaves the choice to an operator, who
+merges them with `deployment publish --merge`.
 
 **Does not protect.** A fresh workstation that reaches only sites an attacker
 holds can be served an old, genuine version, and applying it reaches only those

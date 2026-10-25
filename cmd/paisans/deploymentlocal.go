@@ -20,39 +20,14 @@ import (
 )
 
 // What follows is the workstation's saved deployments (internal/localstore):
-// deployment apply --execute and deployment recover --execute save the
-// version they publish or recover, deployment fetch saves what a host
-// holds, and deployment list shows them.
+// a deploy makes the version it publishes the system copy's
+// (deploydraft.go), deployment recover --execute and the join make the
+// system copy from the sites (recoverFiles), deployment fetch records what a
+// host holds, and deployment list shows them.
 
 // openStore is the saved deployments. Tests point it at a directory of their
 // own through localstore.DirVariable.
 var openStore = localstore.Open
-
-// saveVersion saves version sha of the deployment whose files are in l, as
-// the trust rules there judged it, with what it is and where it came from.
-// key is the key line the version was signed with, "" when this workstation
-// did not sign it. A failure is a warning: the version is on the sites
-// already, and the saved copy is the operator's convenience, not the store.
-func saveVersion(r ui.Reporter, l configstore.Local, sha string, revision int, files configstore.Files, key, source string) {
-	s := r.Step("save " + sha[:12] + " to this workstation's deployments")
-	err := func() error {
-		cfg, err := config.LoadBytes(files.Paisans)
-		if err != nil {
-			return err
-		}
-		st, err := openStore()
-		if err != nil {
-			return err
-		}
-		return st.Save(l, sha, revision, key, localstore.Saved{ID: cfg.ID, Domain: cfg.Community.Domain, Source: source, SavedAt: configNow().UTC()})
-	}()
-	if err != nil {
-		s.End(ui.Warned, "not saved")
-		r.Explain(errLine(err) + ". The version is on the sites; deployment fetch saves it later.")
-		return
-	}
-	s.Done("")
-}
 
 // runDeploymentList is `paisans deployment list`: the saved deployments as a
 // table on stdout, so it can be piped. It reads the saved deployments only.
@@ -103,7 +78,7 @@ var fetchGather = func(l configstore.Local, host string, t apply.Transport, id s
 	if err != nil {
 		return configstore.Gathered{}, err
 	}
-	return configstore.GatherAnchored(l, map[string]apply.Transport{host: t}, 1, id, a, configstore.GatherOptions{})
+	return configstore.GatherAnchored(l, map[string]apply.Transport{host: t}, id, a, configstore.GatherOptions{})
 }
 
 // runDeploymentFetch is `paisans deployment fetch`: every deployment in the
@@ -114,7 +89,11 @@ var fetchGather = func(l configstore.Local, host string, t apply.Transport, id s
 //
 // What a host serves is judged as deployment pull judges it, from the anchor
 // this workstation saved for the deployment: the key that signed what it
-// applied, or the root it pinned. A deployment it holds no anchor for gets
+// applied, or the root it pinned. A system copy with a head keeps it, its
+// files and its record: only a deploy or deployment pull moves it, so the
+// fetch records the versions and what was seen, and names the pull. A
+// system copy with no head takes the newest trusted version. A deployment
+// it holds no anchor for gets
 // nothing written as its own files, since a history found only on a host
 // could have been written by anyone with root on it; its newest versions are
 // set aside in .paisans/incoming/ and listed as unverified.
@@ -164,20 +143,22 @@ func runDeploymentFetch(args []string) error {
 	// means something only in this workstation's ssh config and may later
 	// name another host.
 	source := "fetched from " + dest.String()
-	var saved, unverified, failed int
+	var saved, recorded, unverified, failed int
 	for _, id := range slices.Sorted(maps.Keys(reg.Deployments)) {
 		e := reg.Deployments[id]
 		r.Section(fmt.Sprintf("%s (%s)", id, orDash(e.Domain)))
 		switch fetchOne(r, st, dest.Arg(), t, id, e.Domain, source) {
 		case localstore.Verified:
 			saved++
+		case fetched:
+			recorded++
 		case localstore.Unverified, localstore.Fork:
 			unverified++
 		default:
 			failed++
 		}
 	}
-	r.Result("%d saved, %d set aside unverified, %d not fetched, in %s. %s deployment list shows them.", saved, unverified, failed, st.Base, progname.Cmd())
+	r.Result("%d saved, %d recorded into a system copy here, %d set aside unverified, %d not fetched, in %s. %s deployment list shows them.", saved, recorded, unverified, failed, st.Base, progname.Cmd())
 	if failed > 0 {
 		return &ui.Problem{Hint: fmt.Sprintf("%d deployment(s) were not fetched", failed), Explain: "Each is listed above with why. The others were saved."}
 	}
@@ -185,20 +166,41 @@ func runDeploymentFetch(args []string) error {
 }
 
 // fetchOne fetches deployment id into the store and says how it was saved,
-// "" when it was not.
+// fetched for versions recorded into a system copy with a head, "" when
+// nothing was.
 func fetchOne(r ui.Reporter, st localstore.Store, host string, t apply.Transport, id, domain, source string) localstore.Status {
+	release, err := st.Lock(id)
+	if err != nil {
+		r.Warn("not fetched", errLine(err))
+		return ""
+	}
+	defer release()
 	l, err := st.Local(id)
+	if err != nil {
+		r.Warn("not fetched", errLine(err))
+		return ""
+	}
+	// A system copy with a head moves only by a deploy or a pull: fetch
+	// records into it the versions the host holds, and what was seen.
+	had, err := l.Head()
 	if err != nil {
 		r.Warn("not fetched", errLine(err))
 		return ""
 	}
 	s := r.Step("gather the versions " + host + " holds")
 	g, err := fetchGather(l, host, t, id)
+	if g.ArrivalErr != nil {
+		r.Warn("the arrival of these versions could not be recorded", errLine(g.ArrivalErr)+". Apply cannot warn about a draft saved before the newest revision arrived.")
+	}
 	var rb *configstore.RollbackError
 	switch {
 	case errors.As(err, &rb):
 		s.End(ui.Warned, "older than this workstation has seen")
 		r.Explain(rb.Error() + ". The saved copy is kept as it was: a host that deleted the newer versions can serve an old one. deployment log shows what each site holds.")
+		return ""
+	case errors.Is(err, configstore.ErrNoAnchor) && had != "":
+		s.End(ui.Warned, "nothing here to trust it from")
+		r.Explain("The system copy here holds " + shortSHA(had) + " and records no key or root to judge what " + host + " serves. It is kept as it was. " + recoverHint(id))
 		return ""
 	case errors.Is(err, configstore.ErrNoAnchor):
 		s.End(ui.Warned, "nothing here to trust it from")
@@ -222,6 +224,9 @@ func fetchOne(r ui.Reporter, st localstore.Store, host string, t apply.Transport
 		return ""
 	}
 	s.Done(fmt.Sprintf("%d version(s)", len(g.Versions)))
+	if had != "" {
+		return fetchedInto(r, l, g, had)
+	}
 	if g.Verdict.Fork {
 		for _, h := range g.Verdict.Heads {
 			if err := l.WriteIncomingFor(h); err != nil {
@@ -242,18 +247,46 @@ func fetchOne(r ui.Reporter, st localstore.Store, host string, t apply.Transport
 		if err := l.Checkout(head); err != nil {
 			return err
 		}
-		if err := l.RecordSeen(g); err != nil {
-			return err
-		}
-		return st.Record(localstore.Saved{ID: id, Domain: domain, SHA: head, Revision: g.Versions[head].Revision, Status: localstore.Verified, Source: source, SavedAt: configNow().UTC()})
+		return l.RecordSeen(g)
 	}()
 	if err != nil {
 		s.Fail(err)
 		r.Explain(errLine(err) + ".")
 		return ""
 	}
+	recordHead(r, l, source)
 	s.Done(l.Dir)
 	return localstore.Verified
+}
+
+// fetched is how fetchOne left a system copy that had a head already, at
+// had: the versions recorded and the head kept.
+const fetched localstore.Status = "recorded"
+
+// fetchedInto ends a fetch into l, a system copy with a
+// head, had: only a deploy or a pull moves it, so the versions g gathered
+// are recorded in its store, with what was seen, and its files, its head
+// and its record are kept as they are. It says what deployment pull would
+// bring.
+func fetchedInto(r ui.Reporter, l configstore.Local, g configstore.Gathered, had string) localstore.Status {
+	if err := l.RecordSeen(g); err != nil {
+		r.Warn("what was seen is not recorded", errLine(err))
+		return ""
+	}
+	pull := progname.Cmd() + " deployment pull"
+	rev := 0
+	if cache, ok, err := l.HeldStore(); err == nil && ok {
+		rev = cache.Revision(had)
+	}
+	switch {
+	case g.Verdict.Fork:
+		r.Warn("a fork", fmt.Sprintf("The host serves two trusted heads on one parent. The system copy is kept at %s. An operator who holds the files merges them with %s deployment publish --merge; then %s brings the merge.", shortSHA(had), progname.Cmd(), pull))
+	case g.Verdict.Heads[0] != had && g.Versions[g.Verdict.Heads[0]].Revision > rev:
+		r.Step("keep the system copy at "+shortSHA(had)).End(ui.Pending, describe(g, g.Verdict.Heads[0])+" is newer; "+pull+" moves the system copy to it")
+	default:
+		r.Step("keep the system copy at " + shortSHA(had)).Done("the host holds nothing newer")
+	}
+	return fetched
 }
 
 // setAsideUnverified writes the files of the highest-revision versions g

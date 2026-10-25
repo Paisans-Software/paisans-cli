@@ -238,6 +238,7 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 		"apps.chat.mas_signing_key",
 		"apps.chat.mas_matrix_secret",
 		"apps.gate.cookie_secret",
+		"apps.gate.session_store_password",
 		"apps.health.session_secret",
 		"apps.talk.app_secret",
 		"apps.blog.s3_secret_access_key",
@@ -251,10 +252,13 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 		"apps.auth.database_password",
 		"apps.blog.database_password",
 		"apps.chat.database_password",
+		"apps.digest.database_password",
 		"apps.talk.database_password",
 		"apps.wiki.database_password",
+		"apps.digest.source_database_password",
 		"apps.talk.rabbitmq_password",
 		"apps.auth.dns_email_hash_key",
+		"apps.digest.digest_signing_key",
 		"apps.talk.mercure_jwt_secret",
 		"apps.talk.valkey_password",
 		"storage.garage.admin_token",
@@ -595,7 +599,7 @@ func TestRotationsHoldTheOAuthUnitPath(t *testing.T) {
 func TestSecretsRotateAllRefusesAnUnfilledFile(t *testing.T) {
 	noRotateHost(t)
 	configPath, secretsPath := rotateDeployment(t, func(text string) string {
-		out := strings.Replace(text, "    cookie_secret: \"fixture-not-a-secret-gate-cookie\"\n", "    {}\n", 1)
+		out := strings.Replace(text, "    cookie_secret: \"fixture-not-a-secret-gate-cookie\"\n", "", 1)
 		if out == text {
 			t.Fatal("the fixture's gate cookie line moved")
 		}
@@ -1373,5 +1377,33 @@ func TestSecretsRotateTakesABlueprintsHeartbeatToken(t *testing.T) {
 	tail := []string{"apps.auth.dns_2fa_heartbeat_token", "apps.notes.heartbeat_token", "apps.wiki.heartbeat_token"}
 	if len(got) < len(tail) || !slices.Equal(got[len(got)-len(tail):], tail) {
 		t.Errorf("--all does not end with the blueprints' heartbeat tokens after the continuity tokens: %v", got)
+	}
+}
+
+// The engagement digest's Mbin reader password is rotated by name as the
+// reader role's, and is not mistaken for the app's own database password.
+func TestSecretsRotateTakesTheDigestsSourceDatabasePassword(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := rotatorFor("apps.digest.source_database_password", rotateWiring{cfg: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Path() != "apps.digest.source_database_password" || !r.Cost().Reconnects {
+		t.Errorf("path %q cost %+v", r.Path(), r.Cost())
+	}
+	// The stacks re-applied with the new password are the digest's on every
+	// apps site, never Mbin's: Mbin does not hold it.
+	var users []string
+	for _, u := range r.Users(secretsrotate.Env{Cfg: cfg}) {
+		users = append(users, u.Site+":"+strings.Join(u.Stacks, ","))
+	}
+	if want := []string{"home-a:digest", "home-b:digest"}; !slices.Equal(users, want) {
+		t.Errorf("users %v, want %v", users, want)
+	}
+	if _, err := rotatorFor("apps.wiki.source_database_password", rotateWiring{cfg: cfg}); err == nil {
+		t.Error("a blueprint with no reader was given a reader rotation")
 	}
 }

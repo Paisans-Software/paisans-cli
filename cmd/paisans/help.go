@@ -50,7 +50,7 @@ var groupSummary = map[string]string{
 	"failover":    "Switch the database primary to another site and back.",
 	"dns":         "Create the DNS records the configuration implies, or prune them.",
 	"deployment":  "Apply, list, check out, fetch, publish, pull and recover.",
-	"operator":    "Sign the sites' configuration, or give an operator a sign-in link.",
+	"operator":    "Add an operator, sign the configuration, or give a sign-in link.",
 	"secrets":     "List, set, prune and rotate secrets.",
 	"app":         "Take a removed app off hosts.",
 	"oidc":        "Create an app's sign-in client at Pocket ID.",
@@ -74,24 +74,24 @@ var helpCommands = []helpCommand{
 		name:    "catalog add",
 		summary: "Pin a catalog of blueprints at its newest release.",
 		usage: []string{
-			"paisans catalog add <owner>/<name> [--tag <tag>] [--config " + config.FileName + "]",
-			"paisans catalog add [<name>] <url> [--tag <tag>] [--config " + config.FileName + "]",
+			"paisans catalog add <owner>/<name> [--tag <tag>] [--config " + config.FileName + "] [--id <id>]",
+			"paisans catalog add [<name>] <url> [--tag <tag>] [--config " + config.FileName + "] [--id <id>]",
 		},
 		detail: "A catalog's repository is named paisans-<name>. <owner>/<name> alone is https://github.com/<owner>/paisans-<name>, and a URL alone names the catalog <owner>/<name>, the prefix left out; give a name before the URL for another.\n\n" +
-			"Read the catalog at <url>, pin its newest release, the highest vMAJOR.MINOR.PATCH tag with pre-releases skipped (or --tag), and the commit it names in " + config.FileName + " as catalogs.<name>, and list its blueprints, which apps then name as <name>/<blueprint>. Edits only " + config.FileName + ".",
+			"Read the catalog at <url>, pin its newest release, the highest vMAJOR.MINOR.PATCH tag with pre-releases skipped (or --tag), and the commit it names in " + config.FileName + " as catalogs.<name>, and list its blueprints, which apps then name as <name>/<blueprint>. Edits only " + config.FileName + ". " + draftTopic,
 	},
 	{
 		name:    "catalog update",
 		summary: "Move catalogs' pins to their newest releases.",
-		usage:   []string{"paisans catalog update [<name>] [--tag <tag>] [--config " + config.FileName + "]"},
+		usage:   []string{"paisans catalog update [<name>] [--tag <tag>] [--config " + config.FileName + "] [--id <id>]"},
 		detail: "For each declared catalog, or the one named: read its newest tag (or --tag), and when it names another commit, say what it changes for each app using one of its blueprints (images, port, sign-in, the gate's openings, storage, secrets) and move the pin. " +
-			"Refuses a move that would leave an app without its blueprint. Edits only " + config.FileName + ".",
+			"Refuses a move that would leave an app without its blueprint. Edits only " + config.FileName + ". " + draftTopic,
 	},
 	{
 		name:    "catalog remove",
 		summary: "Remove a catalog no app uses.",
-		usage:   []string{"paisans catalog remove <name> [--config " + config.FileName + "]"},
-		detail:  "Remove catalogs.<name> from " + config.FileName + ". Refused while an app names one of its blueprints.",
+		usage:   []string{"paisans catalog remove <name> [--config " + config.FileName + "] [--id <id>]"},
+		detail:  "Remove catalogs.<name> from " + config.FileName + ". Refused while an app names one of its blueprints. " + draftTopic,
 	},
 	{
 		name:    "catalog list",
@@ -135,12 +135,12 @@ var helpCommands = []helpCommand{
 	{
 		name:    "init",
 		summary: "Give the configuration an id, a mesh subnet and its secrets.",
-		usage:   []string{"paisans init [--config " + config.FileName + "] [--secrets secrets.enc.yaml] [--yes]"},
+		usage:   []string{"paisans init [--config " + config.FileName + "] [--secrets secrets.enc.yaml] [--id <id>] [--yes]"},
 		detail: "Give the configuration an id if it has none; check each site's admission and list every site not admitted, with why, refusing when a site does not answer, unless the deployment is already on a site; " +
 			"at a terminal, without --yes, ask for each site not admitted whether to admit it now from this machine, and on a yes run site admit --site's own flow, which asks for your login on the host and each grant, shows the plan and asks before it runs; " +
 			"otherwise skip the site, whose site admit checks the subnet as root, printing the site admit and site request lines that admit it. --yes never admits a host: admitting stays its owner's step; " +
 			"until the deployment is on any site, reach every admitted site and keep mesh.subnet only if it overlaps nothing there, else, with no site admitted, roll a random /24 that overlaps nothing and move each site's address into it; " +
-			"then generate the secrets it needs, filling in only what is missing, and say what is still owed from elsewhere.",
+			"then generate the secrets it needs, filling in only what is missing, and say what is still owed from elsewhere. " + draftTopic,
 	},
 	{
 		name:    "render",
@@ -162,8 +162,12 @@ var helpCommands = []helpCommand{
 		detail: "Without --site: take every site from " + config.FileName + " to a running stack, running init, site prepare, apply, site add, storage and dns init in the order the deployment needs. " +
 			"With --site: compare that site's rendered artifacts with what is on its host and show what would change.\n\n" +
 			"Changes nothing on a host without --execute; without --site, the dry run may add missing generated secrets to the local secrets file, and says so when it does.\n\n" +
-			"Both, and site prepare, review the keys and images " + config.FileName + " grants against what each host last applied; --execute asks for the word approve at a terminal when anything is added or changed, and asks nothing when nothing is.\n\n" +
-			"--yes approves the review entry by entry, and types create, partial and rollback when apply asks for them. " + yesTopic + "\n\n" +
+			"Both, and site prepare, review the keys and images " + config.FileName + " grants against what each host last applied; --execute asks for the word approve at a terminal when anything is added or changed, and asks nothing when nothing is. Before it, apply shows how the configuration differs from the sites' newest version: " + config.FileName + " as a diff, the secrets by key only. " +
+			"A draft drafted from an older version than the sites' newest is merged forward first, as deployment pull merges it, and with --execute the merge is written into the draft and the apply stops, deploying nothing: review the merged draft, settle any conflict it lists, and run apply again. Versions after the draft's base that only sign its files again, as an attestation by operator register does, leave nothing to merge, and the draft deploys on the sites' newest. A conflict keeps the draft's value and is listed only at the merge; on the next apply it shows only in the review's difference. " +
+			"The review flags each change that puts back the value a path or secret key had before the newest revision that changed it, naming that revision and its signer, and never refuses one. " +
+			"A draft with no usable \"drafted from\" line is taken as drafted from the system copy's version, which the review names, and is warned about when it was last saved before the version that brought the sites' newest files reached this workstation. " +
+			"A deploy makes the deployed files the system copy and rewrites the draft's \"drafted from\" line to name the version it published.\n\n" +
+			"--yes approves the review entry by entry, and types create and rollback when apply asks for them. " + yesTopic + "\n\n" +
 			"Before anything changes, every app it starts logs in to its mail server from its site, sending nothing; one that does not log in refuses the apply.\n\n" +
 			"Every run, --site included, reaches every site's host to classify it, and runs on the sites it has: a site whose host has not admitted the deployment is left out, a joined site that does not answer is kept with its own steps skipped, and the run ends degraded. --require-all: exit 1 when the run is degraded: a site pending or down.\n\n" +
 			"--hold-apps: start none of the site's app stacks, a pinned one included, and apply its mesh, its infrastructure and its Caddy. Without --site, apply runs it on each gateway outside etcd.members before the data sites are founded, so their apps reach Pocket ID through the gateway as they start.",
@@ -258,9 +262,9 @@ var helpCommands = []helpCommand{
 	{
 		name:    "mesh rekey",
 		summary: "Replace sites' WireGuard keys, one site at a time.",
-		usage:   []string{"paisans mesh rekey <site>... | --all [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                   [--execute]"},
+		usage:   []string{"paisans mesh rekey <site>... | --all [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                   [--id <id>] [--execute]"},
 		detail: "Replace sites' WireGuard keys, one site at a time: a next key in the secrets, every peer's mesh file and then the site's own synced with it, a handshake under it from every peer, etcd and Patroni healthy, then the key promoted. " +
-			"A stopped run resumes. Writes nothing without --execute.",
+			"A stopped run resumes. Writes nothing without --execute. " + draftTopic,
 	},
 	{
 		name:    "gateway move",
@@ -286,9 +290,9 @@ var helpCommands = []helpCommand{
 	{
 		name:    "storage rotate-key",
 		summary: "Replace one app's S3 key.",
-		usage:   []string{"paisans storage rotate-key --app <name> [--config " + config.FileName + "]\n                           [--secrets secrets.enc.yaml] [--execute]"},
+		usage:   []string{"paisans storage rotate-key --app <name> [--config " + config.FileName + "]\n                           [--secrets secrets.enc.yaml] [--id <id>] [--execute]"},
 		detail: "Replace one app's S3 key, in gated stages: the new pair into the secrets (the old one kept beside it), the new key imported and granted, the app applied alone on every site running it, a probe written, read and deleted with the new key, and only then the old key deleted from Garage and the secrets.\n\n" +
-			"Resumes from the secrets file. Writes nothing without --execute.",
+			"Resumes from the secrets file. Writes nothing without --execute. " + draftTopic,
 	},
 	{
 		name:    "prune",
@@ -313,9 +317,9 @@ var helpCommands = []helpCommand{
 	{
 		name:    "doctor",
 		summary: "Report what is stuck on every site, and how to recover.",
-		usage:   []string{"paisans doctor [--config " + config.FileName + "] [--site <name>]... [--execute]"},
+		usage:   []string{"paisans doctor [--config " + config.FileName + "] [--site <name>]... [--id <id>] [--execute]"},
 		detail: "Reach every site, or the ones --site names, and report what is stuck: unreachable sites, etcd quorum and version, the Patroni leader and why a replica will not promote, containers that are down, Pocket ID's active instance, and clocks. " +
-			"Prints how to recover. Reaches hosts and changes none; exits 1 on any FAIL. With --execute it removes the config: keys that only repeat what gating renders, and records the ssh.user of a site it logs in to as the deployment's own user, both in " + config.FileName + ".",
+			"Prints how to recover. Reaches hosts and changes none; exits 1 on any FAIL. With --execute it removes the config: keys that only repeat what gating renders, and records the ssh.user of a site it logs in to as the deployment's own user, both in " + config.FileName + ". " + draftTopic + " --id applies only with --execute.",
 	},
 	{
 		name:    "images",
@@ -348,16 +352,21 @@ var helpCommands = []helpCommand{
 	},
 	{
 		name:    "deployment publish",
-		summary: "Sign the local files and push them to every site.",
+		summary: "Sign the draft and push it to every site.",
 		usage:   []string{"paisans deployment publish [--config " + config.FileName + "] [--merge] [--execute] [--yes]"},
-		detail: "Sign the local " + config.FileName + ", secrets.enc.yaml and .sops.yaml as a version on the sites' newest and push it to every site; --merge builds on every head of a fork." +
+		detail: "Sign the draft's " + config.FileName + ", secrets.enc.yaml and .sops.yaml as a version on the one it was drafted from and push it to every site; --merge builds on every head of a fork. " +
+			"A draft drafted from an older version than the sites' newest is refused, naming deployment pull, which merges it forward, unless the versions after it only sign its files again, as an attestation does. With --execute the published files become the system copy, and the draft's \"drafted from\" line names the new version." +
 			configTrust,
 	},
 	{
 		name:    "deployment pull",
-		summary: "Move the local files to the sites' newest version.",
-		usage:   []string{"paisans deployment pull [--config " + config.FileName + "] [--root <sha>] [--key <path.pub>] [--execute] [--yes]"},
-		detail: "Move the local files to the sites' newest version, or, over local edits, show the difference and put its files in .paisans/incoming/." +
+		summary: "Bring the system copy and the draft to the sites' newest version.",
+		usage:   []string{"paisans deployment pull [--config " + config.FileName + "] [--id <id>] [--root <sha>] [--key <path.pub>] [--execute] [--yes]"},
+		detail: "Move the system copy to the sites' newest version and merge that version into the draft, from the version the draft was drafted from: its \"drafted from\" line names it, or, without a usable line, the system copy's version is taken. " +
+			"paisans-stack.yaml and .sops.yaml merge path by path, a list being one value, with the draft's key order, blank lines and comments kept, but for a comment only the sites' newest changed, and a file with a YAML anchor, an alias or a merge key (<<) is refused; the secrets merge key by key, decrypted with this workstation's age key and encrypted again to the merged .sops.yaml's recipients. " +
+			"A path both sides changed differently is a conflict: the draft keeps its own value there, and the conflict is listed, a secret by its key only. The merged draft's \"drafted from\" line names the sites' newest version; review it and deploy it with deployment apply --execute. " +
+			"When the versions from the draft's base to the sites' newest only sign the base's files again, as an attestation by operator register does, the draft is up to date: only its \"drafted from\" line is rewritten, to the sites' newest. " +
+			"In a folder with no draft, start one from the sites' newest version, of the only deployment on this workstation or the one --id names. Writes nothing without --execute." +
 			configTrust + "\n\n" + keyTrust,
 	},
 	{
@@ -368,36 +377,71 @@ var helpCommands = []helpCommand{
 	},
 	{
 		name:    "deployment recover",
-		summary: "Write the newest configuration onto an empty directory.",
+		summary: "Make the system copy from the sites and start a draft of it.",
 		usage:   []string{"paisans deployment recover --from <user@host[:port] or ssh alias>... [--root <sha>] [--key <path.pub>] [--id <id>]\n                       [--config " + config.FileName + "] [--execute] [--yes]"},
-		detail: "Onto an empty directory, gather from the --from hosts and every site the trusted heads name, and write the head's files, or each head's in .paisans/incoming/ with a fork. " +
-			"With --execute, the recovered version is also saved to this workstation's saved deployments (see deployment list)." +
+		detail: "For a deployment this workstation holds no system copy of, gather from the --from hosts and every site the trusted heads name, and with --execute make the system copy the head's, with its root and key, and start a draft of it in the directory of --config, which must hold none of the three files. " +
+			"A deployment whose system copy here has a version is refused, naming deployment checkout and deployment pull, unless --root names another root than the one it pinned, or the copy pinned none, as after the deployment was made again under its id; a system copy with no version, or one --root replaces, is moved aside whole into replaced/ of the data directory, never removed. A fork is refused, naming the merge with deployment publish --merge an operator who holds the files makes, and nothing is written. " +
+			"The system copy is listed by deployment list." +
 			configTrust + "\n\n" + keyTrust + "\n\n" + sshAliasTopic,
 	},
 	{
 		name:    "deployment list",
-		summary: "List the deployments saved on this workstation.",
+		summary: "List the system copies on this workstation.",
 		usage:   []string{"paisans deployment list"},
-		detail: "List every deployment saved on this workstation: its id, domain, revision, version, whether it is verified, where it came from and when. " +
-			"deployment apply --execute and deployment recover --execute save the version they publish or recover; deployment fetch saves what a host holds. " +
-			"Saved deployments are kept in ~/Library/Application Support/Paisans on macOS, and in $XDG_DATA_HOME/paisans (~/.local/share/paisans) elsewhere, or in $" + localstore.DirVariable + " when set. " +
-			"Each is a directory holding " + config.FileName + ", secrets.enc.yaml and .sops.yaml, which any command takes with --config. Reads nothing else, and changes nothing.",
+		detail: "List every deployment's system copy on this workstation: its id, domain, revision, version, whether it is verified, where it came from and when. " +
+			"A system copy is the one copy of a deployment this workstation trusts: the files of the version it last deployed or synced, the signed versions gathered from the sites, and the root, signing key and newest revision trust is read from. " +
+			"The first deploy of a new deployment, deployment recover --execute, the join of operator register and operator register --root --execute make one, and deployment fetch fills one with no version from a host; a deploy or deployment pull moves it to a newer version, and an attestation by operator register moves its head to the attestation. Each records the version it moved to, which this list shows. " +
+			"System copies are kept under deployments/ in ~/Library/Application Support/Paisans on macOS, and in $XDG_DATA_HOME/paisans (~/.local/share/paisans) elsewhere, or in $" + localstore.DirVariable + " when set; locks/ there holds the lock a command takes while it writes one, and replaced/ the copies a recovery moved aside. " +
+			"Work on a deployment in a draft: deployment checkout starts one. Reads nothing else, and changes nothing.",
 	},
 	{
 		name:    "deployment checkout",
-		summary: "Copy a saved deployment into an empty directory to edit.",
-		usage:   []string{"paisans deployment checkout <id, start of id, or domain> [--config " + config.FileName + "] [--execute]"},
-		detail: "Copy a deployment saved on this workstation (see deployment list) into the empty directory of --config: " + config.FileName + ", secrets.enc.yaml and .sops.yaml, and in .paisans/ the store with every version and its signature, the signing key, the pinned root, the head and the highest revision seen, so deployment log, pull and publish trust there as they do in the saved copy. " +
-			"The saved copy is judged from its own anchor first, and the copy again once written; a copy that differs is removed. Refuses a directory with any of those files, and an unverified or forked saved copy, which deployment recover --root <sha> pins instead. " +
-			"Never overwrites a file, and reaches no host. The saved copy may be behind the sites; deployment pull brings it up to date. Writes nothing without --execute.",
+		summary: "Start a draft from a deployment's system copy.",
+		usage:   []string{"paisans deployment checkout [--id <id>] [--head <sha>] [--config " + config.FileName + "] [--execute]"},
+		detail: "Write the three files of a deployment's system copy on this workstation (see deployment list) into the folder of --config, which holds no draft: " + config.FileName + ", secrets.enc.yaml and .sops.yaml, with a first line in " + config.FileName + " naming the version they were drafted from. " +
+			"The deployment is the only one on this workstation, or the one --id names. The system copy is judged from its own anchor first; an unverified or forked one is refused, which deployment recover --root <sha> pins instead. " +
+			"--head <sha> writes that trusted head of the system copy's store in place of its own version, the files a hand merge for deployment publish --merge starts from. " +
+			"Never overwrites a file, writes nothing to the system copy, and reaches no host. The system copy may be behind the sites; deployment pull brings the draft up to date. Writes nothing without --execute.",
 	},
 	{
 		name:    "deployment fetch",
-		summary: "Save every deployment a host holds to this workstation.",
+		summary: "Fill a system copy of every deployment a host holds.",
 		usage:   []string{"paisans deployment fetch --ssh <user@host[:port] or ssh alias>"},
-		detail: "Read, through sudo, the registry of the host --ssh names and, for each deployment in it, every version of its configuration the host keeps, and save the newest trusted one with the saved deployments (see deployment list). " +
-			"A deployment this workstation saved before is judged from the key that signed it, as deployment pull judges; one it never saved has nothing to trust from, so its newest versions are put in .paisans/incoming/<sha>/ and listed as unverified, " +
+		detail: "Read, through sudo, the registry of the host --ssh names and, for each deployment in it, every version of its configuration the host keeps, and record them in the deployment's system copy (see deployment list). " +
+			"A deployment with a system copy here is judged from the key that signed it, as deployment pull judges. A system copy with a version keeps its files, head and record, since only a deploy or deployment pull moves it, and the run names deployment pull when the host holds a newer one; one with no version takes the newest trusted version as its own. A deployment with no system copy here has nothing to trust from, so its newest versions are set aside in its system copy's incoming versions, never as its own files, and listed as unverified, " +
 			"for deployment recover --root <sha> to pin once the hash is checked with another operator. Needs no " + config.FileName + "; changes nothing on the host.\n\n" + sshAliasTopic,
+	},
+	{
+		name:    "operator add",
+		summary: "Declare one more operator in " + config.FileName + ".",
+		usage: []string{
+			"paisans operator add [<username>] [--name <first last>] [--email <address>]\n                     [--key <path.pub or key line>]... [--site <name>]... [--all-sites]\n                     [--config " + config.FileName + "] [--id <id>]",
+			"paisans operator add --request <file> [--site <name>]... [--all-sites] [--config " + config.FileName + "]\n                     [--id <id>]",
+		},
+		detail: "Write the operator's entry under operators, after the last one, and name them in the ssh.keys of each site --site gives, or of every site with --all-sites, leaving every other line of the file as it was. " +
+			"At a terminal it asks, with create's questions, for whatever the flags did not give or give in a form the file would refuse, and which sites the operator may log in to. Without a terminal it asks nothing: the username, --name, --email, at least one --key and the sites must all be given, or nothing is written. " +
+			"A --key is a .pub file, every line of which but blank lines and comments is a key, or one key line itself. " +
+			"Writes the file only when validate refuses nothing the addition introduced. Reaches no host: the next deployment apply --execute gives the operator their sites, publishes the change and makes their Pocket ID account. Their age key, to read the secrets, is added to .sops.yaml by hand, with sops updatekeys; operator invite and operator add --request do that for a new operator.\n\n" +
+			"With --request, accept the signed request a new operator's operator register --invite wrote, on any operator's workstation: the request must be signed by the key its invite names, and the invite by a key an operator of this deployment lists, for this deployment and the root this workstation trusts. " +
+			"It declares the operator with the request's username, name, email and key, asking only for the sites, adds their age key to .sops.yaml and re-encrypts secrets.enc.yaml to every recipient there, its contents unchanged, decrypting with your own age key. An operator declared already keeps their sites, so --site and --all-sites are refused for them. " +
+			"Refuses a .sops.yaml whose creation rule uses key_groups or has no age field, which is left to you, and a secrets file whose sops metadata sets what the toolkit never writes, such as encrypted_regex or keys other than age, which sops updatekeys re-encrypts by hand. Every check is made before the first file is written, and a write that fails puts back the files written before it. The username, --name, --email and --key are refused beside --request. " +
+			"Accepting the same request again adds the age key or re-encrypts if either is missing, and otherwise changes nothing.\n\n" + draftTopic,
+	},
+	{
+		name:    "operator age-key",
+		summary: "Show your age public key for a deployment, making the key first if there is none.",
+		usage:   []string{"paisans operator age-key [--id <deployment id>] [--config " + config.FileName + "]\n                       [--age-private-key-file <path>]"},
+		detail: "Print your age public key for the deployment, on a line of its own at the end of the output. The id comes from --id, or from " + config.FileName + " beside it. " +
+			"The key is the first of these that is present: the one key a SOPS_AGE_* variable holds, the keystore item for the deployment id, the file --age-private-key-file names when it exists, and otherwise a new key, kept in that file when one is named and in the keystore when not. " +
+			"A key file, made or read, comes with the export SOPS_AGE_KEY_FILE line that points sops at it; a directory is refused. Never prints the private key, and never replaces a keystore item or a key file. Reaches no host and changes nothing in the configuration.",
+	},
+	{
+		name:    "operator invite",
+		summary: "Write a signed invite for a new operator to stdout.",
+		usage:   []string{"paisans operator invite <username> --key <path.pub or key line> [--config " + config.FileName + "]"},
+		detail: "Write an invite for the operator <username> will be, signed through your ssh-agent with the signing key the system copy records. " +
+			"The invite names the deployment, its domain, the root of the history this workstation trusts, the new operator's key without its comment, and each site's ssh host, port and user. It holds nothing secret.\n\n" +
+			"Refuses a username or key an operator already has, a workstation with no recorded signing key or whose ssh-agent does not hold it (run operator register), and one that does not know its root, from the system copy's pinned root or a single root among the versions it has gathered (run deployment pull). The root and the inviter come from the system copy, whatever the draft holds. Reaches no host and changes no file.",
 	},
 	{
 		name:    "operator magic-link",
@@ -417,11 +461,19 @@ var helpCommands = []helpCommand{
 	{
 		name:    "operator register",
 		summary: "Sign the sites' newest version with your own key.",
-		usage:   []string{"paisans operator register [--config " + config.FileName + "] [--key <path.pub>] [--root <sha>]\n                          [--execute] [--yes]"},
+		usage: []string{
+			"paisans operator register [--config " + config.FileName + "] [--key <path.pub>] [--root <sha>]\n                          [--id <deployment id>] [--execute] [--yes]",
+			"paisans operator register --invite <file> --inviter-key <path.pub or key line>\n                          [--name <first last>] [--email <address>] [--age-private-key-file <path>]\n                          [--config " + config.FileName + "] > <file>.request",
+		},
 		detail: "Sign an attestation of the sites' newest version with your own key, so trust starts from your signature: the key in your ssh-agent listed under your entry in operators, or the one --key names. " +
-			"Signs only a version equal to your local files, or, with no files and a root pinned, the one the pin leads to, and then writes its files. " +
-			"Records the key in .paisans/signing-key, which deployment publish signs with from then on.\n\n" +
-			"Changes only the sites' configuration stores, and nothing without --execute. With --execute it asks for the word partial at a terminal when no more than half the sites answered directly, and for rollback when the newest version is older than one seen here before; --yes types either. " + yesTopic,
+			"Attests the version the system copy holds, whatever the draft holds, or, for a deployment with no system copy here and a root pinned with --root, the one the pin leads to, making the system copy from it. " +
+			"Records the key in the system copy as its signing key, which deployment publish signs with from then on.\n\n" +
+			"With --invite, answer the signed invite an operator wrote with operator invite, in any directory, since nothing there is read or written: check it against --inviter-key, which must be the key that signed it, and that the ssh-agent holds the key it names; find or make your age key for its deployment, from a SOPS_AGE_* variable, the keystore item, --age-private-key-file, or a new keystore item, in that order; ask for your full name and email at a terminal or take --name and --email; and write the signed request to stdout. " +
+			"The invite and the inviter's key wait as the deployment's pending invite in invites/<deployment id>/ of the workstation's data directory, where deployment list's saved deployments live, and the first answer binds the age key it named to the deployment in age/<deployment id>.recipient there. Every later answer for the deployment searches all the sources for the bound key and uses the one that holds it, and is refused, with no key made, when none does; removing the binding file starts over with another key. " +
+			"Reaches no host and takes no --key, --root, --id or --execute. Refuses an invite to a deployment whose pending invite is a different one, naming the file to remove to abandon it, before anything is made. A key kept in a file comes with the export SOPS_AGE_KEY_FILE line that points sops at it, and the request is followed on stderr by what comes next.\n\n" +
+			"Run without --invite in a directory without the files, with an invite pending, it joins: the one invite pending, or the one --id names when several are. --key or --root without --id registers instead. With several pending and no --id it refuses and lists their directories; removing one abandons that invite. " +
+			"The join makes the system copy from the invite's root and sites, and starts a draft of it in the directory, once an operator has accepted the request (operator add --request) and applied it (deployment apply --execute), and refuses before that with advice to ask the inviter. It signs your attestation with the invite's key and removes the pending invite once the system copy is made. A deployment whose system copy is here already is refused. It then says whether the secrets open with your age key and, when they do not, whether the fix is this workstation's or the acceptance's. Writing needs --execute; without it, the join says what it would write.\n\n" +
+			"Changes only the sites' configuration stores, and nothing without --execute. It goes ahead on whichever sites answer, and with --execute it asks for the word rollback at a terminal when the newest version is older than one seen here before; --yes types it. " + yesTopic,
 	},
 	{
 		name:    "secrets list",
@@ -435,33 +487,33 @@ var helpCommands = []helpCommand{
 		name:    "secrets set",
 		summary: "Write one value from stdin into the secrets file, or ask for each owed one.",
 		usage: []string{
-			"paisans secrets set <dotted.key> [--config " + config.FileName + "] [--secrets secrets.enc.yaml] < value",
-			"paisans secrets set [--config " + config.FileName + "] [--secrets secrets.enc.yaml]",
+			"paisans secrets set <dotted.key> [--config " + config.FileName + "] [--secrets secrets.enc.yaml] [--id <id>] < value",
+			"paisans secrets set [--config " + config.FileName + "] [--secrets secrets.enc.yaml] [--id <id>]",
 		},
 		detail: "Read one value from stdin and write it into the encrypted secrets file, printing only its name. " +
 			"For credentials issued elsewhere, so they never touch an echoing terminal or an editor.\n\n" +
 			"With a key, at a terminal, ask for its value with echo off, saying whether it is already set; an empty answer writes nothing.\n\n" +
 			"With no key, at a terminal, ask for each secret still owed in turn, saying why it is owed, and read each with echo off. " +
 			"Each answer is written before the next is asked; an empty one skips the key, which stays owed. A sign-in client is not asked for, since apply creates it.\n\n" +
-			"An SMTP password is tried before it is written: from this machine, it logs in to the mail server and sends one test message to every operator, so no site need be deployed yet. One the server refuses is not written; a server this machine cannot reach is warned about, and apply tries the password from each site.",
+			"An SMTP password is tried before it is written: from this machine, it logs in to the mail server and sends one test message to every operator, so no site need be deployed yet. One the server refuses is not written; a server this machine cannot reach is warned about, and apply tries the password from each site.\n\n" + draftTopic,
 	},
 	{
 		name:    "secrets prune",
 		summary: "Remove the secrets of what " + config.FileName + " no longer declares.",
-		usage:   []string{"paisans secrets prune [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                      [--without-record] [--execute] [--yes]"},
+		usage:   []string{"paisans secrets prune [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                      [--without-record] [--id <id>] [--execute] [--yes]"},
 		detail: "Remove the secrets that name something " + config.FileName + " no longer declares: a removed site's keys, a removed app's passwords and sign-in client, a Pocket ID group nothing names. Lists them by key, never by value.\n\n" +
 			"--without-record trusts " + config.FileName + " alone, when no gateway's deployment record can be read, and --execute then asks for the word prune at a terminal; --yes types it. " + yesTopic + "\n\n" +
-			"Only reads the gateways' deployment records; its --execute writes the local secrets file, and records the ssh.user of a gateway it logs in to as the deployment's own user.",
+			"Only reads the gateways' deployment records; its --execute writes the draft's secrets file, and records the ssh.user of a gateway it logs in to as the deployment's own user. " + draftTopic,
 	},
 	{
 		name:    "secrets rotate",
 		summary: "Replace secrets, one at a time, in gated stages.",
-		usage:   []string{"paisans secrets rotate <path>... | --all [--restart] [--replaced <path>]...\n                       [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                       [--execute] [--yes]"},
+		usage:   []string{"paisans secrets rotate <path>... | --all [--restart] [--replaced <path>]...\n                       [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                       [--id <id>] [--execute] [--yes]"},
 		detail: "Replace secrets, named by their paths in the secrets file (apps.<app>.<unit> for a unit of secrets an app's blueprint groups), or every one in scope with --all, one at a time in gated stages: a next value in the secrets file, the side that checks it, each site that uses it healthy before the next, then the value promoted.\n\n" +
 			"A pasted secret (the DNS token or an SMTP password) whose value every host using it runs, read line by line, is asked for at a terminal before any host is reached: replace it at its issuer when asked and paste the new one. One already set anew with secrets set is handed on from the file. A DNS token is tried against the zone before any host gets it; an SMTP password logs in to the mail server from this machine (a server it cannot reach is a warning) and then from every site that will be handed it, none being handed it until all accept, and a pasted one sends the operators one test message. --replaced <path> lists one already replaced and applied, which every host runs, instead. Lists the secrets it keeps and why.\n\n" +
 			"--all refuses a file that lacks a secret init generates. A stopped --all resumes with what it left, and says so; --all --restart starts the full list again.\n\n" +
 			"Refuses while a mesh rekey is unfinished, a site does not answer, or etcd or Patroni is unhealthy; apply and every other command that renders refuse while a rotation is unfinished. " +
-			"A run that signs members out asks for sign out at a terminal, before any host is reached; --yes types it, and never pastes a secret. " + yesTopic + " A stopped run resumes. Writes nothing without --execute.",
+			"A run that signs members out asks for sign out at a terminal, before any host is reached; --yes types it, and never pastes a secret. " + yesTopic + " A stopped run resumes. Writes nothing without --execute. " + draftTopic,
 	},
 	{
 		name:    "app remove",
@@ -474,9 +526,9 @@ var helpCommands = []helpCommand{
 	{
 		name:    "oidc client create",
 		summary: "Create an app's client at the deployment's Pocket ID.",
-		usage:   []string{"paisans oidc client create --app <name> [--rotate-secret]\n                           [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                           [--site <name>] [--ssh <destination>] [--execute]"},
+		usage:   []string{"paisans oidc client create --app <name> [--rotate-secret]\n                           [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                           [--site <name>] [--ssh <destination>] [--id <id>] [--execute]"},
 		detail: "Create an app's client at the deployment's Pocket ID, with the groups the app reads, and record its ID and secret in the secrets file. The secret is never printed. " +
-			"Writes nothing without --execute. Supports every blueprint that signs in through Pocket ID.",
+			"Writes nothing without --execute. Supports every blueprint that signs in through Pocket ID. " + draftTopic,
 	},
 	{
 		name:    "web-server show",
@@ -504,21 +556,25 @@ const sshAliasTopic = "A destination is user@host[:port], or a Host alias of you
 
 const yesTopic = "--yes answers each confirmation as typing it would, with no terminal, and prints approved by --yes: and what it approved, a line for each. It needs PAISANS_ALLOW_YES=1 in the environment, so a command line copied alone never approves anything."
 
+// draftTopic is how a command that writes the deployment's files finds
+// them.
+const draftTopic = "It writes the draft in the folder of --config, and in a folder with no draft first starts one there from the system copy, of the only deployment on this workstation or the one --id names. The system copy is unchanged until the draft is deployed."
+
 // configTrust is what every config subcommand shares, after its own
 // sentence.
 const configTrust = "\n\n" +
 	"The signed copies of " + config.FileName + ", secrets.enc.yaml and .sops.yaml every site keeps. Each config command gathers every site's versions first and trusts them from your own signing key or a root pinned with --root.\n\n" +
-	"With --execute, pull, recover, a publish of the first version, apply and operator register ask for the word partial at a terminal when no more than half the sites answered directly; publish, pull, recover, apply and operator register ask for rollback when the newest version is older than one seen here before, and log only warns. " +
-	"--yes types partial and rollback for each command but log, which asks nothing. " + yesTopic + " " +
-	"With --execute each site first syncs with its peers; without it, and in log, no site is changed and only .paisans/ here is written."
+	"Publish, pull, recover, apply and operator register go ahead on whichever sites answer. With --execute, publish, pull, recover, apply and operator register ask for rollback when the newest version is older than one seen here before, and log only warns. " +
+	"--yes types rollback for each command but log, which asks nothing. " + yesTopic + " " +
+	"With --execute each site first syncs with its peers; without it, and in log, no site is changed and only the system copy's store of versions here is written."
 
 // keyTrust is how pull, log and recover start trust from --key on a
 // workstation that records no signing key.
-const keyTrust = "With no key recorded in .paisans/signing-key, name your own operator key with --key <path.pub>. It anchors only on versions it signed itself, under one root, that the trust rules trust from that root: every head must be signed by it and list it under an operator, and every trusted version must declare the deployment's id. " +
-	"A newer version by another operator, or the key's versions under two roots, need --root <sha>, the full hash deployment log prints on a root's line or another operator's .paisans/config-root holds, since a key alone cannot tell this deployment's history from one it signed before a redeploy under the same id. " +
+const keyTrust = "With no signing key recorded in the system copy, name your own operator key with --key <path.pub>. It anchors only on versions it signed itself, under one root, that the trust rules trust from that root: every head must be signed by it and list it under an operator, and every trusted version must declare the deployment's id. " +
+	"A newer version by another operator, or the key's versions under two roots, need --root <sha>, the full hash deployment log prints on a root's line or another operator's system copy pins, since a key alone cannot tell this deployment's history from one it signed before a redeploy under the same id. " +
 	"For the same reason, when every site that answers serves an older incarnation, a recovery with --key can land on a genuine version the key signed there: recover --key prints the full hash of the root it pins, to confirm with another operator before applying. " +
 	"A pinned root anchors alone, and --key is then ignored, with a note. With a root pinned, a gather whose sites serve none of its history is refused: the pin is out of date, and you recover from the current root into an empty directory, or a site that answered holds a history it should not. " +
-	"pull and recover with --execute record the named key in .paisans/signing-key when your ssh-agent holds it (load it with ssh-add) and an operator of the head lists it; log records nothing. With neither --key nor a root, they refuse and say so."
+	"pull and recover with --execute record the named key as the system copy's signing key when your ssh-agent holds it (load it with ssh-add) and an operator of the head lists it; log records nothing. With neither --key nor a root, they refuse and say so."
 
 // executeTopic is `paisans help execute`: which commands reach a host, and
 // what --execute lets each of them change.

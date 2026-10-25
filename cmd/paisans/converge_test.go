@@ -1762,6 +1762,8 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 			// its own disk, which only a pinned app may do.
 			edit: func(cfg *config.Config) {
 				cfg.Storage.Garage.Sites = nil
+				// The digest reads only a clustered Mbin, and talk is pinned here.
+				delete(cfg.Apps, "digest")
 				for _, name := range []string{"talk", "wiki"} {
 					app := cfg.Apps[name]
 					app.Placement = config.Placement{Mode: config.PlacementPinned, Site: "home-a"}

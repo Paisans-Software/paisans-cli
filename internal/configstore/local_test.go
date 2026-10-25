@@ -176,10 +176,10 @@ func TestPublishFirstCreatesTheRootAndState(t *testing.T) {
 		t.Fatalf("root %q head %q key %q, want %s and alice's key", root, head, key, sha)
 	}
 	ignore, err := os.ReadFile(filepath.Join(l.Dir, ".paisans", ".gitignore"))
-	if err != nil || string(ignore) != "store.git/\nincoming/\nsigning-key\nconfig-head\nconfig-seen\n" {
+	if err != nil || string(ignore) != "store.git/\nincoming/\nsigning-key\nconfig-head\nconfig-seen\narrivals\n" {
 		t.Fatalf(".gitignore %q, %v", ignore, err)
 	}
-	g, err := gather(l, reach(sites, "home-a"), 3, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
+	g, err := gather(l, reach(sites, "home-a"), testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestPublishFromAStaleHeadIsRefused(t *testing.T) {
 	if err := lb.SetRoot(v1); err != nil {
 		t.Fatal(err)
 	}
-	g, err := gather(lb, all, 2, testID, mustAnchor(t, lb), GatherOptions{Sync: true}, fakePull)
+	g, err := gather(lb, all, testID, mustAnchor(t, lb), GatherOptions{Sync: true}, fakePull)
 	if err != nil || g.Verdict.Heads[0] != v1 {
 		t.Fatalf("bob's gather %+v %v", g.Verdict, err)
 	}
@@ -275,7 +275,7 @@ func TestTwoOperatorsFromOneHeadForkAndMergeResolvesIt(t *testing.T) {
 	if err := lb.SetRoot(v1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := gather(lb, all, 2, testID, mustAnchor(t, lb), GatherOptions{Sync: true}, fakePull); err != nil {
+	if _, err := gather(lb, all, testID, mustAnchor(t, lb), GatherOptions{Sync: true}, fakePull); err != nil {
 		t.Fatal(err)
 	}
 	if err := lb.Checkout(v1); err != nil {
@@ -292,7 +292,7 @@ func TestTwoOperatorsFromOneHeadForkAndMergeResolvesIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := gather(la, all, 2, testID, mustAnchor(t, la), GatherOptions{Sync: true}, fakePull)
+	g, err := gather(la, all, testID, mustAnchor(t, la), GatherOptions{Sync: true}, fakePull)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +307,7 @@ func TestTwoOperatorsFromOneHeadForkAndMergeResolvesIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err = gather(la, all, 2, testID, mustAnchor(t, la), GatherOptions{Sync: true}, fakePull)
+	g, err = gather(la, all, testID, mustAnchor(t, la), GatherOptions{Sync: true}, fakePull)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,8 +317,8 @@ func TestTwoOperatorsFromOneHeadForkAndMergeResolvesIt(t *testing.T) {
 	}
 }
 
-// Only a site reached directly counts toward the majority, and exactly half
-// is not one.
+// Only a site reached directly is Direct; a version arriving through another
+// site's sync makes that site a holder and nothing more.
 func TestGatherCountsOnlyDirectReaches(t *testing.T) {
 	needTools(t, "git", "ssh-keygen")
 	alice := newOperator(t)
@@ -331,12 +331,9 @@ func TestGatherCountsOnlyDirectReaches(t *testing.T) {
 		t.Fatal(err)
 	}
 	sites["vm"].down, sites["watch"].down = true, true
-	g, err := gather(l, reach(sites, "home-a", "home-b", "vm", "watch"), 4, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
+	g, err := gather(l, reach(sites, "home-a", "home-b", "vm", "watch"), testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if g.Majority {
-		t.Fatal("two of four reached counted as a majority")
 	}
 	direct := 0
 	for _, r := range g.Reached {
@@ -348,10 +345,6 @@ func TestGatherCountsOnlyDirectReaches(t *testing.T) {
 	}
 	if direct != 2 || !slices.Equal(g.Holders[sha], []string{"home-b"}) {
 		t.Fatalf("direct %d, holders %v", direct, g.Holders)
-	}
-	g, err = gather(l, reach(sites, "home-a", "home-b", "vm", "watch"), 3, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
-	if err != nil || !g.Majority {
-		t.Fatalf("two of three: %v %v", g.Majority, err)
 	}
 }
 
@@ -365,7 +358,7 @@ func TestGatherWithoutAnAnchorIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	empty := Local{Dir: t.TempDir()}
-	if _, err := gather(empty, reach(sites, "home-a"), 1, testID, mustAnchor(t, empty), GatherOptions{Sync: true}, fakePull); !errors.Is(err, ErrNoAnchor) {
+	if _, err := gather(empty, reach(sites, "home-a"), testID, mustAnchor(t, empty), GatherOptions{Sync: true}, fakePull); !errors.Is(err, ErrNoAnchor) {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -390,11 +383,11 @@ func TestRecoverWritesTheFilesAndState(t *testing.T) {
 		t.Fatal(err)
 	}
 	l := Local{Dir: t.TempDir()}
-	g, err := gather(l, all, 2, testID, Anchor{Root: v1}, GatherOptions{Sync: true}, fakePull)
+	g, err := gather(l, all, testID, Anchor{Root: v1}, GatherOptions{Sync: true}, fakePull)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if g.Verdict.Heads[0] != v2 || !g.Majority || !slices.Equal(g.Roots(v2), []string{v1}) {
+	if g.Verdict.Heads[0] != v2 || !slices.Equal(g.Roots(v2), []string{v1}) {
 		t.Fatalf("verdict %+v roots %v", g.Verdict, g.Roots(v2))
 	}
 	if err := l.Checkout(v2); err != nil {
@@ -457,31 +450,28 @@ func TestStateFiles(t *testing.T) {
 	}
 }
 
-// Current names the head and its revision only while the files are the
-// head's, and reads no state it would have to create.
-func TestCurrentIsTheHeadOnlyWhileTheFilesAreIt(t *testing.T) {
+// HeadIs names the head and its revision only for the head's files, and
+// creates no state.
+func TestHeadIsTheHeadOnlyForItsFiles(t *testing.T) {
 	needTools(t, "git", "ssh-keygen")
 	alice := newOperator(t)
 	sites := storeSites(t, "home-a")
 	f := edit(testFiles(), "1", map[string]string{"alice": alice.pub})
 	l := workstation(t, f)
-	if sha, rev, err := l.Current(); sha != "" || rev != 0 || err != nil {
+	if sha, rev, err := l.HeadIs(f); sha != "" || rev != 0 || err != nil {
 		t.Fatalf("before a publish: %q %d %v", sha, rev, err)
 	}
 	if _, err := os.Stat(filepath.Join(l.Dir, ".paisans")); !os.IsNotExist(err) {
-		t.Fatalf("Current made the state directory: %v", err)
+		t.Fatalf("HeadIs made the state directory: %v", err)
 	}
 	published, _, err := alice.publish(t, l, reach(sites, "home-a"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sha, rev, err := l.Current(); sha != published || rev != 1 || err != nil {
+	if sha, rev, err := l.HeadIs(f); sha != published || rev != 1 || err != nil {
 		t.Fatalf("published: %q %d %v, want %s at revision 1", sha, rev, err, published)
 	}
-	if err := l.WriteFiles(edit(f, "2", map[string]string{"alice": alice.pub})); err != nil {
-		t.Fatal(err)
-	}
-	if sha, rev, err := l.Current(); sha != "" || rev != 0 || err != nil {
+	if sha, rev, err := l.HeadIs(edit(f, "2", map[string]string{"alice": alice.pub})); sha != "" || rev != 0 || err != nil {
 		t.Fatalf("edited: %q %d %v", sha, rev, err)
 	}
 }
@@ -520,7 +510,7 @@ func TestPublishSignsThroughTheAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := gather(l, reach(sites, "home-a"), 1, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
+	g, err := gather(l, reach(sites, "home-a"), testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
 	if err != nil || !g.Verdict.Trusted[sha] || !g.Versions[sha].Signed {
 		t.Fatalf("verdict %+v %v", g.Verdict, err)
 	}
@@ -550,7 +540,7 @@ func TestGatherRefusesARollbackTheWorkstationRemembers(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(l.Dir, ".paisans", "store.git")); err != nil {
 		t.Fatal(err)
 	}
-	g, err := gather(l, reach(sites, "home-b"), 2, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
+	g, err := gather(l, reach(sites, "home-b"), testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
 	var rb *RollbackError
 	if !errors.As(err, &rb) || rb.Revision != 1 || rb.SHA != v1 || rb.SeenRevision != 2 || rb.SeenSHA != v2 {
 		t.Fatalf("got %v", err)
@@ -577,7 +567,7 @@ func TestGatherSyncsOnlyWhenAsked(t *testing.T) {
 	}
 	l := Local{Dir: t.TempDir()}
 	for _, sync := range []bool{false, true} {
-		g, err := gather(l, reach(sites, "home-a"), 1, testID, Anchor{}, GatherOptions{Sync: sync}, pull)
+		g, err := gather(l, reach(sites, "home-a"), testID, Anchor{}, GatherOptions{Sync: sync}, pull)
 		if err != nil || g.Synced != sync {
 			t.Fatalf("sync %v: %+v %v", sync, g, err)
 		}
@@ -624,7 +614,7 @@ func TestForgedVersionsAreNeverHeads(t *testing.T) {
 	}
 	one := forge(t, sites["home-a"], mallory, v1, 2, 1)
 	chain := forge(t, sites["home-a"], mallory, v1, 2, 4)
-	g, err := gather(l, reach(sites, "home-a"), 1, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
+	g, err := gather(l, reach(sites, "home-a"), testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -657,7 +647,7 @@ func TestAGatherCarriesTheSeenChangeAndRecordSeenWritesIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	fresh := Local{Dir: t.TempDir()}
-	g, err := gather(fresh, reach(sites, "home-a"), 1, testID, Anchor{Root: v1}, GatherOptions{}, fakePull)
+	g, err := gather(fresh, reach(sites, "home-a"), testID, Anchor{Root: v1}, GatherOptions{}, fakePull)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -677,7 +667,7 @@ func TestAGatherCarriesTheSeenChangeAndRecordSeenWritesIt(t *testing.T) {
 	if err := fresh.raiseSeen(7, strings.Repeat("c", 40)); err != nil {
 		t.Fatal(err)
 	}
-	g, err = gather(fresh, reach(sites, "home-a"), 1, testID, Anchor{Root: v1}, GatherOptions{}, fakePull)
+	g, err = gather(fresh, reach(sites, "home-a"), testID, Anchor{Root: v1}, GatherOptions{}, fakePull)
 	var rb *RollbackError
 	if !errors.As(err, &rb) || g.Seen != nil {
 		t.Fatalf("got %v, carried %+v", err, g.Seen)
@@ -760,7 +750,7 @@ func TestAttestSignsTheHeadAndBecomesTheAnchor(t *testing.T) {
 	}
 	// A workstation that forgot the pin trusts from bob's key alone.
 	os.Remove(filepath.Join(lb.Dir, ".paisans", "config-root"))
-	g, err := gather(lb, all, 2, testID, mustAnchor(t, lb), GatherOptions{}, fakePull)
+	g, err := gather(lb, all, testID, mustAnchor(t, lb), GatherOptions{}, fakePull)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -805,7 +795,7 @@ func TestAttestWritesTheHeadsFilesOnlyFromAPin(t *testing.T) {
 	_, bob, sites, v1, v2, _ := twoVersions(t)
 	all := reach(sites, "home-a", "home-b")
 	l := Local{Dir: t.TempDir()}
-	g, err := gather(l, all, 2, testID, Anchor{Root: v1}, GatherOptions{}, fakePull)
+	g, err := gather(l, all, testID, Anchor{Root: v1}, GatherOptions{}, fakePull)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -837,6 +827,30 @@ func TestAttestWritesTheHeadsFilesOnlyFromAPin(t *testing.T) {
 	}
 }
 
+// An attestation that fails once it is signed returns it with the error,
+// so the caller can take it back: here the head cannot be recorded.
+func TestAttestReturnsWhatItSignedOnALaterFailure(t *testing.T) {
+	_, bob, sites, v1, _, _ := twoVersions(t)
+	all := reach(sites, "home-a", "home-b")
+	l := Local{Dir: t.TempDir()}
+	g, err := gather(l, all, testID, Anchor{Root: v1}, GatherOptions{}, fakePull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A directory where the head is written makes its rename fail.
+	if err := os.MkdirAll(filepath.Join(l.state(headFile), "x"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sha, _, err := attestFrom(l, g, all, v1, bob.pub, bob.key, testNow, fakePush)
+	if err == nil || sha == "" {
+		t.Fatalf("sha %q, err %v", sha, err)
+	}
+	cache, _ := l.Cache()
+	if refs, _ := cache.versionRefs(); !slices.Contains(refs, sha) {
+		t.Fatalf("%s is not the version signed: %v", sha, refs)
+	}
+}
+
 // publish is a gather and publishFrom in one, through pull and push: a
 // command gathers itself, for its own prompts, and calls PublishFrom.
 func publish(l Local, sites map[string]apply.Transport, o publishOpts, pull PullFunc, push PushFunc) (string, []string, error) {
@@ -852,7 +866,7 @@ func publish(l Local, sites map[string]apply.Transport, o publishOpts, pull Pull
 	if err != nil {
 		return "", nil, err
 	}
-	g, err := gather(l, sites, len(sites), local.ID, a, GatherOptions{Sync: true}, pull)
+	g, err := gather(l, sites, local.ID, a, GatherOptions{Sync: true}, pull)
 	if err != nil {
 		return "", nil, err
 	}
@@ -878,7 +892,7 @@ func attest(l Local, sites map[string]apply.Transport, keyLine, signWith string,
 	if err != nil {
 		return "", err
 	}
-	g, err := gather(l, sites, len(sites), local.ID, Anchor{Root: root, Signers: []string{key.Fingerprint}}, GatherOptions{Sync: true}, pull)
+	g, err := gather(l, sites, local.ID, Anchor{Root: root, Signers: []string{key.Fingerprint}}, GatherOptions{Sync: true}, pull)
 	if err != nil {
 		return "", err
 	}
@@ -897,7 +911,7 @@ func TestPublishNextBuildsOnTheRunsVersion(t *testing.T) {
 	all := reach(sites, "home-a", "home-b")
 	first := edit(testFiles(), "1", map[string]string{"alice": alice.pub})
 	l := workstation(t, first)
-	g, err := gather(l, all, 2, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
+	g, err := gather(l, all, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -915,7 +929,7 @@ func TestPublishNextBuildsOnTheRunsVersion(t *testing.T) {
 	if head, _ := l.Head(); head != v2 || !held(t, sites["home-a"], v2) || !held(t, sites["home-b"], v2) {
 		t.Fatalf("head %s, held %v %v", head, held(t, sites["home-a"], v2), held(t, sites["home-b"], v2))
 	}
-	again, err := gather(l, all, 2, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
+	again, err := gather(l, all, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -941,7 +955,7 @@ func TestPublishRefusesPlaintextSecrets(t *testing.T) {
 	all := reach(sites, "home-a", "home-b")
 	first := edit(testFiles(), "1", map[string]string{"alice": alice.pub})
 	l := workstation(t, first)
-	g, err := gather(l, all, 2, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
+	g, err := gather(l, all, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -972,7 +986,7 @@ func TestAPlaintextVersionIsNeverWrittenToDisk(t *testing.T) {
 	all := reach(sites, "home-a", "home-b")
 	t.Setenv(config.PlaintextSecretsVariable, "")
 	l := Local{Dir: t.TempDir()}
-	g, err := gather(l, all, 2, testID, Anchor{Root: v1}, GatherOptions{Sync: true}, fakePull)
+	g, err := gather(l, all, testID, Anchor{Root: v1}, GatherOptions{Sync: true}, fakePull)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -984,9 +998,6 @@ func TestAPlaintextVersionIsNeverWrittenToDisk(t *testing.T) {
 	}
 	if head, _ := l.Head(); head != "" {
 		t.Errorf("head %s", head)
-	}
-	if err := l.WriteIncoming(v2); err == nil {
-		t.Error("WriteIncoming wrote a plaintext version")
 	}
 	if err := l.WriteIncomingFor(v2); err == nil {
 		t.Error("WriteIncomingFor wrote a plaintext version")
@@ -1204,5 +1215,211 @@ func TestPaisansFilesLeavesOutAVersionWithoutOne(t *testing.T) {
 	}
 	if _, ok := files[empty]; ok || string(files[held]) != "p\n" || len(files) != 1 {
 		t.Errorf("files %q", files)
+	}
+}
+
+// A publish on a base the caller names builds on it, whatever the head is,
+// and is refused, as one on the head is, when the sites' newest is another.
+func TestPublishOnTheBaseNamed(t *testing.T) {
+	needTools(t, "git", "ssh-keygen")
+	alice := newOperator(t)
+	sites := storeSites(t, "home-a")
+	all := reach(sites, "home-a")
+	first := edit(testFiles(), "1", map[string]string{"alice": alice.pub})
+	l := workstation(t, first)
+	g, err := gather(l, all, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := publishOpts{keyLine: alice.pub, signWith: alice.key, now: testNow}
+	v1, _, err := publishFiles(l, g, first, all, o, fakePush)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g, err = gather(l, all, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SetHead(strings.Repeat("d", 40)); err != nil {
+		t.Fatal(err)
+	}
+	base := v1
+	second := edit(testFiles(), "2", map[string]string{"alice": alice.pub})
+	o.base = &base
+	v2, _, err := publishFiles(l, g, second, all, o, fakePush)
+	if err != nil || v2 == v1 {
+		t.Fatalf("on %s: %s, %v", v1, v2, err)
+	}
+	if head, _ := l.Head(); head != v2 {
+		t.Errorf("head %s", head)
+	}
+	stale := strings.Repeat("e", 40)
+	o.base = &stale
+	if _, _, err := publishFiles(l, g, edit(testFiles(), "3", map[string]string{"alice": alice.pub}), all, o, fakePush); err == nil || !strings.Contains(err.Error(), "stale") {
+		t.Errorf("on a base the sites' newest is not: %v", err)
+	}
+}
+
+// Mark's undo puts back the records and drops every version a publish
+// added to the store, so a gather finds the head as it was.
+func TestMarkTakesAPublishBack(t *testing.T) {
+	needTools(t, "git", "ssh-keygen")
+	alice := newOperator(t)
+	sites := storeSites(t, "home-a")
+	all := reach(sites, "home-a")
+	first := edit(testFiles(), "1", map[string]string{"alice": alice.pub})
+	l := workstation(t, first)
+	g, err := gather(l, all, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := publishOpts{keyLine: alice.pub, signWith: alice.key, now: testNow}
+	v1, _, err := publishFiles(l, g, first, all, o, fakePush)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g, err = gather(l, all, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull); err != nil {
+		t.Fatal(err)
+	}
+	seen, _ := os.ReadFile(filepath.Join(l.Dir, ".paisans", "config-seen"))
+	undo, err := l.Mark()
+	if err != nil {
+		t.Fatal(err)
+	}
+	noPush := func(apply.Transport, deployment.Deployment, []byte) error { return errors.New("refused") }
+	v2, _, err := publishFiles(l, g, edit(testFiles(), "2", map[string]string{"alice": alice.pub}), all, o, noPush)
+	if err == nil || v2 == "" {
+		t.Fatalf("got %s, %v", v2, err)
+	}
+	if err := undo(v2); err != nil {
+		t.Fatal(err)
+	}
+	if head, _ := l.Head(); head != v1 {
+		t.Errorf("head %s", head)
+	}
+	if b, _ := os.ReadFile(filepath.Join(l.Dir, ".paisans", "config-seen")); string(b) != string(seen) {
+		t.Errorf("seen %q, was %q", b, seen)
+	}
+	cache, _ := l.Cache()
+	if shas, _ := cache.versionRefs(); !slices.Equal(shas, []string{v1}) {
+		t.Errorf("the store names %v", shas)
+	}
+}
+
+// Mark's undo drops only the version the publish committed: one another
+// gather brought into the store meanwhile stays. A first version taken back
+// leaves no root and no signing key recorded.
+func TestMarkDropsOnlyTheCommittedVersion(t *testing.T) {
+	needTools(t, "git", "ssh-keygen")
+	alice := newOperator(t)
+	sites := storeSites(t, "home-a")
+	all := reach(sites, "home-a")
+	first := edit(testFiles(), "1", map[string]string{"alice": alice.pub})
+	l := workstation(t, first)
+	g, err := gather(l, all, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	undo, err := l.Mark()
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := publishOpts{keyLine: alice.pub, signWith: alice.key, now: testNow}
+	noPush := func(apply.Transport, deployment.Deployment, []byte) error { return errors.New("refused") }
+	v1, _, err := publishFiles(l, g, first, all, o, noPush)
+	if err == nil || v1 == "" {
+		t.Fatalf("got %s, %v", v1, err)
+	}
+	if root, _ := l.Root(); root != v1 {
+		t.Fatalf("root %q", root)
+	}
+	// What a concurrent gather brought in: another version, named.
+	cache, _ := l.Cache()
+	other, err := cache.Commit(edit(testFiles(), "other", map[string]string{"alice": alice.pub}), nil, 1, alice.key, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := undo(v1); err != nil {
+		t.Fatal(err)
+	}
+	root, _ := l.Root()
+	key, _ := l.SigningKey()
+	head, _ := l.Head()
+	if root != "" || key != "" || head != "" {
+		t.Errorf("root %q, key %q, head %q left", root, key, head)
+	}
+	if shas, _ := cache.versionRefs(); !slices.Equal(shas, []string{other}) {
+		t.Errorf("the store names %v, want only %s", shas, other)
+	}
+}
+
+// A publish whose record fails after it committed returns the version with
+// its error, so undo drops exactly it: the store names no orphan, head and
+// seen are as they were, and the next publish is the one version on the
+// sites, no fork. Given "", undo drops nothing and names what the store
+// gained.
+func TestMarkDropsAVersionCommittedBeforeAFailure(t *testing.T) {
+	needTools(t, "git", "ssh-keygen")
+	alice := newOperator(t)
+	sites := storeSites(t, "home-a")
+	all := reach(sites, "home-a")
+	first := edit(testFiles(), "1", map[string]string{"alice": alice.pub})
+	l := workstation(t, first)
+	g, err := gather(l, all, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	undo, err := l.Mark()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The root cannot be written over a directory of its name: the first
+	// version's SetRoot fails after its commit.
+	if err := os.MkdirAll(filepath.Join(l.Dir, ".paisans", "config-root"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	o := publishOpts{keyLine: alice.pub, signWith: alice.key, now: testNow}
+	sha, _, err := publishFiles(l, g, first, all, o, fakePush)
+	if err == nil || sha == "" {
+		t.Fatalf("got %q, %v", sha, err)
+	}
+	if err := undo(sha); err != nil {
+		t.Fatal(err)
+	}
+	cache, _ := l.Cache()
+	if shas, _ := cache.versionRefs(); len(shas) != 0 {
+		t.Errorf("the store names %v", shas)
+	}
+	if head, _ := l.Head(); head != "" {
+		t.Errorf("head %s", head)
+	}
+	if rev, _, _ := l.Seen(); rev != 0 {
+		t.Errorf("seen %d", rev)
+	}
+	again := edit(testFiles(), "2", map[string]string{"alice": alice.pub})
+	v, _, err := publishFiles(l, g, again, all, o, fakePush)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shas, _ := cache.versionRefs(); !slices.Equal(shas, []string{v}) {
+		t.Errorf("the store names %v, want only %s", shas, v)
+	}
+	if held, _ := sites["home-a"].repo.versionRefs(); !slices.Equal(held, []string{v}) {
+		t.Errorf("home-a holds %v, want only %s", held, v)
+	}
+
+	// undo("") leaves what the store gained, and says so.
+	undo, err = l.Mark()
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := cache.Commit(edit(testFiles(), "other", map[string]string{"alice": alice.pub}), []string{v}, 2, alice.key, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := undo(""); err == nil || !strings.Contains(err.Error(), other) {
+		t.Errorf("undo(\"\") = %v", err)
+	}
+	if shas, _ := cache.versionRefs(); !slices.Contains(shas, other) {
+		t.Errorf("dropped %s", other)
 	}
 }

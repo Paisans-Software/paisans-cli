@@ -55,6 +55,7 @@ func runMeshRekey(args []string) error {
 	fs := newFlagSet("mesh rekey", flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
+	id := idFlag(fs)
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually rekey, one site at a time, stopping at the first gate that fails")
 	all := fs.Bool("all", false, "rekey every site the configuration declares, in its order")
@@ -72,6 +73,9 @@ func runMeshRekey(args []string) error {
 		return &ui.Problem{Hint: "--all takes no site", Explain: "Name the sites to rekey, or pass --all for every one. Got " + strings.Join(sites, " ") + " too."}
 	case !*all && len(sites) == 0:
 		return &ui.Problem{Hint: "mesh rekey needs a site", Explain: "Name the sites to rekey, Eg: " + progname.Cmd() + " mesh rekey home-a, or pass --all for every one."}
+	}
+	if _, err := ensureDraft(*configPath, *id); err != nil {
+		return err
 	}
 	cfg, err := config.Load(*configPath)
 	if err != nil {

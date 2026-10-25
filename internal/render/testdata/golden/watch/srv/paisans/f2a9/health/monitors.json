@@ -181,6 +181,53 @@
       "status_page_excluded": true
     },
     {
+      "name": "digest — public",
+      "monitor_type": "active",
+      "url": "https://digest.example.org/healthz",
+      "method": "GET",
+      "check_type": "status",
+      "expected_status": "200",
+      "follow_redirects": false,
+      "interval_seconds": 60,
+      "timeout_ms": 10000,
+      "failure_threshold": 2,
+      "status_page_excluded": false
+    },
+    {
+      "name": "digest — direct (home-a)",
+      "monitor_type": "active",
+      "url": "http://10.44.0.1:8083/healthz",
+      "method": "GET",
+      "check_type": "status",
+      "expected_status": "200",
+      "follow_redirects": false,
+      "request_headers": {
+        "Host": "digest.example.org",
+        "X-Forwarded-Proto": "https"
+      },
+      "interval_seconds": 60,
+      "timeout_ms": 10000,
+      "failure_threshold": 2,
+      "status_page_excluded": true
+    },
+    {
+      "name": "digest — direct (home-b)",
+      "monitor_type": "active",
+      "url": "http://10.44.0.2:8083/healthz",
+      "method": "GET",
+      "check_type": "status",
+      "expected_status": "200",
+      "follow_redirects": false,
+      "request_headers": {
+        "Host": "digest.example.org",
+        "X-Forwarded-Proto": "https"
+      },
+      "interval_seconds": 60,
+      "timeout_ms": 10000,
+      "failure_threshold": 2,
+      "status_page_excluded": true
+    },
+    {
       "name": "gate — public",
       "monitor_type": "active",
       "url": "https://gate.example.org/ping",

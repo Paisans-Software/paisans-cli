@@ -1,4 +1,4 @@
-# The fixture deployment. It exercises both placements: four clustered apps
+# The fixture deployment. It exercises both placements: five clustered apps
 # and five pinned, on four sites with three stable endpoints. It is validated
 # before it is rendered (see fixture() in render_test.go), so it is a
 # configuration an operator could actually have written.
@@ -183,6 +183,11 @@ apps:
         # Be kind
 
         To each other.
+  # The weekly digest, which reads talk's database through a read only role.
+  digest:
+    blueprint: engagement
+    hostname: digest.example.org
+    placement: cluster
   health:
     blueprint: uptime
     hostname: health.example.org

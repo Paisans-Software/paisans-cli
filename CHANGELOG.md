@@ -10,6 +10,34 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+## [0.3.0-rc.9] - 2026-10-25
+
+### Added
+
+- A homeserver's `hostnames.wellknown` may be another app's own hostname, Eg: the account app on the apex; the gateway sends `/.well-known/matrix/*` there to the homeserver and everything else to that app.
+- A reserved `engagement` blueprint runs the weekly digest email: it reads a clustered Mbin through a read only `<app>_reader` role, and `validate` and `secrets rotate` cover it.
+- `operator add` declares an operator in `paisans-stack.yaml` and names them in the chosen sites' `ssh.keys`, asking at a terminal and taking `--name`, `--email`, `--key` and `--site` or `--all-sites` without one.
+- `operator invite` writes a signed invite, `operator register --invite` answers it with a signed request and the operator's age key, and `operator add --request` declares them and re-encrypts the secrets.
+- `operator register` without files joins a pending invite, or the one `--id` names, recovering the deployment from the invite's root and signing the attestation; each deployment's answers name the age key first bound.
+- `operator age-key` makes or shows the operator's age key for a deployment.
+- `--site` of `doctor` and `operator add`, `--only` and `--recreate` of `deployment apply`, `--replaced` of `secrets rotate` and `--name` of `dns prune` take several values separated by commas.
+- `deployment apply` shows, before its review, how the configuration differs from the sites' newest version: `paisans-stack.yaml` as a diff, the secrets by key name only.
+- `deployment apply` and `pull` merge a draft behind the sites forward from its "drafted from" line, keeping the draft's value on conflicts; the review flags undone changes; `checkout --head` writes another trusted head.
+
+### Changed
+
+- Each deployment has one system copy in the data directory, the only state trusted; a folder holds just a draft of the three files, and writers start one there from the system copy.
+
+### Fixed
+
+- `--age-private-key-file` refuses a path inside a git repository that does not ignore it, and accepts one in a directory holding no `paisans-stack.yaml`, as `operator register --invite` runs in.
+- The visibility gate keeps sessions in a Valkey beside it, so a refreshed session survives the gateway's `forward_auth` instead of signing members out an hour after sign in, mid-form.
+
+### Removed
+
+- `deployment apply`, `publish`, `pull`, `recover` and `operator register` no longer ask for `partial` when few sites answer; each goes ahead on whichever sites do.
+- `create` no longer writes a `# Written by paisans <version>` line atop `paisans-stack.yaml`; each saved version's history records the build that applied it.
+
 ## [0.3.0-rc.8] - 2026-10-23
 
 ### Fixed
@@ -274,7 +302,8 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.
 - The gateway refuses any request to Pocket ID that carries an `X-API-Key` header with 403, so Pocket ID's API keys work only on the mesh.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.8...develop
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.9...develop
+[0.3.0-rc.9]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.8...v0.3.0-rc.9
 [0.3.0-rc.8]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.7...v0.3.0-rc.8
 [0.3.0-rc.7]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.6...v0.3.0-rc.7
 [0.3.0-rc.6]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.5...v0.3.0-rc.6

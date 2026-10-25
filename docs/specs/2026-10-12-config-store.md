@@ -88,8 +88,8 @@ can forge.
 
 **The anchor** is the newest version signed by the operator's own SSH key, the
 one `paisans admin register` recorded (below), or a root hash the operator pins
-with `--root <hash>`. A workstation that has pulled before keeps both in
-`.paisans/`. On a workstation that records no key, a pull, log or recovery
+with `--root <hash>`. A workstation keeps both in the deployment's system copy
+(`docs/specs/2026-10-24-system-copy.md`), never in the folder of a draft. On a workstation that records no key, a pull, log or recovery
 anchors on the public key the operator names with `--key <path.pub>`. A
 pinned root anchors alone; `--key` is then ignored, and the run notes it. A
 named key carries no pin: it may be one a later version removed, and an empty
@@ -107,7 +107,7 @@ for `--root`. When every site that answers serves an older incarnation, a
 recovery with `--key` can land on a genuine version the key signed there,
 and the root it pins is that incarnation's. So a recovery with `--key` prints
 the full hash of the root it pins and asks the operator to confirm it with
-another operator, against their `.paisans/config-root` or a root's line of
+another operator, against the root their system copy pins or a root's line of
 their `paisans deployment log`, before applying.
 
 A workstation with a root pinned checks one thing more: when the sites serve
@@ -172,11 +172,12 @@ a host:
   which another admin publishes.
 * It gathers, then signs an **attestation**: a version whose tree is exactly the
   head's and whose only parent is the head, one revision on. It records the key
-  in `.paisans/signing-key` and the attestation as the anchor.
-* It attests only a head whose three files equal the operator's local files,
-  which are the copy they already trust; otherwise it refuses and shows the
-  difference. On a workstation with a pinned root it may attest the head the pin
-  leads to.
+  as the system copy's signing key and the attestation as the anchor.
+* It attests only a head whose three files equal the system copy's, which is
+  the copy the workstation already trusts; otherwise it refuses and shows the
+  difference. A draft is neither compared nor touched. With a pinned root and
+  no system copy here, it attests the head the pin leads to and makes the
+  system copy from it.
 
 `config publish` and `apply` sign with the recorded key, so after `admin
 register` every later version is the operator's own anchor as well.
@@ -189,7 +190,8 @@ back old secrets, undoing a `secrets rotate` or a `mesh rekey`. No signature can
 prove a version is the newest; these make an old one visible:
 
 * **The workstation remembers.** Nothing older than its anchor is ever a head,
-  and it records the newest revision it has seen in `.paisans/config-seen` and
+  and it records the newest revision it has seen in the system copy's
+  `config-seen` and
   refuses a head with a lower one unless the operator types `rollback`. The
   record is a file of its own, not part of the cache (`store.git`), because the
   cache can be deleted and gathered again and the memory must survive that. A
@@ -201,12 +203,6 @@ prove a version is the newest; these make an old one visible:
   and lists, and a dry run reports the rollback and what `--execute` will ask.
   A root pinned for one run with `--root` and not recorded does not raise the
   record, so a mistaken pin cannot poison it.
-* **A majority of sites.** A pull, a recovery, `admin register`, the publish of
-  a first version and `apply --execute` report how many sites they reached
-  directly, and with fewer than a majority (no more than half) the operator
-  types `partial` to go on. A first version, with no trusted head among the
-  sites that answered, starts the history, and a workstation reaching only an
-  empty site must not start a second one silently.
 * **Hosts are witnesses.** Each host's grant record
   (docs/specs/2026-10-11-config-review.md) also holds the hash and revision of
   the version last applied to it, and `apply` refuses to apply an older revision
@@ -249,23 +245,24 @@ with the rest.
 
 ## Commands
 
-Local state is four files beside `paisans-stack.yaml`, in `.paisans/`: `config-root`,
-the pinned root; `config-head`, the version the local files started from;
+Local state lives in the deployment's system copy, under the Paisans data
+directory, and never in the folder of a draft
+(`docs/specs/2026-10-24-system-copy.md`). It is four files beside the system
+copy's `paisans-stack.yaml`, in its `.paisans/`: `config-root`,
+the pinned root; `config-head`, the version the system copy's files are;
 `config-seen`, the newest revision this workstation has seen (see *Rollback*);
 and `signing-key`, the operator's public key that `operator register`, or a
 pull or recovery that anchored on the key `--key` named, recorded. The anchor
 is the newest version that key signed. A cache of the versions gathered
 (`store.git`) and the files a refused pull sets aside (`incoming/`) sit beside
-them.
+them, with `arrivals`, when each version first reached this workstation.
 
-All of it but `config-root` is per-operator, and the `.gitignore` paisans
-writes in `.paisans/` keeps it out of a repository the admins share:
-`store.git/`, `incoming/`, `signing-key`, `config-head` and `config-seen`. The
-signing key is the one that matters: a workstation that checked out another
-admin's would start its trust from their signature rather than its own.
-`config-head` and `config-seen` describe this workstation's files and gathers.
-`config-root` may be committed, so the admins share one pin. A `.gitignore`
-already in `.paisans/` is the operator's own and is left as it is.
+All of it but `config-root` is per-operator: the signing key above all, since
+a workstation that took another admin's would start its trust from their
+signature rather than its own. `config-head`, `config-seen` and `arrivals`
+describe this workstation's files and gathers. The `.gitignore` paisans writes
+in `.paisans/` lists them, for a system copy whose directory is ever
+committed.
 
 The three files of a version have fixed names, so `--config` must name a file
 called `paisans-stack.yaml`, with `secrets.enc.yaml` and `.sops.yaml` beside it.
@@ -286,21 +283,19 @@ the same way before deciding anything:
 3. **Union, then verify.** Every copy is combined before the rules run, and only
    then is the head chosen.
 
-The majority in *Rollback* counts only sites reached directly over ssh. A
-version that arrived through another site's sync counts toward finding the
-newest, but "these peers answered" is that site's word, and a site that lies
-could inflate it.
+A command goes ahead on whichever sites answer, once at least one does, and
+reports each that did not; one that reaches no site is refused.
 
 | Command | Does |
 |---|---|
-| `paisans admin register` | finds the operator's key, gathers, and signs an attestation of the head when it equals the local files; records the key and the anchor (above) |
-| `paisans config publish` | commits the three files with the base as parent, signs with an admin key from the ssh-agent, and pushes a `git bundle` to every site it reaches over the existing ssh transport, where `sudo git fetch` stores it. Refused: the base is not the sites' head, including when the workstation has no base and the sites hold versions (a second root would result; run `config pull` first); no loaded key belongs to an admin listed in the parent; no site answers |
+| `paisans admin register` | finds the operator's key, gathers, and signs an attestation of the head when it equals the system copy's files; records the key and the anchor (above) |
+| `paisans config publish` | commits the draft's three files with the base as parent, signs with an admin key from the ssh-agent, and pushes a `git bundle` to every site it reaches over the existing ssh transport, where `sudo git fetch` stores it. Refused: the base is not the sites' head, including when the workstation has no base and the sites hold versions (a second root would result; run `config pull` first); no loaded key belongs to an admin listed in the parent; no site answers |
 | `paisans apply`, with or without `--execute` | gathers before the review, and refuses a fork and a stale base; it needs the standard file names beside `paisans-stack.yaml` and an admin key in the ssh-agent even for a dry run, since it checks what `--execute` would sign with |
 | `paisans apply --execute` | after approval, publishes, then applies, so the store shows the declared state even when the apply stops part way; the version published is the very bytes apply loaded and applies, never a second read of the files; writes the version into each host's grant record; refuses an older revision than a host's record, or another version at the same revision, unless `rollback` is typed |
-| `paisans config pull` | gathers and verifies; with no local edits, moves the files to the head; with local edits on an older base, refuses, writes the head's files to `.paisans/incoming/` and shows the difference |
+| `paisans config pull` | gathers and verifies, moves the system copy to the head, and merges the head into the draft from the version the draft was drafted from (`docs/specs/2026-10-24-system-copy.md`) |
 | `paisans config publish --merge` | a version whose parents are every head, after the operator has merged by hand; it resolves a fork and an incoming change alike |
 | `paisans config log` | every version: revision, signer, date, and which sites hold it |
-| `paisans config recover --from <user@host>...` | onto a workstation with nothing: gathers from the named hosts and every site the trusted heads name, verifies from the key `--key` names or `--root`, reports how many sites answered and which key anchored the gather, and writes the three files and the state files, the anchor's signer among them. A host's registry may name more than one deployment; `--id` names the one to recover, and a recovery that finds several without it refuses and lists them |
+| `paisans config recover --from <user@host>...` | onto a workstation with no system copy of the deployment: gathers from the named hosts and every site the trusted heads name, verifies from the key `--key` names or `--root`, reports how many sites answered and which key anchored the gather, makes the system copy with the state files, the anchor's signer among them, and starts a draft of the three files. A host's registry may name more than one deployment; `--id` names the one to recover, and a recovery that finds several without it refuses and lists them |
 
 **Publishing in `apply`.** `apply` publishes the version it applies and refuses
 when the version reaches no site, naming `host prepare` for a site that has no
@@ -320,18 +315,16 @@ so does every later step.
 
 **A fork on recovery.** `recover` never picks between two heads by order,
 including heads a named key's versions lead to. With a
-fork it writes each head's files to `.paisans/incoming/<sha>/` and refuses, and
-the operator merges by hand and publishes with `--merge`.
+fork it refuses and writes nothing; an operator who holds the files merges the
+heads by hand and publishes with `--merge`.
 
 **Secrets conflicts.** Two edits of the encrypted file cannot be merged as text.
-`pull` decrypts both sides and compares them key by key: changes to different
-keys merge; two changes to one key are refused, naming the key and no value. The
-pull takes neither side's value by itself: to take the head's value the operator
-sets that key locally to it (`paisans secrets set` does it for a key it accepts)
-and pulls again. To keep the local value, the operator takes the head's value
-first so the pull can merge the rest, pulls, then sets the key back to their
-value and publishes; a `pocket_id_groups` key, which `paisans secrets set` does
-not accept, is edited with `sops`.
+A merge forward decrypts the base, the draft and the head and compares them key
+by key: changes to different keys merge; two different changes to one key are
+a conflict, named by key and no value, where the draft keeps its own value. To
+take the head's value instead the operator sets that key in the draft
+(`paisans secrets set` does it for a key it accepts); a `pocket_id_groups` key,
+which `paisans secrets set` does not accept, is edited with `sops`.
 
 ## Failures
 
@@ -351,6 +344,6 @@ not accept, is edited with `sops`.
   publish after some sites failed.
 * The daemon and timer units in the golden render tree.
 * Gathering: a site reached directly, a version arriving only through another
-  site's sync, the majority counting only direct reaches.
+  site's sync.
 * The witness refusal and `rollback`, through the fake terminal.
 * Each secrets merge case.

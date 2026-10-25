@@ -18,7 +18,7 @@ func TestRunStorageRotateKeyRequiresAnApp(t *testing.T) {
 // reached: the rotation deletes a Garage key by the previous ID.
 func TestRunStorageRotateKeyRefusesAMalformedKeyBeforeReachingAHost(t *testing.T) {
 	err := runStorageRotateKey([]string{
-		"--config", filepath.Join("..", "..", "internal", "render", "testdata", "deployment.yaml"),
+		"--config", fixtureDraft(t, fixtureDeploymentID),
 		"--secrets", filepath.Join("testdata", "garage-key-is-malformed-secrets.yaml"),
 		"--app", "talk",
 	})

@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -91,8 +90,8 @@ func TestRemainsShowTheirObjectWithoutVerbose(t *testing.T) {
 }
 
 // The client of an app gone from paisans-stack.yaml is looked for by the
-// name in the newest version of the workstation's configuration history that
-// declares the app, which is its display_name when that version sets one.
+// name in the newest version of the system copy's configuration history
+// that declares the app, which is its display_name when that version sets one.
 // Without one, it is the name the current configuration gives, and a
 // recorded client makes that a warning.
 func TestRemovedClientNameIsTheLastDeclaredOne(t *testing.T) {
@@ -101,6 +100,7 @@ func TestRemovedClientNameIsTheLastDeclaredOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	withDataDir(t)
 	rec := &ui.Recorder{}
 	name, from, err := removedClientName(rec, fixtureConfig(), cfg, "talk", "c-1")
 	if name != "talk" || !strings.Contains(from, "holds no configuration history") || err != nil {
@@ -111,10 +111,8 @@ func TestRemovedClientNameIsTheLastDeclaredOne(t *testing.T) {
 	}
 	body := strings.Replace(fixtureAs(t, pub), "    blueprint: mbin\n", "    blueprint: mbin\n    display_name: Test Talk\n", 1)
 	files := snapshotted(configstore.Files{Paisans: []byte(body), Secrets: []byte("s\n"), SOPS: []byte("creation_rules: []\n")})
-	l := configstore.Local{Dir: t.TempDir()}
-	if err := l.WriteFiles(files); err != nil {
-		t.Fatal(err)
-	}
+	w := newWorkstation(t, files)
+	l := w.sys
 	cache, err := l.Cache()
 	if err != nil {
 		t.Fatal(err)
@@ -126,7 +124,7 @@ func TestRemovedClientNameIsTheLastDeclaredOne(t *testing.T) {
 	if err := l.SetHead(sha); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(l.Dir, config.FileName)
+	path := w.config()
 	rec = &ui.Recorder{}
 	name, from, err = removedClientName(rec, path, cfg, "talk", "c-1")
 	if name != "Test Talk" || !strings.Contains(from, sha[:12]) || err != nil {
@@ -164,4 +162,5 @@ func TestRemovedClientNameIsTheLastDeclaredOne(t *testing.T) {
 	if len(rec.Events) != 0 {
 		t.Errorf("warned with no client recorded: %+v", rec.Events)
 	}
+	noFolderState(t, w.dir)
 }

@@ -79,10 +79,12 @@ func TestAdviceNamesTheInvokedCommand(t *testing.T) {
 	if got := resumeAdvice(); got != "Run paisans-test deployment apply --execute again to resume." {
 		t.Errorf("resumeAdvice() = %q", got)
 	}
-	if got := noAnchorPublish(); !strings.Contains(got, "with paisans-test deployment pull --key <path.pub>") || !strings.Contains(got, "run paisans-test operator register") {
-		t.Errorf("noAnchorPublish() = %q", got)
+	if got := noAnchorDeploy(fixtureDeploymentID); !strings.Contains(got, "paisans-test deployment recover --from") || !strings.Contains(got, "paisans-test operator register --execute") {
+		t.Errorf("noAnchorDeploy() = %q", got)
 	}
-	if err := runDeploymentCheckout(nil); err == nil || !strings.Contains(err.Error(), "as paisans-test deployment list prints them") {
+	withDataDir(t)
+	t.Chdir(t.TempDir())
+	if err := runDeploymentCheckout(nil); err == nil || !strings.Contains(err.Error(), "paisans-test deployment recover") {
 		t.Errorf("deployment checkout with no deployment: %v, want advice naming paisans-test", err)
 	}
 }

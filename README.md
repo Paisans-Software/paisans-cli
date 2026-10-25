@@ -543,6 +543,51 @@ that Pocket ID agrees with the `operators:` section (see *The operator
 reconciler checks Pocket ID against the operators*).
 `docs/specs/2026-10-14-operators-and-management.md` is the approved design.
 
+**`paisans operator add` declares one more operator.** It writes their entry
+under `operators` and their name in the `ssh.keys` of the sites they may log
+in to, and leaves every other line of `paisans-stack.yaml` as it was. At a
+terminal it asks `create`'s questions for whatever its flags did not give;
+without one it takes `--name`, `--email`, `--key` and `--site` (one site,
+or several separated by commas) or `--all-sites` and asks nothing. It reaches
+no host: the next `deployment apply --execute` gives them their sites and their
+Pocket ID account. Their age public key goes into `.sops.yaml` by hand,
+followed by `sops updatekeys secrets.enc.yaml`.
+
+**A new operator joins by a signed invite, in five steps,** once the two hold
+each other's SSH public key:
+
+1. The existing operator runs `paisans operator invite carol --key carol.pub >
+   carol.invite`. The invite names the deployment, its domain, the root of the
+   history they trust and each site, and holds nothing secret.
+2. The new operator runs `paisans operator register --invite carol.invite
+   --inviter-key wash.pub > carol.request`, in any directory. It checks the
+   invite against the inviter's key, takes their age key for the deployment's
+   id from a `SOPS_AGE_*` variable, an existing keystore item or
+   `--age-private-key-file`, or else makes a new keystore item, and writes a
+   signed request. The invite waits as pending, and the age key stays bound to
+   the deployment, in the workstation's data directory beside its saved
+   deployments: `invites/<deployment-id>/` and `age/<deployment-id>.recipient`.
+   Answering again names the bound key, wherever it is found.
+3. The existing operator, or any other, runs `paisans operator add --request
+   carol.request`. It checks the request and its invite, declares the operator,
+   names their age key in `.sops.yaml` and re-encrypts `secrets.enc.yaml` to
+   it, with the plaintext unchanged. Accepting the same request again changes
+   only what is missing.
+4. The inviter runs `paisans deployment apply --execute`, which gives the new
+   operator their sites and their Pocket ID account.
+5. The new operator runs `paisans operator register --execute` in an empty
+   directory, which takes the pending invite, or the one `--id <deployment-id>`
+   names when several are pending. It recovers the deployment from the invite's
+   root and sites, trusting no other root, signs their attestation, and says
+   whether the secrets open with their age key, and if not, whose step is
+   missing.
+
+Neither party edits `.sops.yaml` or runs `sops`, and both files travel over
+any channel since each is signed. `paisans operator age-key` shows an
+operator's age public key for a deployment, making it first when there is none.
+See *`paisans operator add`*, *`paisans operator invite`* and *`paisans operator
+register`* in [docs/commands.md](docs/commands.md).
+
 ### Who manages accounts: `management`
 
 Signup, bans and a member's way back in after a lost link are managed in one
@@ -813,6 +858,92 @@ version without anyone numbering it.
 |---|---|---|
 | `apps.<account>.email_hash_key` | keys the HMAC of a declined address, so a copy of the database alone cannot test a guessed address | `secrets rotate` refuses it and `--all` keeps it; only `paisans secrets set` changes it, and that forgets every declined address |
 | `apps.<account>.session_key` | signs the service's sign-in cookie | signs everyone out of the account service and nothing else |
+
+### The engagement digest
+
+The `engagement` blueprint runs [`Paisans-Software/paisans-engagement-service`](https://github.com/Paisans-Software/paisans-engagement-service),
+which emails each member a weekly digest of what happened in the community's
+Mbin. The design is in `docs/specs/2026-10-24-engagement-digest.md`.
+
+* **When and to whom.** It sends on Monday at 08:00, covering the seven days
+  before. The time is the host's local time, not UTC: the container mounts
+  `/etc/localtime` read only, because a container otherwise runs in UTC and
+  nothing else in the toolkit sets a zone. No setting changes the day or the
+  hour, so every deployment has one schedule. A recipient is a local Mbin
+  account with a verified address; banned, deleted, unverified, bot and
+  remote accounts get nothing, and neither does an address that unsubscribed.
+  On a deployment with several apps sites the service runs on each of them,
+  and each member is mailed once: every copy claims a member's week in the
+  service's own database before sending, so only one sends it.
+* **How it reads Mbin.** Through a read only Postgres role, `<app>_reader`
+  (`digest_reader` for an app named `digest`), which `deployment apply` creates
+  beside the app's own role. The role has `SELECT` on named columns of named
+  tables and nothing else, so it cannot write to Mbin's database, and it
+  cannot see a session, a token, a password hash, a TOTP secret, a key or an
+  IP address: those tables and columns are never in the list. The list is in
+  `internal/apply/sourcegrant.go`, and the service's own list of what its
+  queries read must match it.
+* **When the grant runs.** After every app stack on the site is healthy,
+  Mbin's included, because the tables it names exist only once Mbin has
+  started and run its migrations. On a new deployment Mbin has not done that
+  at the first apply, so the grant is reported as owed, nothing is granted, and
+  the next `deployment apply` of the site that leads Patroni grants it.
+  Until then the digest cannot read Mbin, and the first digest follows that
+  second apply. Every apply of the leader's site grants again, even one with
+  nothing else to do, because a Mbin upgrade changes no file on a leader's
+  site that holds no apps. A column the list names and Mbin lacks fails that
+  apply, so a Mbin release that changes its schema is noticed here and not in
+  a digest that silently misses a week; the failure says to remove the
+  engagement app or hold Mbin on its previous release until the list matches.
+* **What the gateway forwards.** `/u/*`, the unsubscribe links, and
+  `GET /healthz`, which answers ok or 503, for the monitor's public check;
+  everything else on the hostname answers 404. The route has no Pocket ID
+  gate (`gateable: false`) because a member clicking from an inbox may not be
+  signed in, and the signed token in the link is what names them.
+
+```yaml
+apps:
+  talk:
+    blueprint: mbin
+    hostname: talk.example.org
+    placement: cluster
+  digest:
+    blueprint: engagement
+    hostname: digest.example.org
+    placement: cluster
+```
+
+The service's own database, in the cluster's Postgres, holds only
+unsubscribes and the record of what was sent to each member each week. A
+member is identified in it, and in every token, by Mbin's `oauth_oidc_id`,
+the member's Pocket ID subject. It reads the deployment's `smtp:` block like
+any other app that sends mail (see *Mail is declared once and overridden per
+app*).
+
+### What `validate` refuses for the digest
+
+| Rule | When |
+|---|---|
+| `engagement-one-per-deployment` | a second `engagement` app. Refused: the digest would mail every member twice |
+| `engagement-must-be-clustered` | an engagement app that is not `placement: cluster`. Refused: it keeps its state in the cluster's Postgres and must keep sending when a site is lost |
+| `engagement-without-source` | no `mbin` app. Refused: it has nothing to read |
+| `engagement-one-source` | more than one `mbin` app. Refused: it could not tell which community to summarise |
+| `engagement-source-not-clustered` | the `mbin` app is pinned. Refused: the reader role is created in the cluster's Postgres, and a pinned Mbin runs against a Postgres of its own on its site, where no such role exists |
+| `engagement-without-smtp` | the app resolves no SMTP host or `from_address`. Warned: it is an email and cannot send without them |
+
+**Mbin must have `placement: cluster`.** The one-Mbin rule also keeps the
+source unambiguous: the digest reads one database and one community's title.
+
+The core catalog's `foundation.yaml` carries an `engagement` track, the
+service's image. It is optional in a foundation, so a core catalog released
+before it still reads; declaring an engagement app against one without it is
+refused when the stack is rendered, with a message that asks for a catalog
+release that publishes one.
+
+| Secret | What it does | Rotating it |
+|---|---|---|
+| `apps.<engagement>.source_database_password` | the password of `<app>_reader` | `secrets rotate` alters the role on the Patroni leader and re-applies the engagement stack; Mbin never holds it, so its stack is untouched. Reconnects |
+| `apps.<engagement>.digest_signing_key` | signs every unsubscribe link | the service rotates it itself, with a restart. **Every unsubscribe link in an email already sent stops working**, because it was signed with the old key; the next digest carries links signed with the new one |
 
 ## Monitoring
 
@@ -2060,9 +2191,9 @@ The toolkit names no image itself. Every image a deployment runs by default is
 named by the **core catalog**, Paisans-Software/paisans-blueprints: an app's
 in its blueprint, and the toolkit's own (etcd, Spilo, HAProxy, Garage, the
 gateway's Caddy, the heartbeat, Pocket ID and its operator reconciler, the gate,
-the account service and the monitor) in its `foundation.yaml`. Each is a
-**track**: a repository and a tag pattern in which each `*` matches one run of
-digits.
+the account service, the digest and the monitor) in its `foundation.yaml`. Each
+is a **track**: a repository and a tag pattern in which each `*` matches one
+run of digits.
 
 ```yaml
 pocket-id: "ghcr.io/pocket-id/pocket-id:v2.*.*"
@@ -2176,7 +2307,7 @@ The kinds do not share a format, so a key means something different per kind:
 
 | Format | Kinds | File | A key means |
 |---|---|---|---|
-| env | mbin, wikijs, pocket-id, oauth2-proxy, uptime, account | `.env` | the variable name |
+| env | mbin, wikijs, pocket-id, oauth2-proxy, uptime, account, engagement | `.env` | the variable name |
 | ini | writefreely | `config.ini` | `section.key`, exactly one dot |
 | yaml | synapse | `homeserver.yaml` | a nested path, any depth |
 | json | element | `config.json` | a nested path, any depth |
@@ -2641,7 +2772,7 @@ Finishing either command first costs nothing but its resume.
 | `external.smtp_password`, `apps.<app>.smtp_password` | the mail provider, logged in to with the next password from this machine, then from every site running an app that uses it, before any site is handed it | each app that logs in to send mail with it, which takes a `username` | none |
 | `oidc_clients.<app>.client_secret` | Pocket ID | the app | none |
 | `apps.<app>.oauth` (Mbin's OAuth2 unit) | Mbin | Mbin | every API client and app signs in again |
-| Mbin `app_secret`, oauth2-proxy `cookie_secret`, uptime `session_secret`, account `session_key` | the app | the app | signed in browser sessions of that app end |
+| Mbin `app_secret`, oauth2-proxy `cookie_secret` and `session_store_password`, uptime `session_secret`, account `session_key` | the app | the app | signed in browser sessions of that app end |
 | Synapse `mas_signing_key`, `mas_matrix_secret` | MAS, the homeserver | MAS, the homeserver | Matrix sessions end, on the stricter reading |
 | `apps.<app>.s3_access_key_id` and `s3_secret_access_key` | Garage | the app | none |
 | Pocket ID `static_api_key`, uptime `admin_password` | the app | the toolkit, the operator, and the account service, whose stack is re-applied with it | none |
@@ -2885,18 +3016,19 @@ no `username`, such as a test deployment's Mailpit under `security: none`, is
 sent to without logging in, so it takes no password: none is asked for, and
 `secrets rotate --all` leaves out one that is set.
 
-Four blueprints read it (`blueprints.SendsMail`): the account service, which takes it as
-`ACCOUNT_SMTP_*` in its `.env` for its notices to community admins and applicants; the
-uptime monitor, which puts it in its seed file; Pocket ID, which takes it as
-`SMTP_HOST`, `SMTP_PORT`, `SMTP_TLS`, `SMTP_USER`, `SMTP_PASSWORD` and
-`SMTP_FROM` in its `.env` (see *Pocket ID's configuration is rendered from
-paisans-stack.yaml*); and Mbin, which takes it as `MAILER_DSN` and its sender address
-(see *Mbin sends little mail, and says where from*). The password goes into
-that `.env` beside the other credentials it already carries, written 0600 like
-every rendered file that holds a secret, and quoted so that a `$` or a `#` a
-mail provider issued arrives as issued. An `smtp:` block on any other kind is
-refused, `smtp-on-a-kind-without-mail`, because an override nothing reads is
-ignored without a word.
+Five blueprints read it (`blueprints.SendsMail`): the engagement digest, which
+takes it as `ENGAGEMENT_SMTP_*` in its `.env` for the weekly email; the account
+service, which takes it as `ACCOUNT_SMTP_*` in its `.env` for its notices to
+community admins and applicants; the uptime monitor, which puts it in its seed
+file; Pocket ID, which takes it as `SMTP_HOST`, `SMTP_PORT`, `SMTP_TLS`,
+`SMTP_USER`, `SMTP_PASSWORD` and `SMTP_FROM` in its `.env` (see *Pocket ID's
+configuration is rendered from paisans-stack.yaml*); and Mbin, which takes it as
+`MAILER_DSN` and its sender address (see *Mbin sends little mail, and says where
+from*). The password goes into that `.env` beside the other credentials it
+already carries, written 0600 like every rendered file that holds a secret, and
+quoted so that a `$` or a `#` a mail provider issued arrives as issued. An
+`smtp:` block on any other kind is refused, `smtp-on-a-kind-without-mail`,
+because an override nothing reads is ignored without a word.
 
 Two fields mean slightly less to Pocket ID than to the monitor, because of
 what Pocket ID can express (Mbin's own differences are in its section):
@@ -3074,7 +3206,8 @@ account, and writes the public key to `.sops.yaml`. The key is never printed,
 because a secret on a terminal is in a scrollback buffer and this one opens
 every other. With no keystore, `init` refuses unless you name a file with
 `--age-private-key-file <path>`, outside the directory that holds
-`paisans-stack.yaml`, since that directory is usually a git repository.
+`paisans-stack.yaml`, since that directory is usually a git repository, and
+outside any git repository that does not ignore the file.
 `init` names the keystore item or file it kept the key in, without
 `--verbose`, since the operator has to know where the only copy is; with a
 file, it also prints the `export SOPS_AGE_KEY_FILE=` line later commands need.
@@ -3170,11 +3303,12 @@ each app the leftovers belong to, which is the command that takes them off
 
 #### A blueprint can come from a catalog
 
-The blueprints built into the toolkit are the reserved four (`pocket-id`, the
-gate, `account`, `uptime`). The first party ones, `mbin`, `wikijs` and the
-rest, are the **core catalog**'s, which the toolkit fetches at its newest
-release this toolkit reads (see *Images follow tracks*). Any other comes from a **catalog**: a git repository of blueprints the deployment
-declares and pins to a commit, and an app names it qualified:
+The blueprints built into the toolkit are the reserved five (`pocket-id`, the
+gate, `account`, `uptime`, `engagement`). The first party ones, `mbin`, `wikijs`
+and the rest, are the **core catalog**'s, which the toolkit fetches at its
+newest release this toolkit reads (see *Images follow tracks*). Any other comes
+from a **catalog**: a git repository of blueprints the deployment declares and
+pins to a commit, and an app names it qualified:
 
 ```yaml
 catalogs:
@@ -3468,6 +3602,34 @@ that was duplicated. This is easiest to hit because an app can declare
 several: setting one app's `hostname` to the value another app already uses for
 a role reads as two unrelated lines.
 
+**The one shared name is a homeserver's `wellknown` on another app's own
+hostname.**
+
+```yaml
+apps:
+  account:
+    blueprint: account
+    hostname: example.org
+  chat:
+    blueprint: synapse
+    hostname: matrix.example.org
+    hostnames:
+      wellknown: example.org
+```
+
+The name members are known by is usually the apex, and the apex usually
+already belongs to the community's own site. The delegation documents are
+paths under `/.well-known/matrix/` and nothing else, so the gateway renders one
+host block for the name: those paths go to the homeserver's `wellknown`
+snippet, and every other path to the app that holds the name. The shared
+handle is the first in the block, ahead of a gate and its bypasses, because a
+federating server fetching delegation is a machine and will not follow a
+redirect to a passkey prompt. Sharing needs the one Caddy routing both apps,
+so a name an app on a monitor holds is refused, and one name holds one
+homeserver's delegation, because a user identifier names one homeserver.
+Every other second claim, a `wellknown` on the homeserver's own hostname or on
+another app's media or join hostname among them, is still refused.
+
 **For a homeserver, `hostnames.wellknown` is not only routing. It is
 `server_name`.** It becomes the part after the colon in every user identifier
 the homeserver ever mints, and it is written into every room that homeserver
@@ -3669,14 +3831,21 @@ from what nobody wrote.
 
 **Nobody declares the gate.** When any app sets `gated` or `auto_login`, the
 toolkit runs it as an app named `gate`, of blueprint `oauth2-proxy`, at
-`gate.<community.domain>`, pinned to the gateway site. It holds no data, being
-a session cookie and nothing durable, so it sits with the edge it serves: it is
-down only when the gateway is, and that takes every app with it anyway. It is
-one container admitting the `members` group, which fails closed: a session
-outside the group is refused, never waved through. Everything an app gets, it
-gets too: a client at the identity provider, a generated cookie secret, a DNS
-record from `dns init` and a check on the monitor. Its session cookie is scoped
-to the community's domain with a leading dot, so one sign-in covers every app.
+`gate.<community.domain>`, pinned to the gateway site. It holds nothing
+durable, so it sits with the edge it serves: it is down only when the gateway
+is, and that takes every app with it anyway. It is two containers: the gate,
+admitting the `members` group, which fails closed, so a session outside the
+group is refused, never waved through; and a Valkey beside it holding the
+sessions, in memory only. The session cookie carries only a ticket naming a
+session in that store, because a refresh must never have to change the
+cookie: the gateway's `forward_auth` sends none of the gate's response headers
+to the browser, so a changed cookie would never arrive and the next request
+would spend a refresh token the identity provider had already replaced. A
+session lost with the store costs its member one pass through sign in at an
+identity provider that still knows them. Everything an app gets, it gets too:
+a client at the identity provider, generated secrets, a DNS record from
+`dns init` and a check on the monitor. Its session cookie is scoped to the
+community's domain with a leading dot, so one sign-in covers every app.
 Four things follow, and each is refused:
 
 * **Declaring an `oauth2-proxy` app.** The gate is the toolkit's; the apps it
@@ -4316,7 +4485,7 @@ not measured on hosts, and live as named constants in `internal/hostmem`.
 | PostgreSQL, Patroni and HAProxy | 1 GiB | `cluster.sites`: the `data` sites | Spilo's PostgreSQL with its shared buffers and a few connections per app, Patroni's Python process, and HAProxy in front |
 | Garage | 256 MiB | the sites `storage.garage.sites` names, whatever their roles | its metadata database and the buffers of the uploads it is handling |
 | Caddy | 128 MiB | the gateway, and a monitor with `web_server.managed_by: paisans` | the toolkit's Caddy, its certificates and connections |
-| oauth2-proxy | 64 MiB | the gateway the gate app is pinned to, when an app is gated | the visibility gate |
+| oauth2-proxy | 64 MiB | the gateway the gate app is pinned to, when an app is gated | the visibility gate, and its session store, capped at 16 MiB |
 | The uptime monitor | 256 MiB | `monitor` sites | a Node.js process |
 | Pocket ID and an app | 1 GiB | `apps` sites | Pocket ID and one app beside it. Mbin, with its PHP workers and Valkey, or Wiki.js needs more of its own, so an apps site running several needs more than its floor |
 
@@ -4384,7 +4553,7 @@ restore that looks complete until someone goes looking for their account.
 |----------|-------|------------|
 | `paisans-stack.yaml` | topology | nothing knows what to build, unless a site holds a version of it (every site does; see *Every site keeps signed copies of the configuration*) |
 | `secrets.enc.yaml` | credentials | every secret must be regenerated and every OIDC client re-minted, unless a site holds a version of it and an operator's age key still decrypts it |
-| Database dumps / WAL archive | member accounts, posts, settings | the community is empty |
+| Database dumps / WAL archive | member accounts, posts, settings; the digest's database holds only unsubscribes and the per member weekly send record | the community is empty |
 | Object storage | media, uploads, attachments | posts render with broken images |
 
 The config files capture **infrastructure**, not **application state**. Groups,
@@ -4416,8 +4585,8 @@ empty workstation can recover them from any host.
 
 The copies are recovery copies now and are built to become the deployment's
 shared source of truth: every version records its parent, two versions from one
-parent are a fork, and `deployment apply` refuses to run from files older than the sites'
-newest version. The one loss this cannot protect is every operator losing their age
+parent are a fork, and `deployment apply` merges a draft older than the sites'
+newest version forward before it deploys anything. The one loss this cannot protect is every operator losing their age
 key, which is why *Rendered configuration is a build artifact* tells every
 deployment to add a second recipient to `.sops.yaml`.
 
@@ -4452,7 +4621,8 @@ newest version signed by the operator's own SSH key, or a root hash the operator
 pins with `--root`. **A history found only on the sites is never trusted on its
 own, however consistent it looks**, because someone with root on those sites
 could have written it, signed with their own key and listing themselves as an
-operator. The operator's key is the one `.paisans/signing-key` records; on a
+operator. The operator's key is the signing key the deployment's system copy
+records (see *This workstation keeps one system copy of each deployment*); on a
 workstation that records none, a pull, a log or a recovery anchors on the
 public key the operator names with `--key`, which anchors only on versions it
 signed itself, under one root, that the rules below already trust from that
@@ -4499,12 +4669,11 @@ since the file is still encrypted to their key.
 A version that was really published verifies forever, so someone who controls a
 site can delete the newer ones there and serve an old one. Applying it would put
 back old secrets, undoing a `storage rotate-key`. No signature can prove a
-version is the newest, so three memories make an old one visible:
+version is the newest, so two memories make an old one visible:
 
 | Memory | What it does | Why it is there |
 |--------|--------------|-----------------|
-| The workstation | `.paisans/config-seen` holds the newest revision seen; a head with a lower one is refused until the operator types `rollback`, which re-bases the record to the head chosen once the command commits its change. A run that stops, and every dry run, leaves the record as it was | the site the workstation reaches may be the one lying; a record nothing could lower would trap an operator restoring from an old backup, so the typed word lowers it deliberately |
-| A majority of sites | a pull, recovery, registration, the publish of a first version or `deployment apply --execute` counts the sites it reached directly over ssh; with no more than half it asks for `partial` | a lying site can hide newer versions only from a workstation that reaches no honest site, which a majority makes unlikely. A version that arrived through another site's sync counts toward finding the newest, but never toward the majority, since "these peers answered" is that site's word |
+| The workstation | the system copy records the newest revision seen; a head with a lower one is refused until the operator types `rollback`, which re-bases the record to the head chosen once the command commits its change. A run that stops, and every dry run, leaves the record as it was | the site the workstation reaches may be the one lying; a record nothing could lower would trap an operator restoring from an old backup, so the typed word lowers it deliberately |
 | The hosts | each host's grant record also holds the hash and revision of the version last applied to it, and `deployment apply` refuses an older revision, or another version at the same revision, unless the operator types `rollback` | a host that has had a newer version is a witness a deleted ref cannot erase; the same revision under another hash is a version another operator applied there, which this apply would replace |
 
 So a host attacker can roll back only the hosts they hold. What stays is a fresh
@@ -4559,14 +4728,17 @@ and nothing is pruned.
    store: those the configuration names, or, for a recovery, those the trusted heads
    name, not only the hosts given on the command line.
 3. The copies are combined, and only then are the rules applied and the head
-   chosen, so a site serving an old version is outvoted by the rest.
+   chosen, so a site serving an old version is superseded by the newer versions the
+   rest hold.
+4. Each site that did not answer is named with its error, and a command that
+   reaches no site is refused.
 
 ### Commands
 
 ```sh
 paisans operator register --execute   # sign an attestation, record your key
-paisans deployment publish --execute      # sign the local files, push to every site
-paisans deployment pull --execute         # move the files to the sites' newest
+paisans deployment publish --execute      # sign the draft, push to every site
+paisans deployment pull --execute         # merge the sites' newest into the draft
 paisans deployment log                    # every version, signer, holding sites
 paisans deployment publish --merge --execute   # one version on every head of a fork
 paisans deployment recover --from admin@203.0.113.9 --key ~/.ssh/id_ed25519.pub --execute   # empty workstation
@@ -4576,25 +4748,27 @@ paisans deployment recover --from admin@203.0.113.9 --key ~/.ssh/id_ed25519.pub 
   of their own, since they have signed nothing. It finds the key in their
   ssh-agent that matches one listed under their entry in `operators` (or the one
   `--key` names), gathers, and signs an attestation: a version with the head's
-  tree and the head as its only parent. It records the key in
-  `.paisans/signing-key`, and every later `publish` and `deployment apply` signs with it.
-  It attests only a head whose files equal the operator's local files, since an
-  attestation says "I hold this version"; otherwise it shows the difference. It
-  changes only the sites' stores, and nothing without `--execute`. With
-  `--execute` it asks for `partial` when no more than half the sites answered
-  directly, since the attestation becomes the operator's anchor.
-* **`paisans deployment publish`** commits the files with the base as parent, signs,
-  and pushes to every site it reaches. It refuses when its base is not the
-  sites' head, when no loaded key belongs to an operator the parent lists, and when
-  no site answers; a site that missed it gets it from its peers. A first
-  version, with no trusted head among the sites that answered, starts the
-  history, so with no more than half the sites reached directly it asks for
-  `partial`: an empty site must not start a second history silently.
-* **`paisans deployment pull`** moves files with no local edits to the head. Over
-  local edits on an older base it refuses, shows the difference, and with
-  `--execute` writes the head's files to `.paisans/incoming/` to merge by hand
-  before `publish --merge`.
-* **`paisans deployment recover`** onto a workstation with nothing gathers from the
+  tree and the head as its only parent. It records the key as the system copy's
+  signing key, and every later `publish` and `deployment apply` signs with it.
+  It attests only a head whose files equal the system copy's, since an
+  attestation says "this workstation holds this version"; otherwise it shows the
+  difference. A draft is neither compared nor touched. For a deployment with no
+  system copy here, `--root` pins the root, and register makes the system copy
+  from the version the pin leads to. It changes only the sites' stores and the
+  system copy, and nothing without `--execute`. It goes ahead on whichever
+  sites answer.
+* **`paisans deployment publish`** commits the draft's files with the version
+  it was drafted from as parent, signs, and pushes to every site it reaches. It
+  refuses when that version is not the sites' head, naming `deployment pull`,
+  when no loaded key belongs to an operator the parent lists, and when no site
+  answers; a site that missed it gets it from its peers. A first version, with
+  no trusted head among the sites that answered, starts the history. It goes
+  ahead on whichever sites answer.
+* **`paisans deployment pull`** moves the system copy to the head and merges
+  the head into the draft, as *A draft behind the sites is merged forward*
+  describes; in a folder with no draft it starts one.
+* **`paisans deployment recover`** onto a workstation with no system copy of
+  the deployment gathers from the
   named hosts and every site the trusted heads name. It anchors on a version
   the rules trust that the operator's key named with `--key` signed, or on
   `--root`
@@ -4605,11 +4779,18 @@ paisans deployment recover --from admin@203.0.113.9 --key ~/.ssh/id_ed25519.pub 
   admission records under `/etc/paisans` are readable by every login, so
   recover learns the deployment and its user from them and reaches the host
   again as that user. `--id` names
-  the deployment when the records name more than one. With a fork it writes
-  each head to `.paisans/incoming/<sha>/` and refuses to choose, because which
-  head wins is for an operator to decide, never an order.
-* **`deployment apply`** gathers before the review, so a fork or files older than the
-  sites' newest version are refused before the operator is asked anything; after
+  the deployment when the records name more than one. With `--execute` it makes
+  the system copy and starts a draft in the directory of `--config`, which must
+  hold none of the three files. A fork is refused, writing nothing, because which
+  head wins is for an operator to decide, never an order: an operator who holds
+  the files merges it with `publish --merge`. A deployment whose system copy here
+  has a version is refused, naming `checkout` and `pull`, unless `--root` names
+  another root than the one it pinned, or the copy pinned none, as after the
+  deployment was made again under its id; the copy replaced is moved whole into `replaced/` of the data
+  directory, never removed.
+* **`deployment apply`** gathers before the review, so a fork is refused and a
+  draft behind the sites' newest version is merged forward before the operator
+  is asked anything; after
   the approval it publishes the very bytes it loaded and applies, so the store
   shows the declared state even when the apply stops part way, and each host
   records the version it was given. A version that reaches no site is refused,
@@ -4620,67 +4801,164 @@ paisans deployment recover --from admin@203.0.113.9 --key ~/.ssh/id_ed25519.pub 
 is a deployment: `deployment apply` puts the version on the hosts, and the rest
 publish, move and recover that same version.
 
-### This workstation keeps every deployment it applies
+### This workstation keeps one system copy of each deployment
 
-A deployment's files sit in a directory the operator chose, often a git
-repository, and an operator who runs several deployments, or comes back to one
-after months, has to remember where each is. So the workstation keeps its own
-copy of each, in one place it can always find: the platform's data directory,
+The workstation keeps one copy of each deployment it runs, the **system copy**,
+in one place it can always find: the platform's data directory,
 `~/Library/Application Support/Paisans` on macOS, where an application keeps the
 data it makes, and `$XDG_DATA_HOME/paisans` elsewhere (`~/.local/share/paisans`
 when that is unset), by the XDG Base Directory convention. `$PAISANS_DATA_DIR`
-replaces either.
+replaces either. The system copy is the only state Paisans trusts on the
+workstation. `docs/specs/2026-10-24-system-copy.md` is the specification.
 
 ```sh
-paisans deployment list                              # every saved deployment
-paisans deployment fetch --ssh admin@203.0.113.9     # save every deployment a host holds
-paisans deployment checkout example.org --execute    # copy one into this empty directory
+paisans deployment list                              # every system copy here
+paisans deployment fetch --ssh admin@203.0.113.9     # fill one for every deployment a host holds
+paisans deployment checkout --execute                # start a draft in this empty directory
+paisans deployment checkout --id <id> --execute      # the same, with several system copies here
 ```
 
-* **`deployment apply --execute` and `deployment recover --execute` save** the
-  version they publish or recover. A copy that cannot be written is a warning,
-  not a failure: the version is on the sites already, and the copy is the
-  operator's convenience, not the store.
-* **Each copy is a workstation directory in its own right**,
-  `deployments/<id>/` with the three files and `.paisans/` beside them, so every
-  command takes it with `--config` and the trust rules above apply to it
-  unchanged. The secrets in it are encrypted as everywhere else, and the
-  directories are `0700`, since together they name every community the operator
-  runs.
-* **A copy is anchored on what signed it.** Saving records the key that signed
-  the version as the copy's signing key, and carries the pinned root, so a
-  later `deployment fetch` judges what a host serves from the operator's own
-  signature, as `deployment pull` does, and refuses a head older than the copy
-  has seen.
+* **A system copy is `deployments/<id>/`** in the data directory: the three
+  files of the version this workstation last deployed or synced, and beside
+  them the store of every signed version gathered from the sites and the trust
+  state, the pinned root, the recorded signing key, the newest revision seen
+  and when each version reached this workstation. The secrets in it are
+  encrypted as everywhere else, and the directories are `0700`, since together
+  they name every community the operator runs.
+* **It changes only on a deploy or a sync.** `deployment apply --execute` and
+  `deployment publish --execute` make the version they published its files.
+  Every command that gathers from the sites records what they hold in its store
+  and when each version arrived; only a deploy and `deployment pull` move its
+  files to a newer head, and an attestation by `operator register` moves its
+  head to the attestation, whose files are the same. Every command that moves
+  the head records the version in the copy's `saved.json`, which `deployment
+  list` shows and `deployment checkout` checks the head against.
+* **It is made only from the sites or a deploy:** the first deploy of a new
+  deployment, `deployment recover`, the join of `operator register`, and
+  `operator register --root`, since a pinned root anchors alone; `deployment
+  fetch` fills one from a host. A draft of a deployment whose sites hold a
+  version but whose system copy is missing here is refused, naming the
+  recovery.
+* **One command writes a system copy at a time.** A writer holds a lock in
+  `locks/` of the data directory while it writes, and a second is refused,
+  naming the first.
 * **`deployment fetch` reads a host's registry, through sudo,** and gathers every
-  deployment in it, changing nothing on the host. A deployment this
-  workstation never applied or recovered has no anchor, and a history found
-  only on a host is never trusted on its own, so its newest versions are set
-  aside in `.paisans/incoming/<sha>/` and listed `unverified`. Pinning one is a
-  recovery: `deployment recover --root <sha>`, with a hash checked with another
-  operator, after which the copy is saved and verified like any other.
-* **`deployment checkout` copies a saved copy out to edit**, into an empty
-  directory, with its store and trust state, since a directory with the three
-  files and no `.paisans/` has nothing to trust from and `pull` and `publish`
-  would treat it as a new workstation. The copy must judge from its own anchor
-  exactly as the saved copy does, or it is removed. An `unverified` or `fork`
-  copy has no trusted version to check out, so it is refused.
+  deployment in it, changing nothing on the host. A system copy with a version
+  keeps it: fetch records the versions the host holds in its store, and leaves
+  its files, head and record as they are, naming `deployment pull`, which moves
+  it. One with no version takes the newest trusted version. A deployment with
+  no system copy here has no anchor, and a history found only on a host is never trusted
+  on its own, so its newest versions are set aside in the system copy, never as
+  its files, and listed `unverified`. Pinning one is a recovery:
+  `deployment recover --root <sha>`, with a hash checked with another
+  operator.
 * **Ids from a host are checked before they become a path.** The registry is a
   file anyone with root on the host can write, and an id names a directory
   here.
 
+### A folder holds a draft
+
+The operator edits a deployment in any folder they like, often a git
+repository. The folder holds a **draft**: `paisans-stack.yaml`,
+`secrets.enc.yaml` and `.sops.yaml`, and nothing else of Paisans. No command
+writes trust state into a folder, so two folders of one deployment never judge
+the sites differently.
+
+* **Which deployment.** A draft names its deployment by the `id` in its
+  `paisans-stack.yaml`. In a folder with no draft, a command uses the only system
+  copy on the workstation, or the one `--id` names.
+* **Every command that writes the files writes the draft**, and in a folder
+  with no draft first starts one from the system copy: `init`, `operator add`,
+  `secrets set`, `secrets rotate`, `secrets prune`, `storage rotate-key`,
+  `oidc client create`, `catalog add`, `doctor --execute` and the rest.
+  `deployment checkout` is that start alone; `--head <sha>` writes another
+  trusted head of the system copy's store, the files a hand merge for
+  `publish --merge` starts from. A checkout never overwrites a file.
+* **Commands that answer about trust read the system copy**: `deployment log`,
+  `operator invite`'s root and signing key, `operator register`'s attestation.
+  Other read-only commands read the draft where there is one, and the system
+  copy where there is none.
+* **The "drafted from" line.** The first line of a draft's `paisans-stack.yaml`
+  names the version it was drafted from:
+
+  ```yaml
+  # paisans: drafted from revision 10 (3f9c2a1e…)
+  ```
+
+  with the version's full hash. Paisans writes it whenever it puts files into a
+  folder: on starting a draft, on merging a newer version into it, and on
+  deploying it, when it names the version just published. It is stripped from
+  every version before signing. It decides only the merge base: a line that is
+  missing, garbled, or names a version the system copy's trusted history does
+  not hold is ignored, and the base is the system copy's version, which the
+  review names. A draft without the line, such as one written by hand, is never
+  refused.
+
+### A draft behind the sites is merged forward
+
+`deployment apply` and `deployment pull` sync the system copy from the sites
+first. When the sites' newest version is the draft's base,
+the draft is the next version. When it is newer, because another operator
+deployed from any workstation or from another folder of this one, the system
+copy moves to it and the draft is merged forward by a three-way merge: the base
+is the version the "drafted from" line names, ours is the draft, theirs is the
+sites' newest.
+
+* `paisans-stack.yaml` and `.sops.yaml` merge path by path on their YAML node
+  trees. A list is one value, and key order, the blank lines between keys and
+  comments come from the draft, except a comment only the sites' newest
+  changed, which comes from it, as a value does.
+  `creation_rules` in `.sops.yaml` is always one value, since its recipients
+  decide who can read the secrets. A file with a YAML anchor, an alias or a
+  merge key (`<<`) is refused, since a merge cannot place one; write out the
+  values they share by hand.
+* Versions after the base that only sign its files again, as an attestation by
+  `operator register` does, leave nothing to merge: `apply` and `deployment
+  publish` deploy the draft on the sites' newest, and `pull` rewrites only the
+  draft's "drafted from" line and says the draft is up to date.
+* The secrets merge key by key after decryption, as *Secrets are merged key by
+  key* describes.
+* A path both sides changed differently is a conflict: the draft keeps its own
+  value there, and the conflicting paths are listed once, a secret by its key
+  only. The merged draft's "drafted from" line names the sites' newest version,
+  so the next apply deploys whatever the operator settles.
+* With `--execute` the merged draft is written and the command stops,
+  deploying nothing: the operator reviews it and runs apply again. A dry run
+  records what the sites hold and writes no draft. `deployment publish` refuses
+  a draft behind the sites, naming `deployment pull`.
+* A fork on the sites is refused, naming `deployment publish --merge`.
+
+Before approval, `deployment apply`'s review shows the draft against the sites'
+newest version: `paisans-stack.yaml` as a diff, the secret keys added, removed
+or changed, never their values, and whether `.sops.yaml` differs. It also flags
+changes that look like undoing a newer version: for each path or secret key the
+draft changes, Paisans walks the trusted history back from the head, by first
+parents, to the newest revision that changed it, and when the draft puts back
+the value from before that revision the line says so:
+
+```
+sites.home-b: added back; revision 15 (signed by alice) removed it.
+```
+
+A key with a dot in it is one segment, written in brackets:
+`sites["home.b"]`. A deliberate undo and an accidental one look the same, so a
+flag informs and never refuses. A draft with no usable "drafted from" line also
+gets a warning when one of its files was last saved before the version that
+brought the sites' newest files reached this workstation, since it may not
+include that version's changes; an attestation after it brings no change, and
+is not the one the warning waits for.
+
 ### Secrets are merged key by key
 
-Two edits of the encrypted file cannot be merged as text. When only the secrets
-file differs on both sides, `pull` decrypts the base, the local file and the
-head in memory and compares them key by key: changes to different keys merge,
-and two changes to one key are refused, naming the key and never a value. The
-pull takes neither side's value by itself. To take the head's value, set that
-key locally to it and pull again. To keep the local value, take the head's value
-first so the pull can merge the rest, pull, then set the key back to your value
-with `paisans secrets set` and publish; a `pocket_id_groups` key, which `deployment apply`
-records and `secrets set` does not accept, is edited in the file with `sops`
-instead. A side with a `paisans mesh rekey` under way (a site with a next
+Two edits of the encrypted file cannot be merged as text. A merge forward
+decrypts the base, the draft's file and the head's in memory with this
+workstation's age key and compares them key by key: changes to different keys
+merge, and two different changes to one key are a conflict, named by key and
+never by value, where the draft keeps its own value. The merged file is
+encrypted again to the merged `.sops.yaml`'s recipients. To take the head's
+value for a conflicting key instead, set it with `paisans secrets set`; a
+`pocket_id_groups` key, which `deployment apply` records and `secrets set` does
+not accept, is edited in the file with `sops` instead. A side with a `paisans mesh rekey` under way (a site with a next
 WireGuard key, or sites a `--all` run has left) is refused, naming its sites and
 `mesh rekey` to finish it first on the side that holds it: a rekey's state is a
 sequence over live hosts, so combining two such states key by key could promote
@@ -5921,7 +6199,9 @@ makes `site prepare` install their key for the deployment's user; or
 by pointing `apps.<name>.images` at an image they control, which `deployment apply` pulls
 and runs with whatever the template mounts. A plan line saying `○ authorize
 ssh key` is easy to miss, and with `--execute` it is not shown at all. So both
-commands show what changes and ask before it does.
+commands show what changes and ask before it does. Before its review,
+`deployment apply` shows how the configuration differs from the sites' newest
+version: `paisans-stack.yaml` as a diff, the secrets by key only.
 `docs/specs/2026-10-11-config-review.md` is the approved specification.
 
 **The grant** is the part of the configuration that decides who may log in to
@@ -6110,7 +6390,7 @@ command.
 
 Every command that asks for a confirmation takes `--yes`, which answers it as
 typing it would, so the command runs from a script with no terminal on stdin:
-each word a command asks to have typed (`approve`, `create`, `partial`,
+each word a command asks to have typed (`approve`, `create`,
 `rollback`, `prune`, `sign out`, `revoked`, `lose writes`, `lose objects`, a
 site's, an app's or a user's name), and each y/N question (`site admit`'s
 grants, and its ufw question with `--site`). `docs/commands.md` lists the
@@ -10021,7 +10301,7 @@ their own, and their healthchecks do not notice.
 An outage is the worst time to remember which container to look at, which etcd
 key holds the answer, or which Patroni log line means what.
 `paisans doctor` reaches every declared site, or only those named with
-`--site` (repeatable), reads its state, and prints one line per finding,
+`--site` (repeatable or comma-separated), reads its state, and prints one line per finding,
 `ok`, `WARN` or `FAIL`, with how to recover under each `FAIL`. A check it could
 not make is a `WARN` saying it was skipped and why, never an `ok`: it found
 nothing right, and the closing line counts it apart from the checks that

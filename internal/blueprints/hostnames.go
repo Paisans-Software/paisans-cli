@@ -18,6 +18,13 @@ const PrimaryRole = "primary"
 // be.
 const WellknownRole = "wellknown"
 
+// WellknownPath is every path a wellknown hostname answers, as a Caddy path
+// matcher. The Matrix specification puts every delegation document under
+// /.well-known/matrix/ (server and client today), so this is what a
+// wellknown hostname shared with another app routes to the homeserver's
+// snippet, and everything outside it stays the other app's.
+const WellknownPath = "/.well-known/matrix/*"
+
 // MediaRole is the hostname an app's stored objects are served on. Every
 // blueprint that keeps objects in S3 has one, and unlike any other role it
 // exists whether or not it is declared: MediaHostname derives it when the app

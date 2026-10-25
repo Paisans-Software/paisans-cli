@@ -219,6 +219,18 @@ type Plan struct {
 	LeaderMoved *LeaderMove
 	// ledBefore is whether this site's Patroni led just before that action.
 	ledBefore bool
+	// primary is set once the bootstrap, or a quiet apply's leader check,
+	// finds this site's Patroni is the leader. Only then does
+	// runSourceGrants grant: a replica is read only.
+	primary bool
+	// leader is the site whose Patroni leads, when the check found this one
+	// a replica.
+	leader string
+	// grantsOnly is set on a plan with no action whose deployment has a
+	// reader or owes a grant. Its bootstrap runs the leader check and the
+	// grants and nothing else: with no action there is no role or database
+	// to create. See WithDatabases.
+	grantsOnly bool
 	// GatewayReload is set when this site serves the public entry point and a
 	// routing file changed. It is the narrower of the two: a new image is
 	// picked up by the recreate, not by a reload.
@@ -327,6 +339,14 @@ type Plan struct {
 	// holds back with Except. Execute keeps it there, so the apply that
 	// releases a held stack still force-recreates it.
 	heldOwed []pendingAction
+	// owedGrants are the reader roles whose grant the record of owed work
+	// holds: an earlier apply found its source's tables missing. They attach
+	// the bootstrap to a plan with no action, so the grant runs. See
+	// runSourceGrants.
+	owedGrants []string
+	// grantsOwed are the reader roles still owed a grant once this apply's
+	// grants ran, which the record keeps for the next apply.
+	grantsOwed []string
 	// HeldOverwrites are --overwrite paths in stacks this plan holds back
 	// with Except. They are not written, and the operator is told so.
 	HeldOverwrites []string
@@ -968,6 +988,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 	if err != nil {
 		return nil, err
 	}
+	out.owedGrants = resumed.Grants
 	// A stack the record still owes is force-recreated, whether or not its
 	// files changed again since. The record says its last action did not
 	// finish, and an `up -d` that stopped part way can leave a container
@@ -1303,7 +1324,7 @@ func execute(plan *Plan, t Transport) error {
 	// A reload is owed through GatewayChanging, which Build sets whenever it
 	// sets GatewayReload: a failed reload leaves the new routing written and
 	// recorded, and only this record brings the next apply back to it.
-	owes := len(plan.Actions) > 0 || plan.GatewayChanging
+	owes := len(plan.Actions) > 0 || plan.GatewayChanging || len(plan.owedGrants) > 0
 	if owes {
 		if err := writePending(plan, plan.Actions, t); err != nil {
 			return err
@@ -1495,7 +1516,7 @@ func execute(plan *Plan, t Transport) error {
 	// App stacks start only after their databases exist. An app started
 	// first connects, fails to authenticate as a role nobody created, and is
 	// restarted in a loop by Docker while the apply reports success.
-	bootstrapped := plan.Bootstrap == nil
+	bootstrapped := plan.Bootstrap == nil || plan.grantsOnly
 	for i, action := range plan.Actions {
 		if action.Stack != infraStack && !bootstrapped {
 			if err := runBootstrap(plan, t); err != nil {
@@ -1566,15 +1587,22 @@ func execute(plan *Plan, t Transport) error {
 			return err
 		}
 	}
+	// A reader's grant names its source's tables, which exist only once that
+	// app's stack has started, so it waits for every app stack to be
+	// healthy. Before the manifest, so a failed grant leaves the apply owing.
+	if err := runSourceGrants(plan, t); err != nil {
+		return err
+	}
 
 	if err := writeManifest(plan, t); err != nil {
 		return err
 	}
-	if owes {
-		if len(plan.heldOwed) > 0 {
-			// Everything this plan moved is done; what it held back is still
-			// owed, and nothing else is.
-			data, err := json.MarshalIndent(pending{Version: 1, Actions: plan.heldOwed}, "", "  ")
+	if owes || len(plan.grantsOwed) > 0 {
+		if len(plan.heldOwed) > 0 || len(plan.grantsOwed) > 0 {
+			// Everything this plan moved is done; what it held back, and a
+			// grant still waiting for its source's tables, are still owed,
+			// and nothing else is.
+			data, err := json.MarshalIndent(pending{Version: 1, Actions: plan.heldOwed, Grants: plan.grantsOwed}, "", "  ")
 			if err != nil {
 				return err
 			}
@@ -1604,6 +1632,9 @@ type pending struct {
 	Actions         []pendingAction `json:"actions"`
 	GatewayChanging bool            `json:"gateway_changing,omitempty"`
 	GatewayReload   bool            `json:"gateway_reload,omitempty"`
+	// Grants are the reader roles whose grant found its source's tables
+	// missing. See runSourceGrants.
+	Grants []string `json:"grants,omitempty"`
 }
 
 type pendingAction struct {
@@ -1648,6 +1679,7 @@ func writePending(plan *Plan, actions []Action, t Transport) error {
 		p.Actions = append(p.Actions, pendingAction{Stack: action.Stack, Recreate: action.Recreate, Up: action.Up})
 	}
 	p.Actions = append(p.Actions, plan.heldOwed...)
+	p.Grants = plan.owedGrants
 	data, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
 		return err

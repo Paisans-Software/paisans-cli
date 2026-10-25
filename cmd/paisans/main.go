@@ -30,6 +30,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/dns"
+	"github.com/paisans-software/paisans-cli/internal/draft"
 	"github.com/paisans-software/paisans-cli/internal/garage"
 	"github.com/paisans-software/paisans-cli/internal/gatewaymove"
 	"github.com/paisans-software/paisans-cli/internal/grant"
@@ -275,6 +276,7 @@ func runInit(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("init", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
+	fromID := idFlag(fs)
 	secretsPath := fs.String("secrets", "", "path to the secrets file (default: secrets.enc.yaml beside the config)")
 	ageKeyFile := fs.String("age-private-key-file", "", "keep a newly made age private key in this file instead of the keystore")
 	answers := yesFlag(fs)
@@ -284,6 +286,9 @@ func runInit(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	ans, err := answers()
 	if err != nil {
+		return err
+	}
+	if _, err := ensureNewDraft(*configPath, *fromID); err != nil {
 		return err
 	}
 	r := reporter()
@@ -557,10 +562,10 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	execute := fs.Bool("execute", false, "actually write files and restart services")
 	var overwrite pathList
 	fs.Var(&overwrite, "overwrite", "replace this conflicting file although it differs from the last apply's record (repeatable)")
-	var recreate pathList
-	var only pathList
-	fs.Var(&only, "only", "apply only this stack's files and actions, and leave the rest of the site as it is (repeatable)")
-	fs.Var(&recreate, "recreate", "replace every container of this stack with up -d --force-recreate, even if nothing changed (repeatable)")
+	var recreate nameList
+	var only nameList
+	fs.Var(&only, "only", "apply only this stack's files and actions, and leave the rest of the site as it is (repeatable, or comma-separated)")
+	fs.Var(&recreate, "recreate", "replace every container of this stack with up -d --force-recreate, even if nothing changed (repeatable, or comma-separated)")
 	minFree := fs.String("min-free", "3G", "free space Docker's data root must have before a stack pulls an image, Eg: 2G")
 	keepImages := fs.Bool("keep-images", false, "leave the images this apply supersedes on the host, Eg: to keep one to roll back to")
 	mustAll := fs.Bool("require-all", false, "exit 1 when the run is degraded: a site pending or down")
@@ -702,10 +707,11 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 			return err
 		}
 		identity.applied(store.held())
-	} else if v := reviewedByRun.version; v != nil && (!bytes.Equal(v.files.Paisans, loaded.Paisans) || !bytes.Equal(v.files.Secrets, loaded.Secrets)) {
+	} else if v := reviewedByRun.version; v != nil && (!bytes.Equal(v.files.Paisans, draft.StripMarker(loaded.Paisans)) || !bytes.Equal(v.files.Secrets, loaded.Secrets)) {
 		// Every step applies the run's current version, which a step that
 		// records at Pocket ID advances: files edited otherwise are not what
-		// the store holds.
+		// the store holds. The draft's "drafted from" line is no part of
+		// the version, and the run's deploy rewrites it.
 		return &ui.Problem{Hint: "the configuration changed after the run published it", Explain: config.FileName + " or secrets.enc.yaml is not what this run published as " + v.sha[:12] + ", so applying it would put on " + *site + " a version the store does not hold. Nothing was changed on " + *site + " by this step. Run " + progname.Cmd() + " deployment apply --execute again, which publishes the files as they are now."}
 	}
 
@@ -916,6 +922,8 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 		// where the run would stop, not work it would do.
 		dryRunFound(summary, apply.Refusal(plan))
 		switch {
+		case changes == 0 && len(plan.Sweep) == 0 && pending == 0 && grantsDue(plan) != "":
+			r.Result("%s has nothing to change. %s", *site, grantsDue(plan))
 		case changes == 0 && len(plan.Sweep) == 0 && pending == 0:
 			r.Result("%s is up to date. Nothing to apply.", *site)
 		case changes == 0 && len(plan.Sweep) == 0:
@@ -1660,9 +1668,9 @@ func dnsInitResult(updates, creates int, provider string) string {
 // configuration no longer implies, under the rules internal/dns/prune.go
 // states. A dry run by default, like dns init, and it reaches no host.
 func runDNSPrune(args []string) error {
-	var vouched pathList
+	var vouched nameList
 	r, cfg, wants, provider, execute, err := dnsSetup("dns prune", "actually delete the records listed as remove", args, func(fs *flag.FlagSet) {
-		fs.Var(&vouched, "name", "vouch that this exact name, outside community.domain and no longer configured, was this deployment's (repeatable)")
+		fs.Var(&vouched, "name", "vouch that this exact name, outside community.domain and no longer configured, was this deployment's (repeatable, or comma-separated)")
 	})
 	if err != nil {
 		return err
@@ -1813,11 +1821,12 @@ func warnUnencrypted(r ui.Reporter, path string) {
 	r.Warn(path+" is not encrypted", config.PlaintextSecretsVariable+"=1 is set, which reads plaintext secrets for tests and fixtures. A real deployment keeps its secrets under sops.")
 }
 
-// pathList collects a repeatable flag. --overwrite takes one path each time it
-// is given, so that every file replaced against its record was named on its
-// own: a pattern or a blanket switch would let one decision cover files the
-// operator never looked at. --recreate takes one stack each time, for the same
-// reason.
+// pathList collects a repeatable flag whose values may hold a comma, such as
+// a path or a key line, so it takes one value each time it is given.
+// --overwrite takes one path each time, so that every file replaced against
+// its record was named on its own: a pattern or a blanket switch would let one
+// decision cover files the operator never looked at. --recreate, a nameList,
+// names each stack for the same reason.
 type pathList []string
 
 func (l *pathList) String() string { return strings.Join(*l, ",") }

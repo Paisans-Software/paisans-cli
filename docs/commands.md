@@ -36,10 +36,17 @@ deleting DNS records, making an administrator) or a read (`doctor`,
 
 ## Flags every command shares
 
+A flag marked repeatable is given once per value. One whose values are names
+that never hold a comma (sites, stacks, secret paths, DNS names) also takes
+several at once, separated by commas: `--site home-a,home-b` is `--site home-a
+--site home-b`. A flag whose value may hold a comma, a path, a key line or an
+ssh destination, takes one value each time.
+
 | Flag | Default | Taken by | Meaning |
 |------|---------|----------|---------|
 | `-v`, `--verbose` | off | every command | the reasons, values, request bodies and command output behind each step; with it, a failure also shows the underlying error |
-| `--config <path>` | `paisans-stack.yaml` | every command except `site deployments`, `deployment list` and `deployment fetch` | the deployment declaration; for `deployment checkout`, where to write it |
+| `--config <path>` | `paisans-stack.yaml` | every command except `site deployments`, `deployment list` and `deployment fetch` | the draft's deployment declaration; for `deployment checkout`, where to write it. A command that writes the files, in a folder with no draft, first starts one there from the system copy (see *`paisans deployment checkout`*) |
+| `--id <id>` | none | every command that writes the deployment's files: `init`, `operator add`, `secrets set`, `secrets prune`, `secrets rotate`, `storage rotate-key`, `oidc client create`, `mesh rekey`, `catalog add`, `catalog update`, `catalog remove`, `doctor --execute`; and `deployment pull` and `deployment checkout` | in a folder with no draft, the deployment whose system copy the draft is started from, when this workstation holds more than one; with one, that one is used |
 | `--secrets <path>` | `secrets.enc.yaml` beside the config | every command that reads secrets | the sops encrypted secrets file. A plaintext one is refused (see *`secrets.enc.yaml` exists only encrypted* in `README.md`) |
 | `--execute` | off | every command that changes something, as each entry says | without it, the command plans and prints and changes nothing |
 | `--yes` | off | every command that asks for a confirmation, as each entry says | answers each confirmation as typing it would; needs `PAISANS_ALLOW_YES=1` (see *`--yes` answers confirmations* below) |
@@ -72,7 +79,7 @@ Every command that asks for a confirmation takes `--yes`: `deployment apply`,
 `app remove`. No other command takes it.
 
 * **What it answers:** every word a command asks to have typed (`approve`,
-  `create`, `partial`, `rollback`, `prune`, `sign out`, `revoked`,
+  `create`, `rollback`, `prune`, `sign out`, `revoked`,
   `lose writes`, `lose objects`, a site's, an app's or a user's name) and
   every y/N question (`site admit`'s grants and, with `--site`, its ufw
   question), each as typing it would. None needs a terminal on stdin.
@@ -257,8 +264,8 @@ under `--verbose`.
   its own to see what is owed before any host is changed, or to generate the
   secrets for a site or app just declared without applying anything.
 * **Flags:** `--config`, `--secrets`, `--age-private-key-file <path>` (keep a
-  newly made age key in this file, outside the configuration's directory,
-  instead of the keystore), `--yes` (ask nothing: skip each site not
+  newly made age key in this file, outside the configuration's directory and
+  any git repository that does not ignore it, instead of the keystore), `--yes` (ask nothing: skip each site not
   admitted, with the commands that admit it). `--yes` never admits a host:
   admitting stays the host owner's explicit step.
 * **Age key:** for a deployment with no secrets file and no `.sops.yaml`, it
@@ -465,7 +472,7 @@ paisans secrets rotate --all --restart --execute           # the full list again
   where it is checked and where it is used* gives); `--restart` (with
   `--all` only: discard what a stopped `--all` run left and rotate every
   secret in scope again; refused while a rotation is pending, which finishes
-  first); `--replaced <path>` (repeatable: a pasted secret already replaced
+  first); `--replaced <path>` (repeatable or comma-separated: a pasted secret already replaced
   and applied, which every host using it runs; listed, not rotated, and
   refused for a generated secret or one some host does not run yet);
   `--config`, `--secrets`, `--execute`, `--yes` (types `sign out`; it never
@@ -523,17 +530,19 @@ around it.
 The signed copies of `paisans-stack.yaml`, `secrets.enc.yaml` and `.sops.yaml` that
 every site keeps. Four subcommands of `deployment`, each gathering every site's versions first
 and trusting them only from the operator's own signature or a root pinned with
-`--root`. The operator's signature is the key `.paisans/signing-key` records;
-on a workstation that records none, `pull`, `log` and `recover` anchor on the
-key the operator names with `--key`, only on a version the trust rules already
+`--root`. Trust is read from the deployment's system copy on this workstation
+(see *`paisans deployment list`*), never from the folder a draft is in. The
+operator's signature is the signing key the system copy records; on a
+workstation that records none, `pull`, `log` and `recover` anchor on the key
+the operator names with `--key`, only on a version the trust rules already
 trust (see *Trust* below). A pinned root anchors alone.
 
 ```sh
 paisans deployment publish                # what would be signed, with which key
-paisans deployment publish --execute      # sign the local files, push to every site
+paisans deployment publish --execute      # sign the draft, push to every site
 paisans deployment publish --merge --execute   # one version on every head of a fork
-paisans deployment pull                   # what would be written
-paisans deployment pull --execute         # move the files to the sites' newest
+paisans deployment pull                   # what would be merged
+paisans deployment pull --execute         # merge the sites' newest into the draft
 paisans deployment log                    # every version, signer, build, holding sites; a root's full hash
 paisans deployment recover --from admin@203.0.113.9 --key ~/.ssh/id_ed25519.pub --execute   # empty directory
 paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # or pin the root
@@ -546,20 +555,20 @@ paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # o
 
   | Flag | Taken by | Meaning |
   |------|----------|---------|
-  | `--config <path>` | all | the deployment declaration, which must be named `paisans-stack.yaml` with `secrets.enc.yaml` and `.sops.yaml` beside it; `.paisans/` beside it holds this workstation's state |
-  | `--merge` | `publish` | the version's parents are every head, after the operator has merged a fork or an incoming change by hand |
-  | `--root <sha>` | `pull`, `log`, `recover` | trust starts from this root, its full hash as `log` prints it on a root's line or another operator's `.paisans/config-root` holds it; `pull` and `recover` record it, `log` judges from it for the run only. One that differs from a recorded pin is refused |
-  | `--key <path.pub>` | `pull`, `log`, `recover` | your own operator key's public key file, to start trust from when `.paisans/signing-key` records none and no root is pinned; the agent need not hold it, and it is recorded only when the agent does. `log` records nothing |
+  | `--config <path>` | all | the draft's deployment declaration, which must be named `paisans-stack.yaml` with `secrets.enc.yaml` and `.sops.yaml` beside it; for `recover`, where the draft is started |
+  | `--merge` | `publish` | the version's parents are every head, after the operator has merged a fork by hand |
+  | `--root <sha>` | `pull`, `log`, `recover` | trust starts from this root, its full hash as `log` prints it on a root's line or another operator's system copy pins it; `pull` and `recover` record it, `log` judges from it for the run only. One that differs from a recorded pin is refused, except by `recover` (below) |
+  | `--key <path.pub>` | `pull`, `log`, `recover` | your own operator key's public key file, to start trust from when the system copy records no signing key and no root is pinned; the agent need not hold it, and it is recorded only when the agent does. `log` records nothing |
   | `--from <user@host[:port] or ssh alias>` | `recover` (required, repeatable) | a host of the deployment to recover from; every site the trusted heads name is reached after it |
-  | `--id <id>` | `recover` | the deployment, when the logins' admission records name more than one; it must be a deployment id |
+  | `--id <id>` | `pull`, `recover` | for `pull`, the deployment, in a folder with no draft, when this workstation holds more than one system copy; for `recover`, the deployment when the logins' admission records name more than one. It must be a deployment id |
   | `--execute` | `publish`, `pull`, `recover` | do it; `log` takes none |
-  | `--yes` | `publish`, `pull`, `recover` | type `partial` and `rollback` when asked for; `log` asks nothing and takes none |
+  | `--yes` | `publish`, `pull`, `recover` | type `rollback` when asked for; `log` asks nothing and takes none |
 
   And the flags every command shares.
 * **Hosts:** every site, over ssh as the site's ssh user, and each is
   reached, not only the ones named on the command line. `recover` has no
   `paisans-stack.yaml` to name them and so starts from `--from`.
-* **Trust:** the newest version signed by the key `.paisans/signing-key`
+* **Trust:** the newest version signed by the signing key the system copy
   records is where trust starts. With no key recorded, it is the key `--key`
   names, which anchors only on versions it signed itself, under one root,
   that the trust rules trust from that root (signed by an operator its parent
@@ -572,81 +581,115 @@ paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # o
   newest such version anchors, and the gather names its key. When every site
   that answers serves an older incarnation, a `--key` recovery can land on a
   genuine version the key signed there, so `recover --key` prints the full
-  hash of the root it pins: confirm it with another operator, against their
-  `.paisans/config-root` or a root's line of their `log`, before applying. A
+  hash of the root it pins: confirm it with another operator, against the root
+  their system copy pins or a root's line of their `log`, before applying. A
   pinned root anchors alone; `--key` is then ignored, and the run notes it.
   With a root pinned, a gather whose sites serve none of its history is
   refused, naming no root they served: either the pin is out of date, and the
   way out is to get the current root from another operator and recover from
-  it into an empty directory with `deployment recover --root <sha>`, or a site
-  that answered holds a history it should not, such as a host never evicted.
-  With no
+  it with `deployment recover --root <sha>`, or a site that answered holds a
+  history it should not, such as a host never evicted. With no
   anchor, `pull`, `log` and `recover` say to name your own operator key with
   `--key` (loaded with `ssh-add`, so it is recorded) or pin `--root <sha>`,
   and `publish`, which judges only from the recorded key, says the same of
   `deployment pull`; all but `recover` add `operator register`.
 * **Without `--execute`:** no site is changed and no site is asked to sync with
   its peers; it reads what each site holds now, which can be staler. Only the
-  cache in `.paisans/` beside the configuration is written.
-* **Per-operator state:** `.paisans/.gitignore` keeps `store.git/`,
-  `incoming/`, `signing-key`, `config-head` and `config-seen` out of a
-  repository the operators share, since each describes one workstation, and a
-  shared signing key would start one operator's trust from another's signature.
-  `config-root` may be committed so the operators share the pin.
+  system copy's store of versions, and when each arrived, is written; no draft
+  and no system copy file.
 * **`--execute`:** each site first syncs with its peers, so a version only a
   site the operator cannot log in to holds arrives through one they can.
-  `publish` signs with the key in `.paisans/signing-key`, or the one ssh-agent
-  key that belongs to an operator the base lists, and pushes to every site it
-  reaches. It refuses a plaintext `secrets.enc.yaml`, or an encrypted one with
-  no recipient in `.sops.yaml`, before it reaches a site, and when its base is not the sites' newest version (including
-  a workstation with no base while the sites hold versions: run `deployment pull`
-  first), when the sites hold a fork and `--merge` is not given, and when no
-  site answers. `pull` moves files with no local edits to the head; over local
-  edits on an older base it refuses, shows how they differ, and writes the
-  head's files to `.paisans/incoming/` to merge by hand. When only
-  `secrets.enc.yaml` differs on both sides it merges key by key: two changes to
-  one key refuse, naming the key and never a value, and the pull takes neither
-  side's value by itself (set the key locally to the head's value and pull
-  again; to keep the local value, take the head's first, pull, then set the key
-  back with `paisans secrets set` and publish, or edit a `pocket_id_groups` key
-  with `sops`). It refuses while either side has a `paisans mesh rekey` under
-  way, naming the sites, until `mesh rekey` finishes it, and while either side
-  has a `paisans secrets rotate` under way (`rotations` or `rotate_remaining`),
-  naming the paths, until `secrets rotate` finishes it. `recover` refuses to
-  write over files, and with a fork writes each head to
-  `.paisans/incoming/<sha>/` and refuses to choose. `pull` and `recover`
-  record, in `.paisans/signing-key`, the key that signed the version trust
-  started from when `--key` named it, the ssh-agent holds it and an operator
-  of the head lists it, so later publishes sign with it; a colleague's public
-  key named with `--key` anchors and is not recorded. `pull` and `recover`
-  refuse a version whose `secrets.enc.yaml` is plaintext before they write
-  any of its files or sign anything.
-* **Words typed at a terminal:** `partial` when fewer than a majority of sites
-  answered directly (no more than half), for `deployment apply --execute`, `deployment pull`,
-  `deployment recover`, `deployment publish` of a first version and `operator register`;
-  `rollback` when the newest version is older than one this workstation has
-  seen. `--yes` types either. An accepted `rollback` re-bases `.paisans/config-seen` to the head
-  chosen once the command commits its change; a run that stops leaves it as it
-  was. `log` asks for neither: it warns and lists. A dry run says what
-  `--execute` will ask.
-* **In `deployment apply`:** `deployment apply` gathers before its review and refuses a fork or a base
-  older than the sites' newest version, naming `deployment pull`. With `--execute`
-  it publishes the version it applies and each host records it; a host whose
-  record holds a newer revision, or another version at the same revision, makes
-  `deployment apply` ask for `rollback`. It needs the standard file names beside
-  `paisans-stack.yaml` (a `--secrets` naming another file is refused), an operator's key in
-  the ssh-agent even for a dry run.
+  `publish` signs the draft with the system copy's signing key, or the one
+  ssh-agent key that belongs to an operator the base lists, and pushes to every
+  site it reaches; the published files become the system copy, and the draft's
+  "drafted from" line names the new version. It refuses a plaintext
+  `secrets.enc.yaml`, or an encrypted one with no recipient in `.sops.yaml`,
+  before it reaches a site, and when the version the draft was drafted from is
+  not the sites' newest, naming `deployment pull`, when the sites hold a fork
+  and `--merge` is not given, and when no site answers. Versions after the
+  draft's base that only sign its files again, as an attestation does, are not
+  newer: the draft is published on the sites' newest.
+* **`pull`:** moves the system copy to the sites' newest version and merges it
+  into the draft by a three-way merge, from the version the draft's "drafted
+  from" line names, or, without a usable line, the system copy's version
+  before the pull. `paisans-stack.yaml` and `.sops.yaml` merge path by path on
+  their YAML node trees, a list being one value and `creation_rules` always
+  one value, with the draft's key order, blank lines and comments kept, but
+  for a comment only the sites' newest changed; a file with a YAML
+  anchor, an alias or a merge key (`<<`) is refused. The secrets merge key by key, decrypted with
+  this workstation's age key and encrypted again to the merged `.sops.yaml`'s
+  recipients. A path both sides changed differently is a conflict: the draft
+  keeps its own value, and the conflicts are listed once, a secret by its key
+  only, never a value. The merged draft's "drafted from" line names the sites'
+  newest version; review it and deploy it with `deployment apply --execute`.
+  It refuses while either side has a `paisans mesh rekey` under way, naming the
+  sites, until `mesh rekey` finishes it, and while either side has a
+  `paisans secrets rotate` under way (`rotations` or `rotate_remaining`),
+  naming the paths, until `secrets rotate` finishes it. Versions that only
+  sign the base's files again, as an attestation by `operator register` does,
+  leave nothing to merge: the draft is up to date, and `--execute` rewrites
+  only its "drafted from" line, to the sites' newest. In a folder with no
+  draft it starts one from the sites' newest version.
+* **`recover`:** for a deployment with no system copy here, makes the system
+  copy from the sites, with its root and key, and starts a draft in the
+  directory of `--config`, which must hold none of the three files. A fork is
+  refused and nothing is written; an operator who holds the files merges it
+  with `publish --merge`, and the recovery is run again. A deployment whose
+  system copy here has a version is refused, naming `deployment checkout` and
+  `deployment pull`, unless `--root` names another root than the one it
+  pinned, or the copy pinned none, as after the deployment was made again under
+  its id. A system copy with no version, or one `--root` replaces, is moved
+  whole into `replaced/` of the data directory, never removed, and the run
+  says where.
+* **Recorded keys:** `pull` and `recover` record as the system copy's signing
+  key the key that signed the version trust started from when `--key` named
+  it, the ssh-agent holds it and an operator of the head lists it, so later
+  publishes sign with it; a colleague's public key named with `--key` anchors
+  and is not recorded. `pull` and `recover` refuse a version whose
+  `secrets.enc.yaml` is plaintext before they write any of its files or sign
+  anything.
+* **The record:** every command that moves a system copy's head (a deploy, a
+  pull or an apply that merged forward, an attestation, a recovery, a join,
+  and a fetch into a copy with no version) writes its `saved.json`, the
+  version `deployment list` shows and `deployment checkout` checks the head
+  against.
+* **One writer at a time:** a command that writes a system copy holds its lock,
+  in `locks/` of the data directory, while it writes; a second is refused,
+  naming the first.
+* **Sites that answer:** `deployment apply`, `deployment pull`,
+  `deployment recover`, `deployment publish` and `operator register` go ahead
+  on whichever sites answer, once at least one does, and name each site that
+  did not, with its error. A command that reaches no site is refused.
+* **Words typed at a terminal:** `rollback` when the newest version is older
+  than one this workstation has seen. `--yes` types it. An accepted
+  `rollback` re-bases the system copy's newest revision seen to the head chosen
+  once the command commits its change; a run that stops leaves it as it was.
+  `log` does not ask: it warns and lists. A dry run says what `--execute` will
+  ask.
+* **In `deployment apply`:** `deployment apply` gathers before its review and
+  refuses a fork. A draft drafted from an older version than the sites' newest
+  is merged forward as `pull` merges it; with `--execute` the merged draft is
+  written and the apply stops, deploying nothing, for the operator to review
+  it and run apply again. Versions after the base that only sign its files
+  again, as an attestation does, are no reason to merge: the draft deploys on
+  the sites' newest. With `--execute` it publishes the version it applies
+  and each host records it; a host whose record holds a newer revision, or
+  another version at the same revision, makes `deployment apply` ask for
+  `rollback`. It needs the standard file names beside `paisans-stack.yaml` (a
+  `--secrets` naming another file is refused), an operator's key in the
+  ssh-agent even for a dry run.
 
-See *Every site keeps signed copies of the configuration* in `README.md` and
-`docs/specs/2026-10-12-config-store.md`.
+See *Every site keeps signed copies of the configuration*, *This workstation
+keeps one system copy of each deployment* and *A folder holds a draft* in
+`README.md`, `docs/specs/2026-10-12-config-store.md` and
+`docs/specs/2026-10-24-system-copy.md`.
 
 ### `paisans deployment list`
 
-Lists the deployments saved on this workstation: id, domain, revision, version,
-status, when and where from. `deployment apply --execute` saves the version it
-publishes, `deployment recover --execute` the version it recovers, and
-`deployment fetch` what a host holds, so every deployment an operator runs is
-found here, wherever its own files are.
+Lists the system copies on this workstation, one per deployment: id, domain,
+revision, version, status, when and where from. The system copy is the one
+copy of a deployment this workstation trusts; a folder the operator edits in
+holds a draft of it.
 
 ```sh
 paisans deployment list
@@ -658,85 +701,185 @@ paisans deployment list
   `$XDG_DATA_HOME/paisans/deployments/<id>/` (`~/.local/share/paisans/...`
   when it is unset) elsewhere, or under `$PAISANS_DATA_DIR` when set. Each
   directory holds `paisans-stack.yaml`, `secrets.enc.yaml` (encrypted, as
-  always) and `.sops.yaml` with their `.paisans/` state, so any command takes
-  it with `--config`. The directories are `0700`.
+  always) and `.sops.yaml` of the version last deployed or synced, with the
+  store of signed versions and the trust state beside them. The directories
+  are `0700`. Beside `deployments/`, `locks/` holds a lock while a command
+  writes a system copy, and `replaced/` the copies a recovery moved aside.
+* **Made by:** the first deploy of a new deployment, `deployment recover
+  --execute`, the join of `operator register`, and `operator register --root
+  --execute`; `deployment fetch` fills one from a host. A deploy or `deployment
+  pull` moves one to a newer version, and an attestation by `operator
+  register` moves its head to the attestation.
 * **Status:** `verified` is a version the trust rules chose; `unverified` is
-  one a host served for a deployment this workstation never applied or
-  recovered, kept only in `.paisans/incoming/<sha>/`; `fork` is two trusted
-  heads, each there.
+  one a host served for a deployment this workstation holds no anchor for, kept
+  only among the system copy's incoming versions; `fork` is two trusted heads,
+  each there.
 * **Hosts:** none. Changes nothing.
 
-See *This workstation keeps every deployment it applies* in `README.md`.
+See *This workstation keeps one system copy of each deployment* in `README.md`.
 
 ### `paisans deployment checkout`
 
-Copies a deployment saved on this workstation into an empty directory, so its
-files can be edited and published from there.
+Starts a draft from a deployment's system copy in a folder with none.
 
 ```sh
-paisans deployment checkout f2a9 --config ~/work/example/paisans-stack.yaml            # what would be written
-paisans deployment checkout example.org --config ~/work/example/paisans-stack.yaml --execute
+paisans deployment checkout --config ~/work/example/paisans-stack.yaml                    # what would be written
+paisans deployment checkout --id <id> --config ~/work/example/paisans-stack.yaml --execute
+paisans deployment checkout --head <sha> --config ~/work/merge/paisans-stack.yaml --execute
 ```
 
-* **Alone:** always, when a saved deployment is to be edited somewhere of the
-  operator's choosing.
-* **Flags:** the deployment, by its id, a unique start of the id, or its
-  domain, as `deployment list` prints them; `--config <path>`, where to write
-  `paisans-stack.yaml` (in the current directory when left out); `--execute`.
+* **Alone:** always, when a deployment is to be edited somewhere of the
+  operator's choosing. Every command that writes the files starts a draft the
+  same way in a folder with none.
+* **Flags:** `--id <id>`, the deployment's full id as `deployment list` prints
+  it, when this workstation holds more than one system copy; `--head <sha>`, a
+  trusted head of the system copy's store, as `deployment log` lists them, to
+  write in place of the system copy's own version; `--config <path>`, where to
+  write `paisans-stack.yaml` (in the current directory when left out);
+  `--execute`. It takes no argument.
 * **What it writes:** `paisans-stack.yaml`, `secrets.enc.yaml` and
-  `.sops.yaml`, and in `.paisans/` the store (`store.git`, every version with
-  its signature), `signing-key`, `config-root`, `config-head` and
-  `config-seen` where the saved copy has them, and `.paisans/.gitignore`. Not
-  `saved.json` or `.paisans/incoming/`. Each file keeps the saved copy's mode,
-  so `secrets.enc.yaml` stays `0600`. `deployment log`, `pull` and `publish`
-  then trust in the new directory as they do in the saved copy, with no root
-  to pin again.
-* **Trust:** the saved copy is judged from its own anchor before anything is
+  `.sops.yaml`, and nothing else, with a first line in `paisans-stack.yaml`
+  naming the version they were drafted from:
+  `# paisans: drafted from revision <n> (<full hash>)`. It writes nothing to
+  the system copy.
+* **Trust:** the system copy is judged from its own anchor before anything is
   written, as `deployment log` judges, and refused when its head is not a
   trusted version at the revision it records or its files are not that
-  version's. The new directory is judged again once written and must judge the
-  same, seen record included. On any failure, that one included, what was
-  written is removed, with the directories the run made.
-* **Refuses:** a directory holding any of the three files, any of that
-  `.paisans/` state or a `.paisans/incoming/`, with the same rule as
-  `deployment recover`, so it never overwrites a file; a name that matches no
-  saved deployment, or more than one; and an `unverified` or `fork` saved
-  copy, or one whose store holds a fork, which has no one trusted version to
-  check out and is pinned with `deployment recover --root <sha>` instead.
+  version's. `--head` takes only a head the anchor trusts, the files a hand
+  merge for `deployment publish --merge` starts from.
+* **Refuses:** a folder holding any of the three files, so it never overwrites
+  one; a deployment with no system copy here, naming `deployment recover`; and
+  an `unverified` or `fork` system copy without `--head`, which has no one
+  trusted version to check out.
 * **Without `--execute`:** prints every path it would write, in full, and the
   version and revision. Writes nothing.
-* **After:** the saved copy may be behind the sites; `deployment pull` in the
-  new directory brings any newer version.
+* **After:** the system copy may be behind the sites; `deployment pull` in the
+  folder merges any newer version into the draft.
 * **Hosts:** none.
 
 ### `paisans deployment fetch`
 
-Saves, for every deployment in the registry of the host `--ssh` names, the
-newest version of its configuration the host keeps.
+Records, for every deployment in the registry of the host `--ssh` names, the
+versions of its configuration the host keeps in its system copy, and fills a
+system copy with no version with the newest trusted one.
 
 ```sh
 paisans deployment fetch --ssh admin@203.0.113.9
 ```
 
 * **Alone:** always, and without `paisans-stack.yaml`: on a new workstation, or
-  to bring the saved copies up to date.
+  to bring the system copies up to date.
 * **Flags:** `--ssh <user@host[:port] or ssh alias>` (required); see
   *Destinations*.
 * **Hosts:** the one host named, as its owner, through sudo, since the registry
   and the configuration stores are root's. It asks no site to sync and changes
   nothing on the host.
-* **Trust:** a deployment saved here before is judged from its saved anchor
-  (the key that signed what was applied, or the pinned root), as `deployment
-  pull` judges, and the newest trusted version becomes the saved copy. One
-  older than this workstation has seen is not saved. A deployment never saved
-  here has no anchor: its newest versions go to `.paisans/incoming/<sha>/`,
-  never to the copy's own files, and it is listed `unverified`, with the
-  `deployment recover --root <sha>` line that pins one once its hash is checked
-  with another operator.
+* **Trust:** a deployment with a system copy here is judged from its anchor
+  (the key that signed what was deployed, or the pinned root), as `deployment
+  pull` judges. A system copy with a version keeps it: the versions the host
+  holds are recorded in its store, with the newest revision seen, and its
+  files, head and record stay as they are, since only a deploy or
+  `deployment pull` moves it; the run names `deployment pull` when the host
+  holds a newer one, and a fork it serves is named, never recorded as the
+  copy's status. A system copy with no version takes the newest trusted one
+  as its files and head, recorded `verified`. One older than this
+  workstation has seen is not saved. A deployment with no
+  system copy here has no anchor: its newest versions are set aside among the
+  system copy's incoming versions, never as its own files, and it is listed
+  `unverified`, with the `deployment recover --root <sha>` line that pins one
+  once its hash is checked with another operator.
 * **Exit:** non-zero when any deployment could not be fetched; the rest are
   saved.
 
-See *This workstation keeps every deployment it applies* in `README.md`.
+See *This workstation keeps one system copy of each deployment* in `README.md`.
+
+### `paisans operator add`
+
+Declares one more operator in `paisans-stack.yaml`: their entry under
+`operators`, after the last one, and their name in the `ssh.keys` of each site
+they may log in to. Every other line of the file stays as it was.
+
+```sh
+paisans operator add                     # asks for each answer at a terminal
+paisans operator add carol --name 'Carol Example' --email carol@example.org \
+  --key carol.pub --all-sites            # asks nothing
+```
+
+* **Alone:** always: the whole apply never declares an operator.
+* **Flags:** `--config`, `--name <first last>`, `--email <address>`,
+  `--key <path.pub or key line>` (repeatable: a `.pub` file, every line of which
+  but blank lines and comments is a key, or one key line itself),
+  `--site <name>` (repeatable or comma-separated) or `--all-sites`. The username is its one
+  argument.
+* **At a terminal:** asks, with `create`'s questions, for every answer the
+  flags did not give and for one they gave that the question would refuse,
+  saying why; then, with no `--site` or `--all-sites`, whether the operator may
+  log in to every site, and if not, to which.
+* **Without a terminal:** asks nothing. The username, `--name`, `--email`, at
+  least one `--key`, and `--site` or `--all-sites` must all be given; a missing
+  one is refused by its flag, and so is one the question would refuse.
+* **Refuses:** a username already declared, a key another operator lists, a
+  site not declared, and a layout it cannot edit in place (a flow mapping
+  under `operators`, a site with no `ssh.keys` list, or one written as a flow
+  list over several lines), naming it so it can be added by hand. It writes the
+  file only when `validate` refuses nothing the addition introduced. Nothing is
+  written after a refusal.
+* **Hosts:** none. The next `deployment apply --execute` reviews the new keys,
+  writes them to each site's authorized keys, publishes the change and makes
+  the operator's Pocket ID account. Without `--request`, reading the secrets
+  needs their age public key in `.sops.yaml` and `sops updatekeys
+  secrets.enc.yaml`, by hand. Then they run `operator register` on their own
+  workstation.
+
+#### `paisans operator add --request`
+
+Accepts the signed request a new operator's `operator register --invite`
+wrote, on any operator's workstation, and does what the hand path does without
+the hand steps: declares the operator, names their age key in `.sops.yaml`, and
+re-encrypts `secrets.enc.yaml` to them.
+
+```sh
+paisans operator add --request carol.request --all-sites
+```
+
+* **Alone:** before the `deployment apply --execute` that gives the new
+  operator their sites; the join is refused until that apply has run.
+* **Flags:** `--request <file>`, `--site <name>` (repeatable or
+  comma-separated) or `--all-sites`, `--config`. The username, `--name`,
+  `--email` and `--key` are refused beside it, since the request gives them.
+* **Checks:** the request's signature against the key its invite names; the
+  invite's signature against a key an operator of this `paisans-stack.yaml`
+  lists; that the invite is for this deployment's id and names the root this
+  workstation trusts. Every one is made before the first file is written. An
+  invite naming another root means the inviter's workstation trusts another
+  root than this one: the refusal names both, and asks the inviter to run
+  `deployment pull`, check the root against `deployment log`, and write a new
+  invite.
+* **Sites:** asked for at a terminal, as `operator add` asks; without one,
+  `--site` or `--all-sites` must be given.
+* **Secrets:** re-encrypted with the sops library, to every recipient the new
+  `.sops.yaml` names, decrypted with this operator's own age key and with the
+  plaintext kept exactly. A workstation that cannot open the secrets refuses
+  before anything is written, and so does a secrets file whose sops metadata
+  sets what the toolkit never writes (`encrypted_regex`, `unencrypted_suffix`,
+  `mac_only_encrypted`, `shamir_threshold`, more than one key group, or keys
+  other than age, among them), naming the field: re-encrypting would drop it,
+  so that file is re-encrypted by hand with `sops updatekeys`.
+* **Refuses:** everything `operator add` refuses; a username declared with any
+  key but the invite's; `--site` or `--all-sites` for an operator already
+  declared, whose sites are edited in `paisans-stack.yaml`; and a `.sops.yaml`
+  with no creation rule, one that uses `key_groups`, or one with no `age` field,
+  which are edited by hand. A write that fails puts back the files written
+  before it.
+* **Again:** accepting the same request a second time is not refused. With the
+  operator declared with the invite's key, it adds the age key if `.sops.yaml`
+  lacks it and re-encrypts if the secrets are not encrypted to it, and with both
+  done it changes nothing and says so. It is also the remedy when a join finds
+  secrets that do not open.
+* **Hosts:** none. The next `deployment apply --execute` gives the operator
+  their sites, publishes the change and makes their Pocket ID account.
+
+See *Operators and community admins* in `README.md`.
 
 ### `paisans operator register`
 
@@ -754,26 +897,189 @@ paisans operator register --key ~/.ssh/id_ed25519.pub --execute
   changes.
 * **Flags:** `--config`, `--key <path.pub>` (the key to sign with; the ssh-agent
   must hold its private half), `--root <sha>` (pin the first version you trust),
-  `--execute`, `--yes` (types `partial` and `rollback`).
+  `--id <deployment id>` (a pending invite to join, below), `--execute`,
+  `--yes` (types `rollback`).
 * **Hosts:** every site, as `deployment pull` does.
-* **The key:** `--key`, else the one `.paisans/signing-key` records, else the
+* **The key:** `--key`, else the signing key the system copy records, else the
   one key in the ssh-agent that is listed under an operator of `paisans-stack.yaml`. It
   refuses when none matches, saying the key goes under your own entry in
   `operators` and another operator publishes that; when the agent holds more than one
   of your keys; and when it holds keys of more than one operator.
 * **What it signs:** an attestation, a version with the head's three files and
-  the head as its only parent. It signs only a head whose files equal the local
-  files, since it says "I hold this version"; otherwise it shows the difference
-  and writes nothing. With no files here and a root pinned, it attests the head
-  the pin leads to and writes its files. A head your key signed already is
-  pushed again, not attested again.
+  the head as its only parent. It signs only a head whose files equal the
+  system copy's, since it says "this workstation holds this version"; otherwise
+  it shows the difference and writes nothing. A draft in the folder is neither
+  compared nor touched. For a deployment with no system copy here and a root
+  pinned with `--root`, it attests the head the pin leads to and makes the
+  system copy from it, since a pinned root anchors alone; a dry run leaves
+  none. A head your key signed already is pushed again, not attested again.
 * **`--execute`:** signs, pushes the attestation to every site it reaches, and
-  writes the key to `.paisans/signing-key`; `deployment publish` and `deployment apply` sign
-  with it from then on. It asks for `partial` when fewer than a majority of
-  sites answered directly, which `--yes` types. Without it, nothing is signed or recorded, and no
-  site is changed.
+  records the key as the system copy's signing key; `deployment publish` and
+  `deployment apply` sign with it from then on. It goes ahead on whichever
+  sites answer. Without it, nothing is signed or recorded, and no site is
+  changed.
 
 See *Every site keeps signed copies of the configuration* in `README.md`.
+
+#### `paisans operator register --invite`
+
+Answers an invite on the new operator's workstation: checks it, makes their
+age key, and writes a signed request to stdout.
+
+```sh
+paisans operator register --invite carol.invite --inviter-key wash.pub > carol.request
+```
+
+* **Alone:** once per invite, in any directory: it reads and writes nothing
+  there.
+* **Flags:** `--invite <file>`, `--inviter-key <path.pub or key line>` (the
+  inviter's public key, as they gave it to you), `--name <first last>`,
+  `--email <address>` (both asked for at a terminal when not given, and
+  required without one), `--age-private-key-file <path>`, `--config`.
+  `--key`, `--root`, `--id` and `--execute` are refused beside `--invite`.
+* **Checks:** the invite's shape, version and signature against
+  `--inviter-key`, whose fingerprint must be the invite's `inviter`; and that
+  the ssh-agent holds the key the invite names, which signs the request. A
+  failure makes and writes nothing.
+* **The age key:** taken from the first of these present, and the step says
+  which: a `SOPS_AGE_*` variable, which must hold one key and keeps nothing; the
+  keystore item `paisans-age` for the invite's deployment id, used as it is;
+  `--age-private-key-file`, read when it exists and made when it does not; and
+  otherwise a new keystore item. The first answer for a deployment binds the key
+  it names to the deployment; every later answer, from any directory, searches
+  all of those sources for the bound key and uses the one that holds it, even
+  where an earlier one holds another key (a variable holding it among others is
+  used, since sops decrypts with any), and with none holding it is refused with
+  no key made, naming the key and the binding file (remove that file to start
+  over with another key). A key is never printed, never replaced, and never
+  written beside `paisans-stack.yaml`.
+* **Refuses:** an invite to a deployment whose pending invite is a different
+  one, naming the pending invite file, so a request that may still be on its
+  way is not orphaned (remove that file to abandon it; the identical invite is
+  answered again); and an `--age-private-key-file` that is a directory.
+* **Output:** the request on stdout, which holds nothing secret and travels over
+  any channel, and on stderr what comes next: send it to the inviter, and once
+  they have accepted and applied it, run `operator register --execute` in an
+  empty directory. What the join needs is recorded in the workstation's data
+  directory, where `deployment list`'s saved deployments live, keyed by the
+  deployment id: the pending invite and the inviter's key in
+  `invites/<deployment-id>/`, and the bound age public key, with where it was
+  found, in `age/<deployment-id>.recipient`. A key kept in a file is reached
+  through `SOPS_AGE_KEY_FILE`, so the answer prints the `export` line for it,
+  whether it made the file or read it.
+* **Hosts:** none.
+
+#### `paisans operator register`, joining
+
+Run without `--invite` in a directory without the deployment's files, with an
+invite pending, `register` joins. Writing the files and signing take
+`--execute`.
+
+```sh
+paisans operator register                # reads, and says what it would write
+paisans operator register --execute      # recovers, signs the attestation
+paisans operator register --id <id> --execute   # one of several pending
+```
+
+* **Alone:** after the inviter has run `operator add --request` and
+  `deployment apply --execute`. Until the apply, no site lists the new
+  operator's key; the refusal says to ask the inviter whether they have applied,
+  and, when a site refused the login, to check with them that the invite's
+  hosts are the deployment's sites.
+* **Which invite:** the one pending, or the one `--id <deployment id>` names.
+  Several pending without `--id`, or an `--id` with none pending, are refused,
+  listing each pending invite with its directory; removing one's directory
+  abandons that invite. With none pending, or with `--key` or `--root` and no
+  `--id`, `register` registers. `--id` is refused where the files are.
+* **Flags:** `--config`, `--id`, `--execute`, `--yes`. `--key` and `--root`
+  are refused: the invite names the key and the root.
+* **What it does:** recovers the deployment as `deployment recover --root <the
+  invite's root> --from <each invite site>` would, trusting that root alone;
+  refuses, before any configuration file is written, sites that hold a fork, and
+  a newest version that does not list the invite's key under the invite's
+  username; writes the files and records the root and the signing key, after
+  which the invite is no longer pending and its directory is removed, the age
+  binding kept; and signs the attestation `register` signs. A fork's refusal
+  says that an operator who holds the files resolves it with `deployment publish
+  --merge`, and to run the join again once they have. A refusal after the gather
+  says no configuration file was written: the gather has filled the
+  workstation's store.
+* **Secrets:** says whether the recovered `secrets.enc.yaml` opens with their
+  age key, as a failed check and not a refusal. Secrets encrypted to the bound
+  age key were accepted, and what stops them opening is on this workstation:
+  the check names the key, where the answer found it, and how sops is pointed
+  at a key. Secrets
+  not encrypted to it mean the acceptance did not re-encrypt them: any operator
+  runs `operator add --request` with the same request again and `deployment
+  apply --execute`, and the new operator runs `deployment pull`.
+* **Again:** a join whose attestation push failed has written the files, so
+  `register --execute` run again is the `register` above, which signs and
+  pushes.
+* **Hosts:** the invite's sites, as `deployment recover` reaches them. Without
+  `--execute`, no configuration file is written and nothing is signed.
+
+Once the files are there, `register` behaves as above.
+
+### `paisans operator invite`
+
+Writes a signed invite for a new operator to stdout. It holds nothing secret.
+
+```sh
+paisans operator invite carol --key carol.pub > carol.invite
+```
+
+* **Alone:** once per new operator, after each side holds the other's SSH
+  public key.
+* **Flags:** `--key <path.pub or key line>` (one key), `--config`. The username
+  the new operator will have is its one argument.
+* **Holds:** the deployment's id and domain, the full hash of the root of the
+  history this workstation trusts, the inviter's name and key fingerprint, the
+  username, the new operator's key without its comment, and each site's name,
+  ssh host, port and user. It is signed through the ssh-agent with the signing
+  key the system copy records, under the namespace
+  `paisans-operator-invite`.
+* **Refuses:** a username already declared or one `operator add` would refuse;
+  a key another operator lists; a workstation with no recorded signing key, or
+  an agent that does not hold it, naming `operator register`; and one that does
+  not know its root (no root pinned in the system copy and no single root among
+  the versions it has gathered), naming `deployment pull`.
+* **Hosts:** none. The root, the signing key and the inviter come from the
+  system copy, never from a site or the draft: the pin, or the versions its
+  store holds, read as they are. In a folder with no draft it reads the system
+  copy's files. It writes
+  no file, and makes no store where there is none. Nothing about the invite is
+  kept.
+
+The flow, in order: `operator invite`, then the new operator's `operator
+register --invite`, then `operator add --request`, then `deployment apply
+--execute`, then the new operator's `operator register`. See *Operators and
+community admins* in `README.md`.
+
+### `paisans operator age-key`
+
+Prints the operator's age public key for a deployment, making the key first
+when there is none. It is the step `operator register --invite` takes, for an
+operator who wants the key without an invite.
+
+```sh
+paisans operator age-key                 # the id from paisans-stack.yaml here
+paisans operator age-key --id <deployment id>
+```
+
+* **Alone:** always.
+* **Flags:** `--id <deployment id>` (default: the id in `paisans-stack.yaml`
+  beside it), `--config`, `--age-private-key-file <path>`.
+* **The key:** from the first present of a `SOPS_AGE_*` variable (one key),
+  the keystore item `paisans-age` for the id, the file
+  `--age-private-key-file` names when it exists, and otherwise a new key, kept
+  in that file when one is named and in the keystore when not. The step says
+  which, and a key file, made or read, comes with the `export
+  SOPS_AGE_KEY_FILE=…` line that points sops at it. A directory named as the
+  key file is refused.
+* **Output:** the public key, `age1…`, on the last line alone. The private key
+  is never printed, and an existing keystore item or key file is never
+  replaced; an item that does not hold one age key is refused.
+* **Hosts:** none. It does not write `.sops.yaml`.
 
 ### `paisans operator magic-link`
 
@@ -1321,11 +1627,27 @@ images it superseded* in `README.md`).
   The dry run shows it, asks nothing, and ends saying what `--execute` will
   ask for. Each step records its part once it has succeeded.
 * **Configuration store:** before the review, every site's versions are gathered
-  (under `configuration store`) and a fork, a base older than the sites' newest
-  version, or a key no operator lists is refused, naming `deployment pull` or `deployment
-  publish --merge`. With `--execute`, it asks for `partial` when fewer than a
-  majority of sites answered directly. A dry run changes no site and starts no
-  sync. After the approval, a host whose record holds a newer revision, or
+  into the system copy (under `configuration store`), and a fork or a key no
+  operator lists is refused, naming `deployment publish --merge` or the
+  operator who adds the key. The draft's base is the version its "drafted
+  from" line names, or, without a usable line, the system copy's version,
+  which the review names. A draft whose base is older than the sites' newest
+  version is merged forward, as `deployment pull` merges it, and with
+  `--execute` the merged draft is written and the apply stops, deploying
+  nothing; conflicts keep the draft's value and are listed once. Under `what
+  changes in the configuration` the review shows how the draft differs from
+  the sites' newest version, its revision and signer named:
+  `paisans-stack.yaml` as a diff, the secret keys added, removed or changed,
+  never a value, and whether `.sops.yaml` differs. Each change that puts back
+  the value a path or secret key had before the newest revision that changed
+  it is flagged, as `sites.home-b: added back; revision 15 (signed by alice)
+  removed it.`; a flag informs and never refuses. A draft with no usable
+  "drafted from" line is warned about once when one of its files was last
+  saved before the sites' newest version reached this workstation. A deploy
+  makes the published files the system copy and rewrites the draft's
+  "drafted from" line to name the new version. It goes ahead on whichever sites answer. A dry run changes no site and
+  starts no sync. After the approval, a host whose record holds a newer
+  revision, or
   another version at the same revision, asks for `rollback`. `--execute` then
   publishes the version, signed with the recorded key, after the `site prepare`
   steps; a version that reaches no site refuses, naming `site prepare`. See
@@ -1377,13 +1699,13 @@ starts, restarts or recreates what changed.
   |------|---------|---------|
   | `--site <name>` | required | the site to apply |
   | `--ssh <destination>` | the site's `ssh` section | as above |
-  | `--only <stack>` | every stack | apply only this stack's files and actions (repeatable); an apply narrowed by it does not sweep |
+  | `--only <stack>` | every stack | apply only this stack's files and actions (repeatable or comma-separated); an apply narrowed by it does not sweep |
   | `--overwrite <path>` | none | replace this conflicting file although it differs from the last apply's record (repeatable) |
-  | `--recreate <stack>` | none | `up -d --force-recreate` every container of this stack, even if nothing changed (repeatable) |
+  | `--recreate <stack>` | none | `up -d --force-recreate` every container of this stack, even if nothing changed (repeatable or comma-separated) |
   | `--min-free <size>` | `3G` | free space Docker's data root must have before a stack pulls an image |
   | `--keep-images` | off | leave the images this apply supersedes on the host, and skip the sweep |
   | `--hold-apps` | off | start none of the site's app stacks, a pinned one included: apply its mesh, its infrastructure and its Caddy, without asking Pocket ID anything; not with `--only` or `--overwrite`, and it does not sweep |
-  | `--yes` | off | approve the review entry by entry, and type `create`, `partial` and `rollback` when asked for |
+  | `--yes` | off | approve the review entry by entry, and type `create` and `rollback` when asked for |
 
   And `--config`, `--secrets`, `--execute`.
 * **Hosts:** the site's own, and every other site's host to classify it (see
@@ -1677,7 +1999,7 @@ ID's active instance, clocks, what is left over, each Caddy site's answer from
 outside, and Caddy's certificates and the DNS token.
 
 * **Alone:** always, in an outage or after one.
-* **Flags:** `--site <name>` (repeatable; default every site), `--config`,
+* **Flags:** `--site <name>` (repeatable or comma-separated; default every site), `--config`,
   `--secrets` (default `secrets.enc.yaml` beside the config), `--execute`.
 * **Hosts:** every site, or the named ones, read only.
 * **Secrets:** a `secrets.enc.yaml` that is plaintext, or encrypted with no
@@ -1829,7 +2151,7 @@ paisans dns prune --execute     # deletes the removes, then confirms each is gon
 ```
 
 * **Alone:** always, after a name has left the configuration.
-* **Flags:** `--name <fqdn>` (repeatable: vouch that this name, outside
+* **Flags:** `--name <fqdn>` (repeatable or comma-separated: vouch that this name, outside
   `community.domain` and no longer configured, was this deployment's),
   `--config`, `--secrets`, `--execute`.
 * **Hosts:** none; the DNS provider's API only.

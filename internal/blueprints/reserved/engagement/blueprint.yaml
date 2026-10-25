@@ -1,0 +1,38 @@
+# The engagement blueprint. A reserved blueprint: built into the binary with the Go that drives it, and never read from a catalog.
+# internal/blueprints reads it; Parse there documents every key.
+apiVersion: paisans.blueprint/v1
+name: engagement
+services:
+  # paisans-engagement-service: the weekly digest email, which reads the
+  # community's Mbin through a role that can only read
+  # (docs/specs/2026-10-24-engagement-digest.md). Its own database holds
+  # only unsubscribes and the record of each week's sends. Its image is the
+  # core catalog's foundation.yaml's.
+  - {name: "app", foundation: "engagement", purpose: "the weekly digest"}
+  - {name: "postgres", purpose: "its role and database on the cluster"}
+database: {engine: postgres}
+# 8083: Mbin publishes 8080 and the account service 8082, and clustered apps
+# share every apps site's mesh address, so each needs its own port. The
+# service reads its port from ENGAGEMENT_LISTEN_ADDR, which this toolkit
+# renders, and its image's health check probes the same variable.
+port: 8083
+config:
+  format: env
+  file: ".env"
+# paisans-engagement-service's /healthz answers 200 when its database does.
+health: {path: "/healthz", status: [200]}
+# A member clicking unsubscribe from an inbox may not be signed in, and a
+# member gate would stop them unsubscribing.
+gate: {gateable: false}
+mail: reads
+secrets:
+  required:
+    - {key: "digest_signing_key", why: "paisans-engagement-service refuses to start without ENGAGEMENT_SIGNING_KEY"}
+  generate:
+    # It signs every unsubscribe link the digest sends. A new key makes
+    # every link in an email already sent stop working, and the next
+    # digest carries links signed with it.
+    - {name: digest_signing_key, format: password, rotation_cost: restart}
+    # The password of the role that reads Mbin's database.
+    - source_database_password
+  self_rotated: ["digest_signing_key"]

@@ -462,8 +462,9 @@ func (l lineIndex) text(data []byte, n int) string {
 	return string(data[l[n-1]:end])
 }
 
-// replaceFile writes data over path through a temporary file beside it, with
-// path's permissions, so a failed write never leaves half a declaration.
+// replaceFile writes data over path through a temporary file beside it,
+// synced, with path's permissions, so a failed write never leaves half a
+// declaration.
 func replaceFile(path string, data []byte) error {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -479,6 +480,10 @@ func replaceFile(path string, data []byte) error {
 		return err
 	}
 	if err := tmp.Chmod(info.Mode().Perm()); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
 		tmp.Close()
 		return err
 	}

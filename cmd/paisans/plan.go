@@ -137,8 +137,14 @@ func listPlan(r ui.Reporter, plan *apply.Plan) {
 			}
 		}
 	}
-	if !bootstrapped {
+	switch {
+	case plan.GrantsOnly():
+		listLeaderCheck(r, plan.Bootstrap)
+	case !bootstrapped:
 		listBootstrap(r, plan.Bootstrap)
+	}
+	if plan.Bootstrap != nil && len(plan.Bootstrap.EtcdUnstarted) == 0 {
+		listGrants(r, plan.Bootstrap)
 	}
 
 	if plan.HostSites {
@@ -204,4 +210,51 @@ func listBootstrap(r ui.Reporter, b *apply.Bootstrap) {
 	for _, db := range b.Databases {
 		r.Detail("database %s: role %s with its password, database owned by it, creating only what is missing", db.App, db.Role)
 	}
+}
+
+// listLeaderCheck is a quiet apply's part of the database work: whether
+// Patroni here leads, which decides whether it grants. It creates nothing.
+func listLeaderCheck(r ui.Reporter, b *apply.Bootstrap) {
+	if len(b.EtcdUnstarted) > 0 {
+		return
+	}
+	r.Step("wait for Patroni primary").End(ui.Pending, "")
+	r.Detail("for a Patroni primary at %s, up to 3 minutes; only the leader's site grants", b.Patroni)
+}
+
+// listGrants is each reader's grant, after every app stack, as Execute runs
+// it.
+func listGrants(r ui.Reporter, b *apply.Bootstrap) {
+	for _, reader := range b.Readers {
+		r.Step("grant "+reader.Role).End(ui.Pending, "")
+		r.Detail("SELECT on the allowlisted columns of database %s, for %s, if Patroni here leads", reader.Database, reader.App)
+	}
+}
+
+// grantsDue is what a dry run with nothing to change says --execute still
+// runs, or empty when it runs nothing.
+func grantsDue(plan *apply.Plan) string {
+	if plan.Bootstrap == nil || !plan.GrantsOnly() || len(plan.Bootstrap.EtcdUnstarted) > 0 {
+		return ""
+	}
+	var readers []string
+	for _, reader := range plan.Bootstrap.Readers {
+		readers = append(readers, reader.Role)
+	}
+	return grantsNote(plan.OwedGrants(), readers)
+}
+
+// grantsNote says which grants --execute runs: one owed since an apply that
+// found Mbin's tables missing, or each reader's again, which every apply of
+// the leader's site runs so that a changed Mbin schema fails it.
+func grantsNote(owed, readers []string) string {
+	switch {
+	case len(owed) == 1:
+		return fmt.Sprintf("%s's grant is owed; --execute runs it if Patroni here leads.", owed[0])
+	case len(owed) > 1:
+		return fmt.Sprintf("The grants of %s are owed; --execute runs them if Patroni here leads.", strings.Join(owed, ", "))
+	case len(readers) > 0:
+		return fmt.Sprintf("--execute grants %s its reads again if Patroni here leads.", strings.Join(readers, ", "))
+	}
+	return ""
 }

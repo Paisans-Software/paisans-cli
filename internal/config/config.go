@@ -76,6 +76,7 @@ const (
 	BlueprintPocketID    Blueprint = "pocket-id"
 	BlueprintUptime      Blueprint = "uptime"
 	BlueprintAccount     Blueprint = "account"
+	BlueprintEngagement  Blueprint = "engagement"
 )
 
 // Config is a whole deployment, declared. It records intent and never status:
@@ -1091,6 +1092,48 @@ func (c *Config) PocketIDApp() (string, bool) {
 			found = append(found, name)
 		}
 	}
+	if len(found) != 1 {
+		return "", false
+	}
+	return found[0], true
+}
+
+// engagementSourceBlueprint is the one catalog blueprint Go names, and the
+// only exception to "no catalog blueprint is named here": the engagement
+// digest reads Mbin's database schema directly, so which app it reads is a
+// fact about that schema and not about any catalog's wiring. The name is the
+// core catalog's, written unqualified.
+const engagementSourceBlueprint Blueprint = "mbin"
+
+// EngagementApps lists the apps whose blueprint is engagement, sorted.
+// validate refuses more than one.
+func (c *Config) EngagementApps() []string {
+	var out []string
+	for _, name := range c.AppNames() {
+		if c.Apps[name].Blueprint == BlueprintEngagement {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// EngagementSources lists the apps the engagement digest could read, sorted:
+// the apps whose blueprint is mbin.
+func (c *Config) EngagementSources() []string {
+	var out []string
+	for _, name := range c.AppNames() {
+		if c.Apps[name].Blueprint == engagementSourceBlueprint {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// EngagementSource is the deployment's one Mbin app, and false when it has
+// none or more than one. The digest reads that app's database, and validate
+// refuses an engagement app without exactly one.
+func (c *Config) EngagementSource() (string, bool) {
+	found := c.EngagementSources()
 	if len(found) != 1 {
 		return "", false
 	}

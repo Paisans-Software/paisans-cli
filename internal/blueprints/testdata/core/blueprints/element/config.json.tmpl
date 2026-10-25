@@ -1,11 +1,11 @@
 {
   "default_server_config": {
     "m.homeserver": {
-      "base_url": "{{ .Linked "matrix-homeserver" "base_url" }}",
-      "server_name": "{{ .Setting "server_name" (.Linked "matrix-homeserver" "server_name") }}"
+      "base_url": {{ jsonquote (.Linked "matrix-homeserver" "base_url") }},
+      "server_name": {{ jsonquote (.Setting "server_name" (.Linked "matrix-homeserver" "server_name")) }}
     }
   },
-  "brand": "{{ .Setting "brand" "Element" }}",
+  "brand": {{ jsonquote (.Setting "brand" "Element") }},
   "disable_custom_urls": true,
   "disable_guests": true,
   "disable_3pid_login": true,

@@ -45,17 +45,24 @@ func checkOperatorID(s string) error {
 	if strings.ContainsAny(s[len(s)-1:], "._-") {
 		return errors.New("Pocket ID refuses a username ending in a dot, an underscore or a hyphen")
 	}
+	// The name is written plain, as a key and in each site's ssh.keys, so it
+	// must read back as itself rather than as null, a boolean or a number.
+	if !config.PlainString(s) {
+		return fmt.Errorf("YAML reads %s as something other than a name; choose another", s)
+	}
 	return nil
 }
 
-func checkFullName(s string) error {
+// CheckFullName refuses a name that is not a first and a last name.
+func CheckFullName(s string) error {
 	if first, last, _ := strings.Cut(s, " "); first == "" || strings.TrimSpace(last) == "" {
 		return errors.New("a first and a last name, separated by a space")
 	}
 	return nil
 }
 
-func checkEmail(s string) error {
+// CheckEmail refuses anything but one email address alone.
+func CheckEmail(s string) error {
 	if addr, err := mail.ParseAddress(s); err != nil || addr.Address != s {
 		return errors.New("an email address alone, Eg: alice@example.org")
 	}

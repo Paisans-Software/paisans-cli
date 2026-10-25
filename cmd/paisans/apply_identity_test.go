@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/draft"
 	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/version"
@@ -41,6 +43,7 @@ var built = "done paisans: " + version.Current().String()
 // name them again. The first run gathers the version into the workstation's
 // store; the second names it from there.
 func TestApplyNamesTheDeploymentAndVersionFirst(t *testing.T) {
+	withDataDir(t)
 	f := newApplyStore(t, 1)
 	f.based(t)
 	loggingSSH(t, "")
@@ -78,14 +81,14 @@ func TestApplyNamesAPublishedVersionAtTheEnd(t *testing.T) {
 	f.based(t)
 	edited := f.files[0]
 	edited.Paisans = append(append([]byte{}, edited.Paisans...), "# next\n"...)
-	if err := f.l.WriteFiles(edited); err != nil {
+	if err := f.write(edited); err != nil {
 		t.Fatal(err)
 	}
 	loggingSSH(t, "")
 	fakeGrants(t, grantedWith(t, f, &grant.ConfigPart{Hash: f.shas[0], Revision: 1}))
 	rec := recordConverge(t)
 	_ = f.applySite(t, noTerminalStdin(), "--execute")
-	head, _ := f.l.Head()
+	head, _ := f.sys.Head()
 	got := identityLines(rec)
 	if len(got) != 2 || head == f.shas[0] {
 		t.Fatalf("head %s, got %v\n%s", head, got, rec.Lines())
@@ -140,4 +143,37 @@ func (f *applyStoreFixture) cfgID(t *testing.T) string {
 		t.Fatal("the fixture declares no id")
 	}
 	return id
+}
+
+// The version a run names as it opens is the system copy's head, when the
+// draft is that version's files, its "drafted from" line aside. A draft that
+// differs, or one whose deployment has no system copy here, leaves it
+// pending; the folder is never written.
+func TestOpenIdentityReadsSystemCopy(t *testing.T) {
+	c := newSavedCopy(t)
+	dir := filepath.Join(t.TempDir(), "work")
+	if err := startDraft(c.l, draft.Draft{Dir: dir}); err != nil {
+		t.Fatal(problemText(err))
+	}
+	path := filepath.Join(dir, config.FileName)
+	v := openIdentity(&ui.Recorder{}, path)
+	if v.sha != c.shas[0] || v.revision != 1 || v.pending {
+		t.Errorf("the draft of the head: %+v", v)
+	}
+	noFolderState(t, dir)
+	body, _ := os.ReadFile(path)
+	if err := os.WriteFile(path, append(body, "# edited\n"...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if v := openIdentity(&ui.Recorder{}, path); v.sha != "" || !v.pending {
+		t.Errorf("an edited draft: %+v", v)
+	}
+	withDataDir(t)
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if v := openIdentity(&ui.Recorder{}, path); v.sha != "" || !v.pending {
+		t.Errorf("no system copy: %+v", v)
+	}
+	noFolderState(t, dir)
 }

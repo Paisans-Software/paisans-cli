@@ -430,7 +430,7 @@ func TestTheBlogReadsPostgresAndS3(t *testing.T) {
 		"type = postgres",
 		"type = s3",
 		"s3_endpoint = " + endpoint,
-		"s3_bucket = blog-uploads",
+		"s3_bucket = `blog-uploads`",
 		"s3_access_key_id = ",
 		"s3_secret_access_key = ",
 		// Path style addressing, rendered rather than defaulted: Garage
@@ -691,6 +691,11 @@ func TestMeshSubnetComesFromTheConfiguration(t *testing.T) {
 	}
 }
 
+// hostTimeZoneMount is the engagement blueprint's read only mount of the
+// host's time zone, so the digest's 08:00 is the host's. It is the host's own
+// file and none of the stack's data, so a move has nothing of it to carry.
+const hostTimeZoneMount = "/etc/localtime:/etc/localtime:ro"
+
 // No named volumes anywhere: a stack under /srv relocates with one tar.
 func TestNoNamedVolumes(t *testing.T) {
 	for _, f := range build(t).Files {
@@ -715,7 +720,7 @@ func TestNoNamedVolumes(t *testing.T) {
 				continue
 			}
 			mount := strings.TrimPrefix(trimmed, "- ")
-			if !strings.HasPrefix(mount, "/srv/paisans/f2a9/") && !strings.HasPrefix(mount, "/dev/") {
+			if !strings.HasPrefix(mount, "/srv/paisans/f2a9/") && !strings.HasPrefix(mount, "/dev/") && mount != hostTimeZoneMount {
 				t.Errorf("%s mounts something that is not a bind mount under /srv: %s", f.Path, mount)
 			}
 		}
@@ -1153,7 +1158,7 @@ func TestTheAuthGateRendersOneInstanceOnTheGateway(t *testing.T) {
 	if !ok {
 		t.Fatal("the gate was not rendered on the gateway")
 	}
-	if strings.Count(compose.Content, "image: ") != 1 {
+	if strings.Count(compose.Content, "/oauth2-proxy:") != 1 {
 		t.Errorf("the gate is not one instance:\n%s", compose.Content)
 	}
 
@@ -1166,6 +1171,45 @@ func TestTheAuthGateRendersOneInstanceOnTheGateway(t *testing.T) {
 	}
 	if !strings.Contains(env.Content, "OIDC_ISSUER_URL=https://id.example.org") {
 		t.Errorf("the gate does not point at the identity provider:\n%s", env.Content)
+	}
+}
+
+// The gate keeps its sessions in a store of its own, so the cookie holds only
+// a ticket that a refresh never changes. forward_auth passes none of the
+// gate's response headers back to the browser, so a cookie that changed on
+// refresh would never arrive, and the next request would spend the refresh
+// token the first one already used.
+func TestTheAuthGateKeepsSessionsInItsOwnStore(t *testing.T) {
+	files := map[string]render.File{}
+	for _, f := range build(t).Files {
+		files[f.Path] = f
+	}
+
+	compose := files["vm/srv/paisans/f2a9/gate/compose.yaml"].Content
+	sessions := compose[strings.Index(compose, "\n  sessions:\n")+1:]
+	if !strings.HasPrefix(sessions, "  sessions:\n") {
+		t.Fatalf("the gate has no session store:\n%s", compose)
+	}
+	if end := strings.Index(sessions, "\n\n"); end >= 0 {
+		sessions = sessions[:end]
+	}
+	if strings.Contains(sessions, "ports:") {
+		t.Errorf("the session store publishes a port, and only the gate beside it may reach it:\n%s", sessions)
+	}
+	if !strings.Contains(sessions, `--save ""`) {
+		t.Errorf("the session store writes snapshots:\n%s", sessions)
+	}
+
+	env := files["vm/srv/paisans/f2a9/gate/.env"].Content
+	for _, want := range []string{
+		"\nOAUTH2_PROXY_SESSION_STORE_TYPE=redis\n",
+		"\nOAUTH2_PROXY_REDIS_CONNECTION_URL=redis://sessions:6379\n",
+		"\nOAUTH2_PROXY_REDIS_PASSWORD=",
+		"\nVALKEY_PASSWORD=",
+	} {
+		if !strings.Contains(env, want) {
+			t.Errorf("the gate's environment lacks %q:\n%s", strings.TrimSpace(want), env)
+		}
 	}
 }
 
