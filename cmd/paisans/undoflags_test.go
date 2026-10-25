@@ -187,3 +187,63 @@ func TestShowChangePrintsUndoFlagsAfterTheDifference(t *testing.T) {
 		t.Errorf("flagged a new change:\n%s", strings.Join(lines, "\n"))
 	}
 }
+
+// A revision with no parent has nothing before it, so removing what has
+// been there since the root puts nothing back.
+func TestNoUndoFlagForRootEraPaths(t *testing.T) {
+	sys, g, head := historyOf(t,
+		revision{1, "domain: x.example\nname: n\n", noSecrets},
+		revision{2, "domain: x.example\nname: n\nextra: 1\n", noSecrets})
+	flags, err := undoFlags(sys, g, head, draftOf("extra: 1\n", noSecrets))
+	if err != nil || len(flags) != 0 {
+		t.Errorf("flags = %q, %v", flags, err)
+	}
+}
+
+// A first-parent chain that reaches a parent the gather does not hold stops
+// there: that boundary produces no flags.
+func TestNoUndoFlagAtAParentMissingFromTheGather(t *testing.T) {
+	sys, g, head := historyOf(t,
+		revision{1, "domain: one.example\n", noSecrets},
+		revision{2, "domain: two.example\n", noSecrets})
+	for sha, v := range g.Versions {
+		if v.Revision == 1 {
+			delete(g.Versions, sha)
+		}
+	}
+	flags, err := undoFlags(sys, g, head, draftOf("domain: one.example\n", noSecrets))
+	if err != nil || len(flags) != 0 {
+		t.Errorf("flags = %q, %v", flags, err)
+	}
+}
+
+func TestUndoFlagFoldsASiteToOneLine(t *testing.T) {
+	a := "sites:\n  home-a:\n    host: a\n"
+	b := "  home-b:\n    host: b\n    port: 22\n"
+	sys, g, head := historyOf(t,
+		revision{1, a + b, noSecrets},
+		revision{2, a, noSecrets})
+	flags, err := undoFlags(sys, g, head, draftOf(a+b, noSecrets))
+	want := "sites.home-b: added back; revision 2 (signed by alice) removed it."
+	if err != nil || len(flags) != 1 || flags[0] != want {
+		t.Errorf("flags = %q, %v; want [%q]", flags, err, want)
+	}
+}
+
+// A sibling that is not flagged stops the fold: its prefix is not wholly put
+// back, so each path is named.
+func TestUndoFlagDoesNotFoldOverAnUnchangedSibling(t *testing.T) {
+	was := "site:\n  host: a\n  port: 22\n  keep: k\n"
+	now := "site:\n  host: b\n  port: 23\n  keep: k\n"
+	sys, g, head := historyOf(t,
+		revision{1, was, noSecrets},
+		revision{2, now, noSecrets})
+	flags, err := undoFlags(sys, g, head, draftOf(was, noSecrets))
+	want := []string{
+		"site.host: put back; revision 2 (signed by alice) changed it.",
+		"site.port: put back; revision 2 (signed by alice) changed it.",
+	}
+	if err != nil || strings.Join(flags, "|") != strings.Join(want, "|") {
+		t.Errorf("flags = %q, %v; want %q", flags, err, want)
+	}
+}

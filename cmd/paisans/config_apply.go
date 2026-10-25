@@ -200,9 +200,9 @@ func mergeNewer(r ui.Reporter, p deployer, g configstore.Gathered, execute bool)
 // version, the secrets by key name only, never a value. files are the
 // draft's as a version holds them, its "drafted from" line stripped. It
 // returns that version when the draft is it already, "" otherwise. Under the
-// difference it flags each change that puts back a value an older version had
-// before a later revision changed it (undoFlags). A first
-// version has nothing to differ from.
+// difference it flags each change that puts back a value an older version
+// had before a later revision changed it (undoFlags). A first version has
+// nothing to differ from.
 func showChange(r ui.Reporter, sys configstore.Local, g configstore.Gathered, parents []string, files configstore.Files) (string, error) {
 	s := r.Step("what changes in the configuration")
 	if len(parents) == 0 {

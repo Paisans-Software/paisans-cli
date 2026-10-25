@@ -42,9 +42,6 @@ func undoFlags(sys configstore.Local, g configstore.Gathered, head string, draft
 		if v, ok := read[sha]; ok {
 			return v, nil
 		}
-		if sha == "" {
-			return pathValues{map[string]string{}, map[string]string{}}, nil
-		}
 		f, err := cache.Files(sha)
 		if err != nil {
 			return pathValues{}, err
@@ -55,12 +52,6 @@ func undoFlags(sys configstore.Local, g configstore.Gathered, head string, draft
 		}
 		read[sha] = v
 		return v, nil
-	}
-	parentOf := func(i int) string {
-		if i+1 < len(chain) {
-			return chain[i+1]
-		}
-		return ""
 	}
 	if len(chain) == 0 {
 		return nil, nil
@@ -93,7 +84,12 @@ func undoFlags(sys configstore.Local, g configstore.Gathered, head string, draft
 				if err != nil {
 					return nil, err
 				}
-				before, err := valuesAt(parentOf(i))
+				// The oldest version in the chain, a root or one whose parent
+				// is not in the gather, has nothing before it to put back.
+				if i+1 == len(chain) {
+					break
+				}
+				before, err := valuesAt(chain[i+1])
 				if err != nil {
 					return nil, err
 				}
@@ -183,9 +179,10 @@ func same(a, b map[string]string, path string) bool {
 	return inA == inB && x == y
 }
 
-// collapse is the paths to print with their flags. A flagged path is folded into the
-// shortest ancestor under which every path of all is flagged for the same
-// revision and wording, so a site put back is one line, not one per field.
+// collapse is the paths to print with their flags. A flagged path is folded
+// into the shortest ancestor under which every path of all is flagged for
+// the same revision and wording, so a site put back is one line, not one per
+// field.
 func collapse(flags map[string]undo, all map[string]bool) map[string]undo {
 	shown := map[string]undo{}
 	for path, f := range flags {
