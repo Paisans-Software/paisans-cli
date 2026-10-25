@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -31,18 +30,17 @@ import (
 // conflicts, which are dotted paths, sorted. When nothing is taken from
 // theirs, merged is ours byte for byte.
 func Config(base, ours, theirs []byte) (merged []byte, conflicts []string, err error) {
-	return run(base, ours, theirs, nil)
+	return run(base, ours, theirs)
 }
 
-// SOPS merges .sops.yaml the same way. While base, ours and theirs hold
-// the same number of creation rules, each rule is one value, by its place
-// in creation_rules: a conflict in rule 0 is creation_rules.0. Otherwise
-// creation_rules is one value, so a rule one side removed is never put back
-// by the places of the others shifting.
+// SOPS merges .sops.yaml the same way. creation_rules, a sequence, is one
+// value: a list only one side changed is taken whole, and two different
+// changes conflict as creation_rules, ours' whole list kept. A rule is never
+// paired with another by its place, so a recipient one side removed is
+// never put back by the other side's reordering. The keys beside
+// creation_rules merge path by path.
 func SOPS(base, ours, theirs []byte) (merged []byte, conflicts []string, err error) {
-	return run(base, ours, theirs, func(path []string) bool {
-		return len(path) == 1 && path[0] == "creation_rules"
-	})
+	return run(base, ours, theirs)
 }
 
 // Paths is every value of a YAML document by dotted path, as the merge
@@ -133,7 +131,7 @@ func plain(n *yaml.Node) error {
 	return nil
 }
 
-func run(base, ours, theirs []byte, expand func(path []string) bool) ([]byte, []string, error) {
+func run(base, ours, theirs []byte) ([]byte, []string, error) {
 	switch {
 	case bytes.Equal(ours, theirs), bytes.Equal(theirs, base):
 		return ours, nil, nil
@@ -152,7 +150,7 @@ func run(base, ours, theirs []byte, expand func(path []string) bool) ([]byte, []
 	if err != nil {
 		return nil, nil, err
 	}
-	m := &merger{expand: expand}
+	m := &merger{}
 	root := m.value(nil, b, o, t)
 	if m.err != nil {
 		return nil, nil, m.err
@@ -182,10 +180,8 @@ func run(base, ours, theirs []byte, expand func(path []string) bool) ([]byte, []
 }
 
 // merger is one merge: the paths that conflict, whether anything was taken
-// from theirs or removed, and the first error. expand says which sequences
-// merge item by item.
+// from theirs or removed, and the first error.
 type merger struct {
-	expand    func(path []string) bool
 	conflicts []string
 	changed   bool
 	err       error
@@ -200,8 +196,6 @@ func (m *merger) value(path []string, b, o, t *yaml.Node) *yaml.Node {
 			b = nil
 		}
 		return m.mapping(path, b, o, t)
-	case m.expand != nil && m.expand(path) && sameLength(b, o, t):
-		return m.sequence(path, b, o, t)
 	}
 	return m.leaf(path, b, o, t)
 }
@@ -242,37 +236,9 @@ func (m *merger) mapping(path []string, b, o, t *yaml.Node) *yaml.Node {
 	return o
 }
 
-// sameLength reports whether the three are sequences of one length.
-func sameLength(nodes ...*yaml.Node) bool {
-	for _, n := range nodes {
-		if n == nil || n.Kind != yaml.SequenceNode || len(n.Content) != len(nodes[0].Content) {
-			return false
-		}
-	}
-	return true
-}
-
-// sequence merges three sequences of one length item by item, by place,
-// each item one value.
-func (m *merger) sequence(path []string, b, o, t *yaml.Node) *yaml.Node {
-	var content []*yaml.Node
-	for i := range len(o.Content) {
-		if v := m.leaf(append(slices.Clip(path), strconv.Itoa(i)), at(b, i), at(o, i), at(t, i)); v != nil {
-			content = append(content, v)
-		}
-	}
-	o.Content = content
-	return o
-}
-
 // conflict lists the paths under path that conflict: each value below it
-// the two sides changed differently, or path itself. An item of a sequence
-// that merges item by item is one value, and is listed whole.
+// the two sides changed differently, or path itself.
 func (m *merger) conflict(path []string, b, o, t *yaml.Node) {
-	if len(path) > 0 && m.expand != nil && m.expand(path[:len(path)-1]) {
-		m.conflicts = append(m.conflicts, label(strings.Join(path, ".")))
-		return
-	}
 	sides := make([]map[string]string, 3)
 	for i, n := range []*yaml.Node{b, o, t} {
 		sides[i] = map[string]string{}
@@ -357,12 +323,4 @@ func get(n *yaml.Node, key string) *yaml.Node {
 		}
 	}
 	return nil
-}
-
-// at is item i of the sequence n, nil when there is none.
-func at(n *yaml.Node, i int) *yaml.Node {
-	if n == nil || i >= len(n.Content) {
-		return nil
-	}
-	return n.Content[i]
 }

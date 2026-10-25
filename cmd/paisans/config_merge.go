@@ -39,7 +39,7 @@ type merged struct {
 	marked bool
 	// conflicts is each path the draft and that version changed
 	// differently, naming its file: "paisans-stack.yaml: sites.home-b",
-	// "secrets: external.a", ".sops.yaml: creation_rules.0".
+	// "secrets: external.a", ".sops.yaml: creation_rules".
 	conflicts []string
 }
 

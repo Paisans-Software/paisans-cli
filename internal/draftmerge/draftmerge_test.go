@@ -137,48 +137,43 @@ func TestConfigKeepsOurComments(t *testing.T) {
 	}
 }
 
-func TestSOPSRuleIsOneValue(t *testing.T) {
-	b := "creation_rules:\n  - age: age1base\n  - path_regex: other\n    age: age1other\n"
-	ours := "creation_rules:\n  - age: age1base,age1ours\n  - path_regex: other\n    age: age1other\n"
-	theirs := "creation_rules:\n  - age: age1base\n  - path_regex: other\n    age: age1other,age1theirs\n"
-	out, conflicts, err := SOPS([]byte(b), []byte(ours), []byte(theirs))
-	if err != nil || len(conflicts) != 0 {
-		t.Fatalf("%v %v", err, conflicts)
-	}
-	if want := "creation_rules:\n  - age: age1base,age1ours\n  - path_regex: other\n    age: age1other,age1theirs\n"; string(out) != want {
-		t.Fatalf("got\n%s", out)
-	}
-	theirs = "creation_rules:\n  - age: age1base,age1theirs\n  - path_regex: other\n    age: age1other\n"
-	out, conflicts, err = SOPS([]byte(b), []byte(ours), []byte(theirs))
-	if err != nil || !reflect.DeepEqual(conflicts, []string{"creation_rules.0"}) || string(out) != ours {
-		t.Fatalf("%v %v\n%s", err, conflicts, out)
-	}
-}
-
-// The rules merge one by one only while the three lists are the same
-// length; otherwise the list is one value, so a rule ours removed is never
-// put back by its place shifting.
-func TestSOPSRulesOfOtherLengthsAreOneValue(t *testing.T) {
-	const a, b, c = "  - age: age1a\n", "  - age: age1b\n", "  - age: age1c\n"
-	rules := func(r ...string) []byte { return []byte("creation_rules:\n" + strings.Join(r, "")) }
+// creation_rules is one value whatever its rules: a list only one side
+// changed is taken whole, two different changes are a conflict keeping
+// ours' whole list, and no rule is paired with another by its place. The
+// keys beside it merge path by path.
+func TestSOPSRulesAreOneValue(t *testing.T) {
+	const a, b, c, d = "  - age: age1a\n", "  - age: age1b\n", "  - age: age1c\n", "  - age: age1d\n"
+	const revoked, revokedNot = "  - path_regex: s\n    age: age1c,age1revoked\n", "  - path_regex: s\n    age: age1c\n"
+	rules := func(r ...string) string { return "creation_rules:\n" + strings.Join(r, "") }
 	for name, tc := range map[string]struct {
-		base, ours, theirs []byte
-		want               []byte
+		base, ours, theirs string
+		want               string
 		conflicts          []string
 	}{
-		"ours removed one, theirs another": {rules(a, b, c), rules(a, b), rules(b, c), rules(a, b), []string{"creation_rules"}},
-		"theirs inserted one":              {rules(a, b), rules(a, b), rules(c, a, b), rules(c, a, b), nil},
-		"ours appended one":                {rules(a, b), rules(a, b, c), rules(a, b), rules(a, b, c), nil},
-		"both appended differently":        {rules(a), rules(a, b), rules(a, c), rules(a, b), []string{"creation_rules"}},
+		"ours revokes, theirs drops one and appends": {rules(a, b, revoked), rules(a, b, revokedNot), rules(b, revoked, d), rules(a, b, revokedNot), []string{"creation_rules"}},
+		"both swap differently":                      {rules(a, b, c), rules(b, a, c), rules(a, c, b), rules(b, a, c), []string{"creation_rules"}},
+		"ours removed one, theirs another":           {rules(a, b, c), rules(a, b), rules(b, c), rules(a, b), []string{"creation_rules"}},
+		"both change one rule each":                  {rules(a, b), rules("  - age: age1a,age1x\n", b), rules(a, "  - age: age1b,age1y\n"), rules("  - age: age1a,age1x\n", b), []string{"creation_rules"}},
+		"theirs inserted one":                        {rules(a, b), rules(a, b), rules(c, a, b), rules(c, a, b), nil},
+		"theirs appended one":                        {rules(a, b), rules(a, b), rules(a, b, c), rules(a, b, c), nil},
+		"theirs removed one":                         {rules(a, b, c), rules(a, b, c), rules(a, c), rules(a, c), nil},
+		"theirs reordered":                           {rules(a, b, c), rules(a, b, c), rules(c, b, a), rules(c, b, a), nil},
+		"ours appended one":                          {rules(a, b), rules(a, b, c), rules(a, b), rules(a, b, c), nil},
+		"both made the same change":                  {rules(a), rules(a, b), rules(a, b), rules(a, b), nil},
 	} {
-		out, conflicts, err := SOPS(tc.base, tc.ours, tc.theirs)
-		if err != nil || !reflect.DeepEqual(conflicts, tc.conflicts) || string(out) != string(tc.want) {
+		out, conflicts, err := SOPS([]byte(tc.base), []byte(tc.ours), []byte(tc.theirs))
+		if err != nil || !reflect.DeepEqual(conflicts, tc.conflicts) || string(out) != tc.want {
 			t.Errorf("%s: %v %v\n%s", name, err, conflicts, out)
 		}
+		if !strings.Contains(tc.ours, "age1revoked") && strings.Contains(string(out), "age1revoked") {
+			t.Errorf("%s: a recipient ours removed is back:\n%s", name, out)
+		}
 	}
-	// theirs inserted one while ours changed another: the list is one value.
-	if _, conflicts, _ := SOPS(rules(a, b), rules(a, "  - age: age1b,age1d\n"), rules(c, a, b)); !reflect.DeepEqual(conflicts, []string{"creation_rules"}) {
-		t.Errorf("an insert beside a change: %v", conflicts)
+	// A key beside creation_rules merges by its path.
+	base := rules(a) + "stores:\n  yaml:\n    indent: 2\n"
+	out, conflicts, err := SOPS([]byte(base), []byte(rules(a, b)+"stores:\n  yaml:\n    indent: 2\n"), []byte(rules(a)+"stores:\n  yaml:\n    indent: 4\n"))
+	if err != nil || len(conflicts) != 0 || !strings.Contains(string(out), "age1b") || !strings.Contains(string(out), "indent: 4") {
+		t.Errorf("beside creation_rules: %v %v\n%s", err, conflicts, out)
 	}
 }
 
