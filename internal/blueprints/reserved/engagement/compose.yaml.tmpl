@@ -1,0 +1,33 @@
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
+#
+# {{ .App.Name }} has cluster placement: no Postgres service of its own, and a
+# connection to the local HAProxy on {{ .DBHost }}:{{ .DBPort }}. Its state is
+# all in that database, so the container has no volume of its own.
+name: {{ .Project }}
+
+services:
+  app:
+    labels:
+      {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
+    image: {{ yamlquote (.Image "app") }}
+    restart: unless-stopped
+    # The image declares its own healthcheck, the binary probing /healthz on
+    # ENGAGEMENT_LISTEN_ADDR's port, which apply's health gate reads.
+    env_file:
+      - .env
+    # The mesh address only. The gateway, over the mesh, is the only thing
+    # that should reach it, and a port published on every interface would
+    # answer anything the host's firewall lets in.
+    ports:
+      - "{{ .MeshAddress }}:{{ .App.Port }}:{{ .App.Port }}"
+    # The digest goes out at 08:00 in the container's local time, and a
+    # container otherwise runs in UTC, so it takes the host's time zone.
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+
+# Every network carries the deployment label too, so that what owns it is
+# read from the label rather than guessed from its name.
+networks:
+  default:
+    labels:
+      {{ .DeploymentLabel }}: "{{ .DeploymentID }}"

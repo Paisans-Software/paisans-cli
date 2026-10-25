@@ -170,6 +170,10 @@ type appValues struct {
 	// of conduct (account.go). Populated only for that blueprint.
 	Account accountValues
 
+	// Engagement is the engagement blueprint's Mbin connection and titles
+	// (engagement.go). Populated only for that blueprint.
+	Engagement engagementValues
+
 	// OperatorsHeartbeat is true for a Pocket ID app in a deployment with a
 	// monitor, whose stack then runs the operators heartbeat pusher on
 	// HeartbeatImage (operatorsheartbeat.go).
@@ -500,6 +504,9 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 			return appValues{}, err
 		}
 		v.Account = account
+	}
+	if planned.Blueprint == config.BlueprintEngagement {
+		v.Engagement = p.engagementValuesFor(planned, dbHost, dbPort)
 	}
 	for _, svc := range blueprints.ServicePorts(planned.Blueprint) {
 		if v.ServicePorts == nil {

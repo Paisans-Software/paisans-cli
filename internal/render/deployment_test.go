@@ -65,6 +65,7 @@ func TestComposeFilesNameTheTokenAndLabelTheID(t *testing.T) {
 // Everything apply renders lands under /srv/paisans/<token>/ or /etc, and
 // every bind mount a compose file names on the host is under the root too,
 // the gateway's read only mount of the deployment's HostSitesDir among them.
+// The one exception is hostTimeZoneMount, which holds no data.
 func TestEveryPathIsUnderTheDeploymentRoot(t *testing.T) {
 	for _, f := range build(t).Files {
 		site, rel, _ := strings.Cut(f.Path, "/")
@@ -82,7 +83,7 @@ func TestEveryPathIsUnderTheDeploymentRoot(t *testing.T) {
 			// second part is its options.
 			mount, ok := strings.CutPrefix(strings.TrimSpace(line), "- /")
 			_, target, bind := strings.Cut(mount, ":")
-			if !ok || !bind || !strings.HasPrefix(target, "/") || strings.HasPrefix(mount, "dev/") {
+			if !ok || !bind || !strings.HasPrefix(target, "/") || strings.HasPrefix(mount, "dev/") || "/"+mount == hostTimeZoneMount {
 				continue
 			}
 			if !strings.HasPrefix(mount, "srv/paisans/f2a9/") {

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -35,6 +36,13 @@ func TestRulesFire(t *testing.T) {
 		{"account-without-pocket-id", "account-without-pocket-id", validate.Refuse},
 		{"account-login-link-disabled", "account-login-link-disabled", validate.Refuse},
 		{"account-under-pocket-id-management", "account-under-pocket-id-management", validate.Refuse},
+		{"engagement-must-be-clustered", "engagement-must-be-clustered", validate.Refuse},
+		{"engagement-one-per-deployment", "engagement-one-per-deployment", validate.Refuse},
+		{"engagement-without-source", "engagement-without-source", validate.Refuse},
+		{"engagement-one-source", "engagement-one-source", validate.Refuse},
+		{"engagement-source-not-clustered", "engagement-source-not-clustered", validate.Refuse},
+		{"engagement-without-smtp", "engagement-without-smtp", validate.Warn},
+		{"engagement-plaintext-with-username", "smtp-plaintext-with-username", validate.Refuse},
 		{"operators-fewer-than-two", "operators-fewer-than-two", validate.Warn},
 		{"operators-none", "operators-none", validate.Refuse},
 		{"pocket-id-management-unset", "pocket-id-management-unset", validate.Refuse},
@@ -1086,5 +1094,54 @@ func TestAGatedMbinWithFederationOffIsAccepted(t *testing.T) {
 	result := validate.Check(load(t, "mbin-federation-off-when-gated"))
 	if result.Refused() {
 		t.Fatalf("refused: %v", result.Refusals())
+	}
+}
+
+// A complete digest deployment is quiet: the engagement app, the one
+// clustered Mbin it reads and a mail server.
+func TestEngagementFixtureIsQuiet(t *testing.T) {
+	result := validate.Check(load(t, "engagement-valid"))
+	if len(result.Findings) != 0 {
+		t.Fatalf("engagement-valid produced findings: %v", result.Findings)
+	}
+}
+
+// A pinned Mbin is one fault, not two: the source exists, so only its
+// placement is refused.
+func TestAPinnedMbinIsNotAMissingSource(t *testing.T) {
+	result := validate.Check(load(t, "engagement-source-not-clustered"))
+	if result.Has("engagement-without-source") {
+		t.Fatalf("a pinned mbin was reported as missing: %v", result.Findings)
+	}
+	if !result.Has("engagement-source-not-clustered") {
+		t.Fatalf("findings: %v", result.Findings)
+	}
+}
+
+// Without an engagement app, an Mbin of either placement draws no
+// engagement finding.
+func TestNoEngagementAppNoEngagementRules(t *testing.T) {
+	cfg := load(t, "engagement-source-not-clustered")
+	delete(cfg.Apps, "digest")
+	for _, f := range validate.Check(cfg).Findings {
+		if strings.HasPrefix(f.Rule, "engagement-") {
+			t.Fatalf("an engagement rule fired with no engagement app: %v", f)
+		}
+	}
+}
+
+// Each engagement app after the first is refused once, at its own key, so
+// the operator sees every app to remove and the first is the one kept.
+func TestEveryExtraEngagementAppIsRefused(t *testing.T) {
+	cfg := load(t, "engagement-one-per-deployment")
+	cfg.Apps["digest-three"] = cfg.Apps["digest-two"]
+	var keys []string
+	for _, f := range validate.Check(cfg).Findings {
+		if f.Rule == "engagement-one-per-deployment" {
+			keys = append(keys, f.Key)
+		}
+	}
+	if want := []string{"apps.digest-three", "apps.digest-two"}; !slices.Equal(keys, want) {
+		t.Errorf("refused at %v, want %v", keys, want)
 	}
 }

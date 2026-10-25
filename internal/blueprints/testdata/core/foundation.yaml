@@ -38,6 +38,8 @@ images:
   uptime: "ghcr.io/paisans-software/uptime:1.1.*-oidc.*"
   # 0.6 needs Pocket ID 2.18 or newer, which the v2 track above reaches.
   account: "ghcr.io/paisans-software/paisans-account-service:0.6.*"
+  # 0.1, the first engagement digest.
+  engagement: "ghcr.io/paisans-software/paisans-engagement-service:0.1.*"
 # By Postgres major. A major is data, so a deployment's
 # cluster.postgres_version chooses it and no track moves it. Spilo
 # publishes one repository per major, each on its own release line.

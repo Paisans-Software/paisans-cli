@@ -595,6 +595,10 @@ func rotatorFor(path string, w rotateWiring) (secretsrotate.Rotator, error) {
 			return secretsrotate.AppS3(app, w.s3Run), nil
 		case "database_password":
 			return secretsrotate.AppDatabase(app), nil
+		case "source_database_password":
+			if w.cfg != nil && w.cfg.Apps[app].Blueprint == config.BlueprintEngagement {
+				return secretsrotate.SourceReader(app), nil
+			}
 		case "admin_password":
 			return secretsrotate.UptimeAdmin(app), nil
 		case "operators_heartbeat_token", "dns_super_admins_heartbeat_token", "dns_2fa_heartbeat_token":
@@ -759,6 +763,13 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 	for _, app := range cfg.AppNames() {
 		if blueprints.UsesPostgres(cfg.Apps[app].Blueprint) && has("apps."+app+".database_password") {
 			rs = append(rs, secretsrotate.AppDatabase(app))
+		}
+	}
+	// The password of the read only role an engagement app reads its
+	// source's database as, altered in the same cluster.
+	for _, app := range cfg.EngagementApps() {
+		if has("apps." + app + ".source_database_password") {
+			rs = append(rs, secretsrotate.SourceReader(app))
 		}
 	}
 	// Each secret a blueprint changes inside the running app.

@@ -434,6 +434,76 @@ func (r appDatabase) pinnedSite(e Env) (string, apply.Transport, error) {
 	return site, t, nil
 }
 
+// sourceReader rotates apps.<app>.source_database_password.
+type sourceReader struct {
+	Generated
+	app string
+}
+
+// SourceReader is the rotation of an engagement app's
+// apps.<app>.source_database_password, the password of the read only role
+// it reads its source's database as. The role is altered on the Patroni
+// leader, and the engagement app's stack, which renders the password into
+// its connection string, is applied site by site as AppDatabase does for an
+// app's own role. Its source's stack is untouched: Mbin never holds this
+// password.
+func SourceReader(app string) Rotator {
+	return sourceReader{Generated: Generated{SecretPath: "apps." + app + ".source_database_password"}, app: app}
+}
+
+func (r sourceReader) Cost() Cost { return Cost{Reconnects: true} }
+
+func (r sourceReader) role() string { return render.ReaderRole(r.app) }
+
+// source is the database the reader may connect to, which is the Mbin app's.
+func (r sourceReader) source(e Env) (string, error) {
+	mbin, ok := e.Cfg.EngagementSource()
+	if !ok {
+		return "", fmt.Errorf("apps.%s: the configuration declares no single Mbin app for it to read", r.app)
+	}
+	return render.DBIdentifier(mbin), nil
+}
+
+func (r sourceReader) Precheck(e Env) error {
+	app, ok := e.Cfg.Apps[r.app]
+	if !ok {
+		return fmt.Errorf("the configuration declares no app %q", r.app)
+	}
+	if app.Blueprint != config.BlueprintEngagement {
+		return fmt.Errorf("apps.%s is a %s, which reads no other app's database, so no role checks this password", r.app, app.Blueprint)
+	}
+	if !pgIdentifier.MatchString(r.role()) {
+		return fmt.Errorf("apps.%s: its reader role %q is not one apply creates", r.app, r.role())
+	}
+	database, err := r.source(e)
+	if err != nil {
+		return err
+	}
+	if !pgIdentifier.MatchString(database) {
+		return fmt.Errorf("apps.%s: its source database %q is not one apply creates", r.app, database)
+	}
+	return nil
+}
+
+func (r sourceReader) Checked(e Env, next string) error {
+	return alterOnLeader(e, r.role(), next)
+}
+
+// Accepts logs in to the source's database, the one the grant lets the
+// reader connect to; any other would be refused whatever the password.
+func (r sourceReader) Accepts(e Env, next string) (bool, error) {
+	database, err := r.source(e)
+	if err != nil {
+		return false, err
+	}
+	return loginOnLeader(e, r.role(), database, next)
+}
+
+// Users is every site running the engagement app, as render places it: the
+// one it is pinned to, or every apps site. These are the stacks whose
+// connection string holds the password.
+func (r sourceReader) Users(e Env) []Use { return appDatabase{app: r.app}.Users(e) }
+
 // alterSQL sets role's password, with statement logging off first.
 func alterSQL(role, password string) string {
 	return apply.NoStatementLog + fmt.Sprintf("ALTER ROLE %s WITH PASSWORD %s;\n", apply.QuoteIdent(role), apply.QuoteLiteral(password))

@@ -2027,7 +2027,7 @@ func noWait(t *testing.T) {
 	t.Cleanup(apply.SetPrimaryWait(9*time.Second, 3*time.Second, func(time.Duration) {}))
 }
 
-// The fixture's clustered apps are talk, wiki, auth and account; the pinned ones keep
+// The fixture's clustered apps are talk, wiki, auth, account and digest; the pinned ones keep
 // their own Postgres and are none of the cluster's business.
 func TestOnlyClusteredPostgresAppsAreBootstrapped(t *testing.T) {
 	cfg, secrets := fixture(t)
@@ -2039,7 +2039,7 @@ func TestOnlyClusteredPostgresAppsAreBootstrapped(t *testing.T) {
 	for _, db := range b.Databases {
 		got = append(got, db.App+"="+db.Role+"/"+db.Name)
 	}
-	if want := "account=account/account auth=auth/auth talk=talk/talk wiki=wiki/wiki"; strings.Join(got, " ") != want {
+	if want := "account=account/account auth=auth/auth digest=digest/digest talk=talk/talk wiki=wiki/wiki"; strings.Join(got, " ") != want {
 		t.Errorf("bootstrapped %v, want %s", got, want)
 	}
 	if b.Patroni != "10.44.0.1:8008" {
@@ -2246,7 +2246,7 @@ func TestAReplicaLeavesTheDatabasesToTheLeader(t *testing.T) {
 	noWait(t)
 	host := newHost()
 	host.leader = "home-b"
-	host.replicaHas = []string{"account", "auth", "talk", "wiki"}
+	host.replicaHas = []string{"account", "auth", "digest", "digest_reader", "talk", "wiki"}
 	p := bootstrapPlan(t, host)
 	said := &ui.Recorder{}
 	p.Report = said
@@ -2281,14 +2281,14 @@ func TestAReplicaWaitsForTheLeaderToCreateTheDatabases(t *testing.T) {
 		t.Errorf("the replica's stop is not apply.ErrDatabasesWait: %v", err)
 	}
 	var wait *apply.DatabasesWaitError
-	if !errors.As(err, &wait) || wait.Site != "home-a" || wait.Leader != "home-b" || !slices.Equal(wait.Missing, []string{"account", "talk", "wiki"}) {
+	if !errors.As(err, &wait) || wait.Site != "home-a" || wait.Leader != "home-b" || !slices.Equal(wait.Missing, []string{"account", "digest", "talk", "wiki", "digest_reader"}) {
 		t.Errorf("the replica's stop does not name the leader: %#v", wait)
 	}
 	if errors.Is(err, apply.ErrFoundingWait) {
 		t.Errorf("the replica's stop is taken for the founding stop: %v", err)
 	}
 	q := problemOf(t, err)
-	if q.Hint != "home-a is waiting on home-b to create databases account, talk, wiki" {
+	if q.Hint != "home-a is waiting on home-b to create databases account, digest, talk, wiki and role digest_reader" {
 		t.Errorf("hint: %q", q.Hint)
 	}
 	for _, want := range []string{"Patroni here is a replica", "no app stack was started", "Apply home-b, then apply this site again"} {
@@ -2313,7 +2313,7 @@ func TestAReplicaWaitsForTheLeaderToCreateTheDatabases(t *testing.T) {
 		}
 	}
 
-	host.replicaHas = []string{"account", "auth", "talk", "wiki"}
+	host.replicaHas = []string{"account", "auth", "digest", "digest_reader", "talk", "wiki"}
 	if err := apply.Execute(bootstrapPlan(t, host), host); err != nil {
 		t.Fatal(err)
 	}
@@ -2418,15 +2418,40 @@ func TestAnAppCannotTakeAClusterRole(t *testing.T) {
 	}
 }
 
-// A second apply of the same thing runs nothing, database work included.
+// A second apply of the same thing creates nothing, database work included.
+// A deployment with a reader still runs its grant (see
+// TestAQuietApplyOfTheLeaderGrants); one without plans no database work.
 func TestANoopApplyBootstrapsNothing(t *testing.T) {
 	noWait(t)
 	host := newHost()
 	if err := apply.Execute(bootstrapPlan(t, host), host); err != nil {
 		t.Fatal(err)
 	}
-	if p := bootstrapPlan(t, host); p.Bootstrap != nil {
-		t.Error("an apply with nothing to do still plans database work")
+	host.inputs = nil
+	p := bootstrapPlan(t, host)
+	if p.Bootstrap != nil && !p.GrantsOnly() {
+		t.Error("an apply with nothing to do plans the whole bootstrap")
+	}
+	if err := apply.Execute(p, host); err != nil {
+		t.Fatal(err)
+	}
+	if host.created() {
+		t.Errorf("an apply with nothing to do created roles: %v", host.inputs)
+	}
+
+	cfg, secrets := fixture(t)
+	b, err := apply.Databases(cfg, secrets, "home-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.Readers = nil
+	quiet, err := apply.Build("home-a", plan(t), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	quiet.WithDatabases(b)
+	if quiet.Bootstrap != nil {
+		t.Error("an apply with nothing to do and no reader still plans database work")
 	}
 }
 
