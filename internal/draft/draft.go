@@ -6,6 +6,7 @@ package draft
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -34,7 +35,9 @@ func firstLine(paisans []byte) (line, rest []byte) {
 }
 
 // ReadMarker reads the marker on the first line of paisans-stack.yaml. It
-// reports false when the line is absent or malformed.
+// reports false when the line is absent or malformed. A file that starts
+// with a byte order mark has no marker: the line must be the file's first
+// bytes, as Paisans writes it.
 func ReadMarker(paisans []byte) (Marker, bool) {
 	line, _ := firstLine(paisans)
 	m := markerRE.FindSubmatch(line)
@@ -69,23 +72,30 @@ type Draft struct{ Dir string }
 
 func (d Draft) path(name string) string { return filepath.Join(d.Dir, name) }
 
-// Has reports whether the folder holds a paisans-stack.yaml.
-func (d Draft) Has() bool {
-	_, err := os.Lstat(d.path(config.FileName))
-	return err == nil
-}
+// Has reports whether the folder holds a paisans-stack.yaml. A file that
+// cannot be checked counts as there, so nothing takes the folder for one
+// without a draft and writes over it; reading it reports why.
+func (d Draft) Has() bool { return present(d.path(config.FileName)) }
 
-// HasAny reports whether the folder holds any of the three files.
+// HasAny reports whether the folder holds any of the three files, each
+// counted as Has counts paisans-stack.yaml.
 func (d Draft) HasAny() bool {
 	for _, n := range []string{config.FileName, configstore.FileSecrets, configstore.FileSOPS} {
-		if _, err := os.Lstat(d.path(n)); err == nil {
+		if present(d.path(n)) {
 			return true
 		}
 	}
 	return false
 }
 
-// Files reads the three files. Paisans keeps its marker line.
+// present reports whether path is there, or cannot be checked.
+func present(path string) bool {
+	_, err := os.Lstat(path)
+	return !errors.Is(err, os.ErrNotExist)
+}
+
+// Files reads the three files; one that is missing is an error, since a
+// draft is the three together. Paisans keeps its marker line.
 func (d Draft) Files() (configstore.Files, error) {
 	var f configstore.Files
 	for _, e := range []struct {
@@ -110,9 +120,14 @@ func (d Draft) Write(f configstore.Files, m Marker) error {
 
 // Mark rewrites the first line of the folder's paisans-stack.yaml to m and
 // leaves the rest of it, and the other two files, as they are: what the
-// operator edited since the version m names stays a draft on it.
+// operator edited since the version m names stays a draft on it. A
+// paisans-stack.yaml that is a symbolic link is written through it, at the
+// file it names, and stays a link.
 func (d Draft) Mark(m Marker) error {
-	path := d.path(config.FileName)
+	path, err := filepath.EvalSymlinks(d.path(config.FileName))
+	if err != nil {
+		return err
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return err
@@ -121,7 +136,7 @@ func (d Draft) Mark(m Marker) error {
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(d.Dir, "."+config.FileName+".tmp-")
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-")
 	if err != nil {
 		return err
 	}

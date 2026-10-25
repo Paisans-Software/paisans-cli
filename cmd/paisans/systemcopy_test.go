@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -139,7 +140,7 @@ func TestSystemForRefusesMissingCopy(t *testing.T) {
 		"--id":     {empty, fixtureDeploymentID},
 		"bad --id": {empty, "../x"},
 	} {
-		before := tree(t, filepath.Dir(tc.path))
+		before, beforeFiles := tree(t, filepath.Dir(tc.path)), fileContents(t, filepath.Dir(tc.path))
 		_, _, _, err := systemFor(tc.path, tc.id)
 		text := problemText(err)
 		if err == nil || (name != "bad --id" && !strings.Contains(text, "deployment recover")) {
@@ -148,7 +149,7 @@ func TestSystemForRefusesMissingCopy(t *testing.T) {
 		if entries, _ := os.ReadDir(base); len(entries) != 0 {
 			t.Errorf("%s: wrote %v into the data directory", name, entries)
 		}
-		if after := tree(t, filepath.Dir(tc.path)); len(after) != len(before) {
+		if after := tree(t, filepath.Dir(tc.path)); !maps.Equal(after, before) || !maps.Equal(fileContents(t, filepath.Dir(tc.path)), beforeFiles) {
 			t.Errorf("%s: the folder changed", name)
 		}
 	}

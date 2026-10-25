@@ -184,15 +184,18 @@ func same(a, b map[string]string, path string) bool {
 // the same revision and wording, so a site put back is one line, not one per
 // field.
 func collapse(flags map[string]undo, all map[string]bool) map[string]undo {
+	segs := map[string][]string{}
+	for p := range all {
+		segs[p] = pathKeys(p)
+	}
 	shown := map[string]undo{}
 	for path, f := range flags {
-		parts := strings.Split(path, ".")
+		parts := pathKeys(path)
 		pick := path
 		for n := 1; n < len(parts); n++ {
-			prefix := strings.Join(parts[:n], ".")
 			whole := true
 			for p := range all {
-				if p == prefix || strings.HasPrefix(p, prefix+".") {
+				if len(segs[p]) >= n && slices.Equal(segs[p][:n], parts[:n]) {
 					if g, ok := flags[p]; !ok || g != f {
 						whole = false
 						break
@@ -200,11 +203,20 @@ func collapse(flags map[string]undo, all map[string]bool) map[string]undo {
 				}
 			}
 			if whole {
-				pick = prefix
+				pick = draftmerge.JoinPath(parts[:n])
 				break
 			}
 		}
 		shown[pick] = f
 	}
 	return shown
+}
+
+// pathKeys is the keys of a dotted path, as draftmerge.JoinPath writes
+// them; a path it did not write, a secret's, splits at its dots.
+func pathKeys(path string) []string {
+	if keys, ok := draftmerge.SplitPath(path); ok {
+		return keys
+	}
+	return strings.Split(path, ".")
 }

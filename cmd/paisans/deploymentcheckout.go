@@ -140,7 +140,11 @@ func trustedHead(sys configstore.Local, id, sha string) (draft.Marker, configsto
 		return draft.Marker{}, configstore.Files{}, err
 	}
 	if !slices.Contains(t.heads, sha) {
-		return draft.Marker{}, configstore.Files{}, &ui.Problem{Hint: fmt.Sprintf("%q is not a trusted head of %s", sha, id), Explain: "--head takes the full hash of a head the system copy's store holds, as its own anchor judges it: " + strings.Join(t.heads, ", ") + "."}
+		heads := "--head takes the full hash of a head the system copy's store holds, as its own anchor judges it: " + strings.Join(t.heads, ", ") + "."
+		if current, err := sys.Head(); err == nil && current == sha {
+			return draft.Marker{}, configstore.Files{}, &ui.Problem{Hint: fmt.Sprintf("%s is the system copy's version, and no longer a head of its store", shortSHA(sha)), Explain: "The store holds newer trusted versions on it, gathered since the system copy was last moved. Check out the system copy's version without --head, or bring it to the newest with " + progname.Cmd() + " deployment pull. " + heads}
+		}
+		return draft.Marker{}, configstore.Files{}, &ui.Problem{Hint: fmt.Sprintf("%q is not a trusted head of %s", sha, id), Explain: heads}
 	}
 	cache, _, err := sys.HeldStore()
 	if err != nil {

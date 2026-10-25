@@ -143,3 +143,85 @@ func TestDraftMark(t *testing.T) {
 		t.Errorf(".sops.yaml written: %v", err)
 	}
 }
+
+// A CRLF marker line is stripped whole, its \r with it, and the rest is
+// kept byte for byte.
+func TestStripMarkerCRLFExact(t *testing.T) {
+	rest := "sites: {}\r\nother: 1\r\n"
+	in := []byte("# paisans: drafted from revision 4 (" + sha40 + ")\r\n" + rest)
+	if got := StripMarker(in); string(got) != rest {
+		t.Fatalf("got %q, want %q", got, rest)
+	}
+}
+
+// A first line that is nearly a marker is no marker: it is kept, and
+// WithMarker puts the marker above it rather than replacing it.
+func TestNearMissMarkerIsKept(t *testing.T) {
+	for name, line := range map[string]string{
+		"trailing space":   "# paisans: drafted from revision 4 (" + sha40 + ") ",
+		"no space after #": "#paisans: drafted from revision 4 (" + sha40 + ")",
+		"other words":      "# paisans: copied from revision 4 (" + sha40 + ")",
+		"byte order mark":  "\ufeff# paisans: drafted from revision 4 (" + sha40 + ")",
+	} {
+		in := []byte(line + "\nsites: {}\n")
+		if _, ok := ReadMarker(in); ok {
+			t.Errorf("%s: read as a marker", name)
+		}
+		if got := StripMarker(in); string(got) != string(in) {
+			t.Errorf("%s: stripped to %q", name, got)
+		}
+		if got := WithMarker(in, Marker{5, sha40}); !strings.HasSuffix(string(got), string(in)) {
+			t.Errorf("%s: replaced: %q", name, got)
+		}
+	}
+}
+
+// Mark writes through a paisans-stack.yaml that is a symbolic link: the
+// file it names gets the line, and the link stays a link.
+func TestDraftMarkThroughSymlink(t *testing.T) {
+	dir, elsewhere := t.TempDir(), t.TempDir()
+	target := filepath.Join(elsewhere, "real.yaml")
+	if err := os.WriteFile(target, []byte("sites: {}\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, config.FileName)
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := (Draft{Dir: dir}).Mark(Marker{2, sha40}); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("the link was replaced: %v %v", fi, err)
+	}
+	body, _ := os.ReadFile(target)
+	if m, ok := ReadMarker(body); !ok || m.Revision != 2 || string(StripMarker(body)) != "sites: {}\n" {
+		t.Fatalf("the file the link names is %q", body)
+	}
+	if fi, _ := os.Stat(target); fi.Mode().Perm() != 0o640 {
+		t.Errorf("mode %v", fi.Mode().Perm())
+	}
+}
+
+// A file that cannot be checked counts as there, so a folder Paisans cannot
+// read is never taken for one without a draft.
+func TestHasCountsAFileThatCannotBeChecked(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads every directory")
+	}
+	dir := filepath.Join(t.TempDir(), "locked")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+	d := Draft{Dir: dir}
+	if !d.Has() || !d.HasAny() {
+		t.Fatal("a folder that cannot be read reads as holding no draft")
+	}
+	if (Draft{Dir: t.TempDir()}).HasAny() {
+		t.Fatal("an empty folder holds a draft")
+	}
+}

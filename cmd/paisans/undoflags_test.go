@@ -69,6 +69,25 @@ func TestUndoFlagSiteAddedBack(t *testing.T) {
 	}
 }
 
+// A key with a dot in it is one segment: a site named home.b put back folds
+// to it, bracketed, and never into a nested path its dots would spell.
+func TestUndoFlagDottedKey(t *testing.T) {
+	both := "sites:\n  home:\n    b: kept\n  home.b:\n    host: b.example\n    port: 22\n"
+	one := "sites:\n  home:\n    b: kept\n"
+	sys, g, head := historyOf(t,
+		revision{14, both, noSecrets},
+		revision{15, one, noSecrets},
+		revision{16, one + "domain: x.example\n", noSecrets})
+	flags, err := undoFlags(sys, g, head, draftOf(both+"domain: x.example\n", noSecrets))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `sites["home.b"]: added back; revision 15 (signed by alice) removed it.`
+	if len(flags) != 1 || flags[0] != want {
+		t.Errorf("flags = %q, want [%q]", flags, want)
+	}
+}
+
 func TestUndoFlagValueChangedTwice(t *testing.T) {
 	sys, g, head := historyOf(t,
 		revision{1, "domain: one.example\n", noSecrets},

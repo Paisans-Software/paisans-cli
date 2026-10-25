@@ -166,7 +166,9 @@ func headOf(cache configstore.Repo, id, sha string) (draft.Marker, configstore.F
 func draftFiles(d draft.Draft) []string {
 	var held []string
 	for _, name := range []string{config.FileName, configstore.FileSecrets, configstore.FileSOPS} {
-		if _, err := os.Lstat(filepath.Join(d.Dir, name)); err == nil {
+		// One that cannot be checked counts as there, so it is never
+		// written over.
+		if _, err := os.Lstat(filepath.Join(d.Dir, name)); !errors.Is(err, os.ErrNotExist) {
 			held = append(held, filepath.Join(d.Dir, name))
 		}
 	}

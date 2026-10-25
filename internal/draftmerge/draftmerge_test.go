@@ -2,6 +2,7 @@ package draftmerge
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -199,5 +200,48 @@ func TestConfigRootConflictNamesTheWholeFile(t *testing.T) {
 	_, conflicts := merge(t, "a\n", "b\n", "c\n")
 	if !reflect.DeepEqual(conflicts, []string{"(whole file)"}) {
 		t.Fatalf("conflicts %v", conflicts)
+	}
+}
+
+// A key holding a dot is one segment, bracketed, so it never collides with
+// the nested path its dotted spelling would name, in the paths and in a
+// conflict's label.
+func TestDottedKeysDoNotCollide(t *testing.T) {
+	doc := []byte("a.b: 1\na:\n  b: 2\n")
+	got, err := Paths(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[`["a.b"]`] != "1" || got["a.b"] != "2" || len(got) != 2 {
+		t.Fatalf("paths %v", got)
+	}
+	_, conflicts, err := Config([]byte("x.y: 1\n"), []byte("x.y: 2\n"), []byte("x.y: 3\n"))
+	if err != nil || len(conflicts) != 1 || conflicts[0] != `["x.y"]` {
+		t.Fatalf("conflicts %q, %v", conflicts, err)
+	}
+	for _, keys := range [][]string{{"sites", "home.a", "host"}, {"a"}, {"", "b"}, {`q"[x]`, "y"}} {
+		back, ok := SplitPath(JoinPath(keys))
+		if !ok || !slices.Equal(back, keys) {
+			t.Errorf("%q: %q round trips to %q, %v", keys, JoinPath(keys), back, ok)
+		}
+	}
+	if JoinPath([]string{"sites", "home.a", "host"}) != `sites["home.a"].host` {
+		t.Errorf("got %s", JoinPath([]string{"sites", "home.a", "host"}))
+	}
+}
+
+// An inline merge key, which needs no anchor, is refused as an alias is:
+// the merge cannot place what it merges in.
+func TestInlineMergeKeyRefused(t *testing.T) {
+	doc := []byte("a:\n  <<: {x: 1}\n  y: 2\n")
+	if _, _, err := Config([]byte("a: {y: 1}\n"), doc, []byte("a: {y: 3}\n")); err == nil || !strings.Contains(err.Error(), "merge key") {
+		t.Fatalf("got %v", err)
+	}
+	if _, err := Paths(doc); err == nil {
+		t.Fatal("Paths took a merge key")
+	}
+	// A quoted "<<" is an ordinary key.
+	if _, err := Paths([]byte("a:\n  \"<<\": 1\n")); err != nil {
+		t.Fatalf("a quoted key: %v", err)
 	}
 }

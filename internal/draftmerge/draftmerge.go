@@ -13,7 +13,7 @@
 // differently on the two, is a conflict: the merge keeps ours there and
 // lists it. Comments and key order come from ours; a path only theirs adds
 // is appended under its parent, in theirs' order. A document with a YAML
-// anchor, an alias or a key given twice is refused.
+// anchor, an alias, a merge key (<<) or a key given twice is refused.
 package draftmerge
 
 import (
@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -43,8 +44,8 @@ func SOPS(base, ours, theirs []byte) (merged []byte, conflicts []string, err err
 	return run(base, ours, theirs)
 }
 
-// Paths is every value of a YAML document by dotted path, as the merge
-// compares them: a mapping key is a path segment, and a sequence, a scalar
+// Paths is every value of a YAML document by dotted path (JoinPath), as the
+// merge compares them: a mapping key is a path segment, and a sequence, a scalar
 // or an empty mapping is one value, its canonical YAML. A document that is
 // not a mapping is one value at "".
 func Paths(doc []byte) (map[string]string, error) {
@@ -72,8 +73,66 @@ func flatten(path []string, n *yaml.Node, out map[string]string) error {
 	if err != nil {
 		return err
 	}
-	out[strings.Join(path, ".")] = c
+	out[JoinPath(path)] = c
 	return nil
+}
+
+// JoinPath is the dotted path of a list of mapping keys: each key a
+// segment, after a dot. A key that is empty, or holds a dot, a bracket or
+// a double quote, is written ["key"] instead, quoted as Go quotes a string,
+// so a key with a dot in it is never read as two segments.
+func JoinPath(keys []string) string {
+	var b strings.Builder
+	for i, k := range keys {
+		if k == "" || strings.ContainsAny(k, `.[]"`) {
+			b.WriteString("[" + strconv.Quote(k) + "]")
+			continue
+		}
+		if i > 0 {
+			b.WriteByte('.')
+		}
+		b.WriteString(k)
+	}
+	return b.String()
+}
+
+// SplitPath is the mapping keys of a path JoinPath wrote, and false for one
+// it did not write.
+func SplitPath(path string) ([]string, bool) {
+	var keys []string
+	for path != "" {
+		if path[0] == '[' {
+			ok := false
+			for end := 1; end < len(path) && !ok; end++ {
+				if path[end] != ']' {
+					continue
+				}
+				if k, err := strconv.Unquote(path[1:end]); err == nil {
+					keys, path, ok = append(keys, k), path[end+1:], true
+				}
+			}
+			if !ok {
+				return nil, false
+			}
+		} else {
+			i := strings.IndexAny(path, ".[")
+			if i < 0 {
+				i = len(path)
+			}
+			if i == 0 {
+				return nil, false
+			}
+			keys = append(keys, path[:i])
+			path = path[i:]
+		}
+		if strings.HasPrefix(path, ".") {
+			path = path[1:]
+			if path == "" || strings.HasPrefix(path, "[") {
+				return nil, false
+			}
+		}
+	}
+	return keys, true
 }
 
 // canon is n's value as YAML with no comment and no style of its own.
@@ -90,8 +149,8 @@ func canon(n *yaml.Node) (string, error) {
 }
 
 // parse is doc's document node and its root, nil for an empty document.
-// A document with an anchor, an alias or a mapping key given twice is
-// refused: the toolkit writes none, and a merge path by path cannot place
+// A document with an anchor, an alias, a merge key or a mapping key given
+// twice is refused: the toolkit writes none, and a merge path by path cannot place
 // what they share.
 func parse(doc []byte, what string) (*yaml.Node, *yaml.Node, error) {
 	var n yaml.Node
@@ -107,8 +166,8 @@ func parse(doc []byte, what string) (*yaml.Node, *yaml.Node, error) {
 	return &n, n.Content[0], nil
 }
 
-// plain refuses a node tree holding an anchor, an alias or a mapping key
-// given twice.
+// plain refuses a node tree holding an anchor, an alias, a merge key or a
+// mapping key given twice.
 func plain(n *yaml.Node) error {
 	if n.Kind == yaml.AliasNode || n.Anchor != "" {
 		return fmt.Errorf("uses a YAML anchor or alias at line %d, which a merge cannot place; replace each alias with the value it names by hand, and remove the anchor", n.Line)
@@ -117,6 +176,9 @@ func plain(n *yaml.Node) error {
 		seen := map[string]bool{}
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			k := n.Content[i].Value
+			if n.Content[i].Tag == "!!merge" {
+				return fmt.Errorf("uses a YAML merge key (<<) at line %d, which a merge cannot place; write out the keys it merges in by hand, and remove it", n.Content[i].Line)
+			}
 			if seen[k] {
 				return fmt.Errorf("gives the key %q twice at line %d", k, n.Content[i].Line)
 			}
@@ -259,7 +321,7 @@ func (m *merger) conflict(path []string, b, o, t *yaml.Node) {
 		found = append(found, p)
 	}
 	if len(found) == 0 {
-		found = []string{strings.Join(path, ".")}
+		found = []string{JoinPath(path)}
 	}
 	for _, p := range found {
 		m.conflicts = append(m.conflicts, label(p))

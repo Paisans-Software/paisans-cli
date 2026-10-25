@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -75,25 +77,50 @@ func checkout(dir string, more ...string) error {
 	return runDeployment(append([]string{"checkout", "--config", filepath.Join(dir, config.FileName)}, more...), noTerminalStdin(), &bytes.Buffer{})
 }
 
+// installedBlueprints records the blueprints a write installs, in place of
+// installing them.
+func installedBlueprints(t *testing.T) *map[string][]byte {
+	t.Helper()
+	got := map[string][]byte{}
+	saved := configstore.InstallBlueprints
+	configstore.InstallBlueprints = func(m map[string][]byte) error { got = m; return nil }
+	t.Cleanup(func() { configstore.InstallBlueprints = saved })
+	return &got
+}
+
+// wantDraft fails the test unless dir holds exactly the three files of want,
+// byte for byte, under the line m, and the blueprints installed are want's.
+func wantDraft(t *testing.T, dir string, m draft.Marker, want configstore.Files, installed map[string][]byte) {
+	t.Helper()
+	got := fileContents(t, dir)
+	exact := map[string]string{
+		config.FileName:         string(draft.WithMarker(want.Paisans, m)),
+		configstore.FileSecrets: string(want.Secrets),
+		configstore.FileSOPS:    string(want.SOPS),
+	}
+	if !maps.Equal(got, exact) {
+		t.Errorf("the folder holds %v, want the three files of revision %d", slices.Sorted(maps.Keys(got)), m.Revision)
+		for name, body := range exact {
+			if got[name] != body {
+				t.Errorf("%s differs:\n%s", name, got[name])
+			}
+		}
+	}
+	if len(want.Blueprints) == 0 || !maps.EqualFunc(installed, want.Blueprints, bytes.Equal) {
+		t.Errorf("installed %d blueprint files, want the version's %d", len(installed), len(want.Blueprints))
+	}
+}
+
 // A checkout starts a draft from the system copy: its head's files, with the
 // line naming that head, and the system copy is left as it was.
 func TestCheckoutStartsDraft(t *testing.T) {
 	c := newSavedCopy(t)
+	installed := installedBlueprints(t)
 	dir := filepath.Join(t.TempDir(), "work")
 	if err := checkout(dir, "--execute"); err != nil {
 		t.Fatal(problemText(err))
 	}
-	got, err := draft.Draft{Dir: dir}.Files()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if m, ok := draft.ReadMarker(got.Paisans); !ok || m != (draft.Marker{Revision: 1, SHA: c.shas[0]}) {
-		t.Errorf("marker %v, %v", m, ok)
-	}
-	got.Paisans, got.Blueprints = draft.StripMarker(got.Paisans), c.files[0].Blueprints
-	if !got.Equal(c.files[0]) {
-		t.Error("the draft is not the system copy's files")
-	}
+	wantDraft(t, dir, draft.Marker{Revision: 1, SHA: c.shas[0]}, c.files[0], *installed)
 	if fi, _ := os.Stat(filepath.Join(dir, "secrets.enc.yaml")); fi.Mode().Perm() != 0o600 {
 		t.Errorf("secrets.enc.yaml is %v", fi.Mode().Perm())
 	}
@@ -118,21 +145,12 @@ func TestCheckoutStartsDraft(t *testing.T) {
 // not a trusted head is refused.
 func TestCheckoutHeadWritesThatHead(t *testing.T) {
 	c := newSavedCopy(t)
+	installed := installedBlueprints(t)
 	dir := t.TempDir()
 	if err := checkout(dir, "--head", c.shas[1], "--execute"); err != nil {
 		t.Fatal(problemText(err))
 	}
-	got, err := draft.Draft{Dir: dir}.Files()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if m, ok := draft.ReadMarker(got.Paisans); !ok || m != (draft.Marker{Revision: 2, SHA: c.shas[1]}) {
-		t.Errorf("marker %v, %v", m, ok)
-	}
-	got.Paisans, got.Blueprints = draft.StripMarker(got.Paisans), c.files[1].Blueprints
-	if !got.Equal(c.files[1]) {
-		t.Error("the draft is not the head's files")
-	}
+	wantDraft(t, dir, draft.Marker{Revision: 2, SHA: c.shas[1]}, c.files[1], *installed)
 	if h, _ := c.l.Head(); h != c.shas[0] {
 		t.Errorf("the system copy moved to %s", h)
 	}
@@ -141,6 +159,11 @@ func TestCheckoutHeadWritesThatHead(t *testing.T) {
 		err := checkout(dir, "--head", sha, "--execute")
 		if text := problemText(err); err == nil || !strings.Contains(text, c.shas[1]) {
 			t.Errorf("%s: %v\n%s", sha, err, text)
+		}
+		// The system copy's own version, behind a newer head, is named as
+		// the one it is.
+		if text := problemText(err); sha == c.shas[0] && !strings.Contains(text, shortSHA(sha)+" is the system copy's version") {
+			t.Errorf("the refusal does not say %s is the system copy's version:\n%s", sha, text)
 		}
 		if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 			t.Errorf("%s: wrote %v", sha, entries)
