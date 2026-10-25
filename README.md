@@ -3206,7 +3206,8 @@ account, and writes the public key to `.sops.yaml`. The key is never printed,
 because a secret on a terminal is in a scrollback buffer and this one opens
 every other. With no keystore, `init` refuses unless you name a file with
 `--age-private-key-file <path>`, outside the directory that holds
-`paisans-stack.yaml`, since that directory is usually a git repository.
+`paisans-stack.yaml`, since that directory is usually a git repository, and
+outside any git repository that does not ignore the file.
 `init` names the keystore item or file it kept the key in, without
 `--verbose`, since the operator has to know where the only copy is; with a
 file, it also prints the `export SOPS_AGE_KEY_FILE=` line later commands need.
@@ -4876,7 +4877,8 @@ is the version the "drafted from" line names, ours is the draft, theirs is the
 sites' newest.
 
 * `paisans-stack.yaml` and `.sops.yaml` merge path by path on their YAML node
-  trees. A list is one value, and comments and key order come from the draft.
+  trees. A list is one value, and comments, key order and the blank lines
+  between keys come from the draft.
   `creation_rules` in `.sops.yaml` is always one value, since its recipients
   decide who can read the secrets. A file with a YAML anchor, an alias or a
   merge key (`<<`) is refused, since a merge cannot place one; write out the

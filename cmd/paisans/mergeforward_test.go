@@ -248,6 +248,10 @@ func TestApplyMergesNewerThenStops(t *testing.T) {
 	if text := problemText(err); err == nil || !strings.Contains(text, "--execute merges revision 2 into this draft") {
 		t.Fatalf("dry run: %v\n%s", text, rec.Lines())
 	}
+	// The draft's base is named by its revision, as the sites' newest is.
+	if text := problemText(err); !strings.Contains(text, "drafted from revision 1, "+f.shas[0][:12]) {
+		t.Errorf("dry run does not name the base's revision: %s", text)
+	}
 	if !maps.Equal(rawFiles(t, f.sys.Dir), sysBefore) || !maps.Equal(rawFiles(t, f.dir), draftBefore) {
 		t.Error("a dry run changed the system copy's files or the draft")
 	}

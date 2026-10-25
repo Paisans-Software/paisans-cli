@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -258,6 +259,46 @@ func TestInitAgePrivateKeyFileRefusals(t *testing.T) {
 			t.Error("a key file was written")
 		}
 	})
+}
+
+// A key file inside a git repository is refused unless git ignores it, and
+// a directory that holds no paisans-stack.yaml, as operator register
+// --invite runs in, is no reason to refuse one.
+func TestWriteKeyFileGitRepository(t *testing.T) {
+	identity, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := identity.String()
+	const id = "ba69b17d-83bf-43d2-a326-587bcf051b1d"
+	repo := t.TempDir()
+	if out, err := exec.Command("git", "init", "-q", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	nowhere := filepath.Join(t.TempDir(), config.FileName)
+
+	_, err = writeKeyFile("operator register", id, nowhere, filepath.Join(repo, "keys", "..", "jane.key"), key)
+	if err == nil || !strings.Contains(err.Error(), "inside a git repository") {
+		t.Fatalf("writeKeyFile = %v, want a refusal", err)
+	}
+	if real, _ := filepath.EvalSymlinks(repo); !strings.Contains(problemText(err), "is inside "+real+", a git repository") {
+		t.Errorf("writeKeyFile = %v, want it to name %s", problemText(err), real)
+	}
+	if exists(t, filepath.Join(repo, "jane.key")) {
+		t.Error("the key file was written")
+	}
+
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("*.key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writeKeyFile("operator register", id, nowhere, filepath.Join(repo, "jane.key"), key); err != nil {
+		t.Errorf("writeKeyFile ignored by git = %v, want it written", err)
+	}
+
+	dir := t.TempDir()
+	if _, err := writeKeyFile("operator register", id, filepath.Join(dir, config.FileName), filepath.Join(dir, "jane.key"), key); err != nil {
+		t.Errorf("writeKeyFile beside no %s = %v, want it written", config.FileName, err)
+	}
 }
 
 // lookupStore is a keystore with a lookup command, as the Keychain and the

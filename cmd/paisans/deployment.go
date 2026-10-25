@@ -741,7 +741,7 @@ func difference(a, b configstore.Files, s sides) ([]string, error) {
 			out = append(out, ui.Visible(line))
 		}
 	}
-	out = append(out, secretsKeyChanges(a.Secrets, b.Secrets, s)...)
+	out = append(out, secretsKeyChanges(a, b, s)...)
 	if !bytesEqual(a.SOPS, b.SOPS) {
 		out = append(out, ".sops.yaml differs")
 	}
@@ -781,14 +781,16 @@ func unifiedDiff(a, b []byte, nameA, nameB string) (string, error) {
 }
 
 // secretsKeyChanges names each key of the secrets file that is only on one
-// side, as s names the sides, or whose stored value differs, never a value.
-// The file is compared as stored, encrypted, and sops's own metadata is left
-// out; a re-encrypted file differs at every key.
-func secretsKeyChanges(local, theirs []byte, s sides) []string {
-	a, errA := flatKeys(local)
-	b, errB := flatKeys(theirs)
+// side, as s names the sides, or whose value differs, never a value. The
+// file is compared as stored, encrypted, and sops's own metadata is left
+// out. Where this workstation can decrypt both sides, a key whose stored
+// value differs is compared decrypted, so a file re-encrypted to other
+// recipients differs at no key whose value it kept.
+func secretsKeyChanges(local, theirs configstore.Files, s sides) []string {
+	a, errA := flatKeys(local.Secrets)
+	b, errB := flatKeys(theirs.Secrets)
 	if errA != nil || errB != nil {
-		if !bytesEqual(local, theirs) {
+		if !bytesEqual(local.Secrets, theirs.Secrets) {
 			return []string{"secrets.enc.yaml differs, and cannot be read as YAML to say where"}
 		}
 		return nil
@@ -806,9 +808,18 @@ func secretsKeyChanges(local, theirs []byte, s sides) []string {
 		names = append(names, k)
 	}
 	sort.Strings(names)
+	var pa, pb map[string]string
+	for _, k := range names {
+		if va, vb := a[k], b[k]; va != vb && pa == nil {
+			pa, pb = plainKeys(local), plainKeys(theirs)
+		}
+	}
 	for _, k := range names {
 		va, inA := a[k]
 		vb, inB := b[k]
+		if pa != nil && pb != nil && inA && inB && va != vb {
+			va, vb = pa[k], pb[k]
+		}
 		switch {
 		case inA && !inB:
 			out = append(out, "secrets: "+ui.Visible(k)+" only in "+s.inA)
@@ -817,6 +828,31 @@ func secretsKeyChanges(local, theirs []byte, s sides) []string {
 		case va != vb:
 			out = append(out, "secrets: "+ui.Visible(k)+" differs")
 		}
+	}
+	return out
+}
+
+// plainKeys is f's secrets decrypted, by dotted key as flatKeys names them,
+// or nil when this workstation cannot decrypt them. The deployment id that
+// finds the key is f's paisans-stack.yaml's.
+func plainKeys(f configstore.Files) map[string]string {
+	var doc struct {
+		ID string `yaml:"id"`
+	}
+	if err := yaml.Unmarshal(draft.StripMarker(f.Paisans), &doc); err != nil || doc.ID == "" {
+		return nil
+	}
+	secrets, err := config.DecryptSecretsBytes(f.Secrets, doc.ID)
+	if err != nil {
+		return nil
+	}
+	data, err := yaml.Marshal(secrets)
+	if err != nil {
+		return nil
+	}
+	out, err := flatKeys(data)
+	if err != nil {
+		return nil
 	}
 	return out
 }

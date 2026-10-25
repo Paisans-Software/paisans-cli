@@ -190,7 +190,11 @@ func mergeNewer(r ui.Reporter, p deployer, g configstore.Gathered, execute bool)
 	}
 	rev := m.marker.Revision
 	if !execute {
-		explain := fmt.Sprintf("The draft was drafted from %s, and the sites hold %s, which applying the draft would undo. --execute merges revision %d into this draft and stops, so the merged draft is reviewed before it is deployed.", shortSHA(p.base), describe(g, head), rev)
+		from := shortSHA(p.base)
+		if _, ok := g.Versions[p.base]; ok {
+			from = describe(g, p.base)
+		}
+		explain := fmt.Sprintf("The draft was drafted from %s, and the sites hold %s, which applying the draft would undo. --execute merges revision %d into this draft and stops, so the merged draft is reviewed before it is deployed.", from, describe(g, head), rev)
 		if len(m.conflicts) > 0 {
 			explain += "\n" + conflictsExplain(m)
 		}
@@ -243,8 +247,9 @@ func showChange(r ui.Reporter, sys configstore.Local, g configstore.Gathered, pa
 	}
 	s.End(ui.OK, "the draft against "+describe(g, head))
 	if len(lines) == 0 {
-		// Equal keys and values, stored differently: sops's metadata.
-		lines = []string{"secrets.enc.yaml differs only in sops's metadata"}
+		// Equal keys and values, stored differently: encrypted again, or
+		// sops's metadata.
+		lines = []string{"secrets.enc.yaml differs only in how it is encrypted: no key or value changed"}
 	}
 	r.Verbatim(lines)
 	// The history is only advice: a version that cannot be read for it does

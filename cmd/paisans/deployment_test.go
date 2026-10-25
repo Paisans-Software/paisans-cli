@@ -420,10 +420,42 @@ func TestConfigPullOverEditsShowsTheDifference(t *testing.T) {
 }
 
 func TestSecretsKeyChangesNamesKeysOnly(t *testing.T) {
-	got := secretsKeyChanges([]byte("a:\n  b: ENC[x]\n  c: ENC[y]\nsops:\n  mac: m1\n"), []byte("a:\n  b: ENC[x]\n  c: ENC[z]\n  d: ENC[w]\nsops:\n  mac: m2\n"), localAndHead)
+	got := secretsKeyChanges(configstore.Files{Secrets: []byte("a:\n  b: ENC[x]\n  c: ENC[y]\nsops:\n  mac: m1\n")}, configstore.Files{Secrets: []byte("a:\n  b: ENC[x]\n  c: ENC[z]\n  d: ENC[w]\nsops:\n  mac: m2\n")}, localAndHead)
 	want := []string{"secrets: a.c differs", "secrets: a.d only in the head"}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("got %q", got)
+	}
+}
+
+// A secrets file re-encrypted to one more recipient differs at no key whose
+// value it kept, when this workstation can decrypt both sides; a changed
+// value still differs.
+func TestSecretsKeyChangesComparesDecrypted(t *testing.T) {
+	ours, other := ageIdentity(t), ageIdentity(t)
+	t.Setenv("SOPS_AGE_KEY", ours.String())
+	const id = "ba69b17d-83bf-43d2-a326-587bcf051b1d"
+	files := func(token string, recipients ...string) configstore.Files {
+		t.Helper()
+		data, err := config.WriteSecretsBytes(filepath.Join(t.TempDir(), "secrets.enc.yaml"), &config.Secrets{Version: 1, ID: id, External: map[string]string{"acme_dns_token": token}}, recipients)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return configstore.Files{Paisans: []byte("id: " + id + "\n"), Secrets: data}
+	}
+	one := files("not-a-real-token-1", ours.Recipient().String())
+	two := files("not-a-real-token-1", ours.Recipient().String(), other.Recipient().String())
+	if got := secretsKeyChanges(one, two, localAndHead); len(got) != 0 {
+		t.Errorf("re-encrypted only: got %q, want nothing", got)
+	}
+	changed := files("not-a-real-token-2", ours.Recipient().String(), other.Recipient().String())
+	got := secretsKeyChanges(one, changed, localAndHead)
+	if strings.Join(got, "|") != "secrets: external.acme_dns_token differs" {
+		t.Errorf("changed: got %q", got)
+	}
+	for _, line := range got {
+		if strings.Contains(line, "not-a-real-token") {
+			t.Errorf("a value was shown: %q", line)
+		}
 	}
 }
 

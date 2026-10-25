@@ -26,7 +26,7 @@ func runOperatorAgeKey(args []string, stdout io.Writer) error {
 	reporter := commonFlags(fs)
 	id := fs.String("id", "", "the deployment id the key is kept under (default: the id in the configuration beside it)")
 	configPath := fs.String("config", config.FileName, configHelp)
-	keyFile := fs.String("age-private-key-file", "", "keep the key in this file, outside the configuration's directory, rather than the keystore; an existing file is read")
+	keyFile := fs.String("age-private-key-file", "", "keep the key in this file, outside the configuration's directory and any git repository that does not ignore it, rather than the keystore; an existing file is read")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

@@ -245,3 +245,79 @@ func TestInlineMergeKeyRefused(t *testing.T) {
 		t.Fatalf("a quoted key: %v", err)
 	}
 }
+
+// The blank lines between keys survive a merge: ours' where ours has a key,
+// theirs' before a key only theirs adds, and none where neither has one.
+func TestConfigKeepsBlankLines(t *testing.T) {
+	base := `# header
+
+version: 1
+community:
+  name: x
+
+sites:
+  solo:
+    keys: [john]
+
+apps:
+  auth:
+    app_name: Test
+`
+	ours := `# header
+
+version: 1
+community:
+  name: x
+
+sites:
+  solo:
+    keys: [john]
+
+# john: a comment of ours.
+apps:
+  auth:
+    app_name: Test
+`
+	theirs := `# header
+
+version: 1
+community:
+  name: x
+
+sites:
+  solo:
+    keys: [john]
+
+apps:
+  auth:
+    app_name: Theirs
+
+storage:
+  garage: {}
+`
+	want := `# header
+
+version: 1
+community:
+  name: x
+
+sites:
+  solo:
+    keys: [john]
+
+# john: a comment of ours.
+apps:
+  auth:
+    app_name: Theirs
+
+storage:
+  garage: {}
+`
+	got, conflicts := merge(t, base, ours, theirs)
+	if len(conflicts) != 0 {
+		t.Fatalf("conflicts %v", conflicts)
+	}
+	if got != want {
+		t.Errorf("merged:\n%s\nwant:\n%s", got, want)
+	}
+}

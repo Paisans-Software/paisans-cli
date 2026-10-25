@@ -11,8 +11,9 @@
 // sides is taken; a path removed on one side and unchanged on the other is
 // removed. A path removed on one side and changed on the other, or changed
 // differently on the two, is a conflict: the merge keeps ours there and
-// lists it. Comments and key order come from ours; a path only theirs adds
-// is appended under its parent, in theirs' order. A document with a YAML
+// lists it. Comments, key order and the blank lines before keys come from
+// ours; a path only theirs adds is appended under its parent, in theirs'
+// order, with theirs' blank line before it. A document with a YAML
 // anchor, an alias, a merge key (<<) or a key given twice is refused.
 package draftmerge
 
@@ -212,6 +213,9 @@ func run(base, ours, theirs []byte) ([]byte, []string, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	spaced := map[*yaml.Node]bool{}
+	blankBefore(ours, o, spaced)
+	blankBefore(theirs, t, spaced)
 	m := &merger{}
 	root := m.value(nil, b, o, t)
 	if m.err != nil {
@@ -238,7 +242,77 @@ func run(base, ours, theirs []byte) ([]byte, []string, error) {
 	if err := enc.Close(); err != nil {
 		return nil, nil, err
 	}
-	return out.Bytes(), m.conflicts, nil
+	encoded, err := respace(out.Bytes(), root, spaced)
+	if err != nil {
+		return nil, nil, err
+	}
+	return encoded, m.conflicts, nil
+}
+
+// blankBefore marks in spaced each mapping key under n that src, the
+// document n was parsed from, has a blank line before, above its comment.
+// The encoder writes none, so respace puts them back.
+func blankBefore(src []byte, n *yaml.Node, spaced map[*yaml.Node]bool) {
+	if n == nil {
+		return
+	}
+	lines := strings.Split(string(src), "\n")
+	var walk func(n *yaml.Node)
+	walk = func(n *yaml.Node) {
+		for i, c := range n.Content {
+			if n.Kind == yaml.MappingNode && i%2 == 0 {
+				if above := top(c) - 2; above >= 0 && above < len(lines) && strings.TrimSpace(lines[above]) == "" {
+					spaced[c] = true
+				}
+			}
+			walk(c)
+		}
+	}
+	walk(n)
+}
+
+// top is the first line of key k, its comment included.
+func top(k *yaml.Node) int {
+	if k.HeadComment == "" {
+		return k.Line
+	}
+	return k.Line - strings.Count(k.HeadComment, "\n") - 1
+}
+
+// respace is out, the encoding of root, with a blank line before each key
+// spaced marks. out is parsed again so each key's line is known; its tree
+// is root's, node for node.
+func respace(out []byte, root *yaml.Node, spaced map[*yaml.Node]bool) ([]byte, error) {
+	if len(spaced) == 0 {
+		return out, nil
+	}
+	_, again, err := parse(out, "the merge")
+	if err != nil || again == nil {
+		return out, err
+	}
+	blank := map[int]bool{}
+	var walk func(m, a *yaml.Node)
+	walk = func(m, a *yaml.Node) {
+		if len(m.Content) != len(a.Content) {
+			return
+		}
+		for i := range m.Content {
+			if m.Kind == yaml.MappingNode && i%2 == 0 && spaced[m.Content[i]] {
+				blank[top(a.Content[i])] = true
+			}
+			walk(m.Content[i], a.Content[i])
+		}
+	}
+	walk(root, again)
+	lines := strings.SplitAfter(string(out), "\n")
+	var b strings.Builder
+	for i, l := range lines {
+		if blank[i+1] && i > 0 && strings.TrimSpace(lines[i-1]) != "" {
+			b.WriteString("\n")
+		}
+		b.WriteString(l)
+	}
+	return []byte(b.String()), nil
 }
 
 // merger is one merge: the paths that conflict, whether anything was taken

@@ -264,8 +264,8 @@ under `--verbose`.
   its own to see what is owed before any host is changed, or to generate the
   secrets for a site or app just declared without applying anything.
 * **Flags:** `--config`, `--secrets`, `--age-private-key-file <path>` (keep a
-  newly made age key in this file, outside the configuration's directory,
-  instead of the keystore), `--yes` (ask nothing: skip each site not
+  newly made age key in this file, outside the configuration's directory and
+  any git repository that does not ignore it, instead of the keystore), `--yes` (ask nothing: skip each site not
   admitted, with the commands that admit it). `--yes` never admits a host:
   admitting stays the host owner's explicit step.
 * **Age key:** for a deployment with no secrets file and no `.sops.yaml`, it
@@ -614,7 +614,7 @@ paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # o
   from" line names, or, without a usable line, the system copy's version
   before the pull. `paisans-stack.yaml` and `.sops.yaml` merge path by path on
   their YAML node trees, a list being one value and `creation_rules` always
-  one value, with the draft's comments and key order kept; a file with a YAML
+  one value, with the draft's comments, key order and blank lines kept; a file with a YAML
   anchor, an alias or a merge key (`<<`) is refused. The secrets merge key by key, decrypted with
   this workstation's age key and encrypted again to the merged `.sops.yaml`'s
   recipients. A path both sides changed differently is a conflict: the draft
