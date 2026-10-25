@@ -33,6 +33,7 @@ changes share a bullet. Detailed notes are on the corresponding
 ### Removed
 
 - `deployment apply`, `publish`, `pull`, `recover` and `operator register` no longer ask for `partial` when few sites answer; each goes ahead on whichever sites do.
+- `create` no longer writes a `# Written by paisans <version>` line atop `paisans-stack.yaml`; each saved version's history records the build that applied it.
 
 ## [0.3.0-rc.8] - 2026-10-23
 

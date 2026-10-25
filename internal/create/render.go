@@ -25,20 +25,12 @@ var fileTemplate = template.Must(template.New(config.FileName).Funcs(template.Fu
 // it overlaps anything there.
 const MeshSubnet = "10.44.0.0/24"
 
-// Origin is what the file's first line says wrote it: the paisans binary's
-// version and the date it was written.
-type Origin struct {
-	Version string
-	Date    string
-}
-
 // Render writes the answers as a commented paisans-stack.yaml with deployment id
-// id, naming by as what wrote it. What follows from the answers rather than being asked (placement,
+// id. What follows from the answers rather than being asked (placement,
 // object storage, replication, etcd timings) is decided here, so the same
 // answers always give the same file.
-func Render(a Answers, id string, by Origin) ([]byte, error) {
+func Render(a Answers, id string) ([]byte, error) {
 	v := build(a, id)
-	v.Origin = by
 	var out bytes.Buffer
 	if err := fileTemplate.Execute(&out, v); err != nil {
 		return nil, fmt.Errorf("rendering "+config.FileName+": %w", err)
@@ -48,7 +40,6 @@ func Render(a Answers, id string, by Origin) ([]byte, error) {
 
 // view is the template's data: the answers, and what follows from them.
 type view struct {
-	Origin      Origin
 	ID          string
 	Subnet      string
 	Name        string

@@ -1,5 +1,3 @@
-# Written by paisans v0.0.0-test on 2026-01-02.
-#
 # This file is plain and safe to commit. It holds no secrets: those live in
 # secrets.enc.yaml, encrypted with sops and age, which `paisans init` makes.
 
