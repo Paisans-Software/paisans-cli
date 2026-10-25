@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/draft"
 	"github.com/paisans-software/paisans-cli/internal/localstore"
@@ -665,6 +667,59 @@ func TestRegisterThenCheckout(t *testing.T) {
 	}
 	if out := listed(t); !strings.Contains(out, shortSHA(head)) || !strings.Contains(out, "attested by operator register") || strings.Contains(out, "unverified") {
 		t.Errorf("deployment list does not show the attestation:\n%s", out)
+	}
+}
+
+// An attestation no site took is taken back whole: the system copy's head,
+// records and files are as they were and its store names no version only
+// this workstation holds. So once another operator deploys on the version
+// it attested, there is no fork here: a pull brings that version, and
+// register attests it.
+func TestRegisterTakesBackAnAttestationNoSiteTook(t *testing.T) {
+	var runs []string
+	s, akey, yaml, shas, l := aliceAndBob(t, &runs)
+	answer := s.answer(t)
+	refuse := func(all bool) {
+		configSiteTransport = func(name string, _ config.Site) apply.Transport {
+			return &storeHost{name: name, answer: answer, runs: &runs, noPush: all}
+		}
+	}
+	refuse(true)
+	before := fileContents(t, l.sys.Dir)
+	err := runOperator([]string{"register", "--root", shas[0], "--config", l.config(), "--execute"}, noTerminalStdin(), &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("an attestation no site took was reported registered")
+	}
+	after := fileContents(t, l.sys.Dir)
+	for _, name := range []string{"paisans-stack.yaml", "secrets.enc.yaml", ".sops.yaml", ".paisans/config-head", ".paisans/config-root", ".paisans/config-seen", ".paisans/signing-key", "saved.json"} {
+		if after[name] != before[name] {
+			t.Errorf("%s is not as it was: %q, was %q", name, after[name], before[name])
+		}
+	}
+	// The gather brought the first version; the attestation is dropped.
+	if now := must(must(l.sys.Cache()).Versions(os.DevNull)); len(now) != 1 || now[0].SHA != shas[0] {
+		t.Fatalf("the store names %+v, want only the sites' %s", now, shas[0])
+	}
+
+	// alice deploys on the first version; this workstation pulls it.
+	v2, _ := s.commit(t, yaml, "# alice's change\n", []string{shas[0]}, 2, akey)
+	answer = s.answer(t)
+	refuse(false)
+	empty := filepath.Join(t.TempDir(), "paisans-stack.yaml")
+	if err := runDeployment([]string{"pull", "--root", shas[0], "--config", empty, "--execute"}, noTerminalStdin(), &bytes.Buffer{}); err != nil {
+		t.Fatal(problemText(err))
+	}
+	if h, _ := l.sys.Head(); h != v2 {
+		t.Fatalf("head %s, want alice's %s", h, v2)
+	}
+	if err := runOperator([]string{"register", "--root", shas[0], "--config", l.config(), "--execute"}, noTerminalStdin(), &bytes.Buffer{}); err != nil {
+		t.Fatal(problemText(err))
+	}
+	head, _ := l.sys.Head()
+	vs := must(must(l.sys.Cache()).Versions(os.DevNull))
+	i := slices.IndexFunc(vs, func(v configstore.Version) bool { return v.SHA == head })
+	if i < 0 || !slices.Equal(vs[i].Parents, []string{v2}) || vs[i].Revision != 3 {
+		t.Fatalf("the attestation is not on alice's version: %+v", vs)
 	}
 }
 

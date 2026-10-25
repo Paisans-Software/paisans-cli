@@ -1246,7 +1246,9 @@ func AttestTarget(l Local, g Gathered, pin string) (head string, write bool, err
 // a site but its store. signWith is what git's user.signingKey is given,
 // "key::" and the key line for the agent. A head the key signed already is
 // pushed again rather than attested twice, so running it again resumes a
-// push some sites missed.
+// push some sites missed. Once it signed the attestation it returns it
+// with any error, so the caller can take back one no site took
+// (Local.Mark).
 func AttestFrom(l Local, g Gathered, sites map[string]apply.Transport, pin, keyLine, signWith string, now time.Time) (string, []string, error) {
 	return attestFrom(l, g, sites, pin, keyLine, signWith, now, Push)
 }
@@ -1294,22 +1296,22 @@ func attestFrom(l Local, g Gathered, sites map[string]apply.Transport, pin, keyL
 			return "", nil, fmt.Errorf("sign the attestation: %w", err)
 		}
 		if err := l.raiseSeen(rev, sha); err != nil {
-			return "", nil, err
+			return sha, nil, err
 		}
 	}
 	if write {
 		if err := l.WriteFiles(theirs); err != nil {
-			return "", nil, err
+			return sha, nil, err
 		}
 	}
 	if err := l.SetSigningKey(key.Line); err != nil {
-		return "", nil, err
+		return sha, nil, err
 	}
 	if err := l.SetHead(sha); err != nil {
-		return "", nil, err
+		return sha, nil, err
 	}
 	if recorded, err := l.Root(); err != nil {
-		return "", nil, err
+		return sha, nil, err
 	} else if recorded == "" {
 		root := pin
 		if roots := g.Roots(head); root == "" && len(roots) == 1 {
@@ -1317,7 +1319,7 @@ func attestFrom(l Local, g Gathered, sites map[string]apply.Transport, pin, keyL
 		}
 		if root != "" {
 			if err := l.SetRoot(root); err != nil {
-				return "", nil, err
+				return sha, nil, err
 			}
 		}
 	}

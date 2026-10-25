@@ -827,6 +827,30 @@ func TestAttestWritesTheHeadsFilesOnlyFromAPin(t *testing.T) {
 	}
 }
 
+// An attestation that fails once it is signed returns it with the error,
+// so the caller can take it back: here the head cannot be recorded.
+func TestAttestReturnsWhatItSignedOnALaterFailure(t *testing.T) {
+	_, bob, sites, v1, _, _ := twoVersions(t)
+	all := reach(sites, "home-a", "home-b")
+	l := Local{Dir: t.TempDir()}
+	g, err := gather(l, all, testID, Anchor{Root: v1}, GatherOptions{}, fakePull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A directory where the head is written makes its rename fail.
+	if err := os.MkdirAll(filepath.Join(l.state(headFile), "x"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sha, _, err := attestFrom(l, g, all, v1, bob.pub, bob.key, testNow, fakePush)
+	if err == nil || sha == "" {
+		t.Fatalf("sha %q, err %v", sha, err)
+	}
+	cache, _ := l.Cache()
+	if refs, _ := cache.versionRefs(); !slices.Contains(refs, sha) {
+		t.Fatalf("%s is not the version signed: %v", sha, refs)
+	}
+}
+
 // publish is a gather and publishFrom in one, through pull and push: a
 // command gathers itself, for its own prompts, and calls PublishFrom.
 func publish(l Local, sites map[string]apply.Transport, o publishOpts, pull PullFunc, push PushFunc) (string, []string, error) {

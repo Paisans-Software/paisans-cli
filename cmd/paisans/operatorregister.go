@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
@@ -501,6 +502,33 @@ func attest(r ui.Reporter, l configstore.Local, cfg *config.Config, key, pin str
 		return nil
 	}
 	s := r.Step("sign and push the attestation, signed with " + k.Fingerprint)
+	sha, err := attestOnce(l, g, sites, pin, key, s, r)
+	if err != nil {
+		return err
+	}
+	recordHead(r, l, "attested by operator register")
+	r.Result("registered %s; version %s is your anchor", k.Fingerprint, sha)
+	return nil
+}
+
+// attestOnce signs and pushes the attestation (configstore.AttestFrom) on
+// l, ending s from what the push did. An attestation no site took is
+// taken back whole, as a deploy's is (deployDraft): l's files byte for
+// byte, what it records and the version dropped from its store, so the
+// store names no version only this workstation holds, which another
+// operator's next deploy would make a fork of. Once a site took it nothing
+// takes it back, and a site that missed it is warned about.
+func attestOnce(l configstore.Local, g configstore.Gathered, sites map[string]apply.Transport, pin, key string, s ui.Step, r ui.Reporter) (string, error) {
+	before, err := heldFiles(l.Dir)
+	if err != nil {
+		s.Fail(err)
+		return "", err
+	}
+	undo, err := l.Mark()
+	if err != nil {
+		s.Fail(err)
+		return "", err
+	}
 	sha, pushed, err := configstore.AttestFrom(l, g, sites, pin, key, configSignWith(key), configNow())
 	var pe *configstore.PushError
 	switch {
@@ -511,13 +539,14 @@ func attest(r ui.Reporter, l configstore.Local, cfg *config.Config, key, pin str
 		}
 	case err != nil:
 		s.Fail(err)
-		return err
+		if back := errors.Join(putBack(l.Dir, before), undo(sha)); back != nil {
+			return "", errors.Join(err, back)
+		}
+		return "", err
 	default:
 		s.Done(sha[:12])
 	}
-	recordHead(r, l, "attested by operator register")
-	r.Result("registered %s; version %s is your anchor", k.Fingerprint, sha)
-	return nil
+	return sha, nil
 }
 
 // registerConfig is the configuration register reads the operators and the
