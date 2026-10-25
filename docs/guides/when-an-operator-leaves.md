@@ -55,7 +55,7 @@ repository's history, still opens with their key, and holds every value as it
 was then. Re-encrypting closes the values written from now on; only rotating a
 secret makes their copy of it worthless.
 
-## Every version is signed, and a removal is final
+## Every version is signed, and a removal stands
 
 `paisans deployment apply --execute` publishes the files it applies to every site as a
 signed version, and `paisans deployment publish` does the same without applying.
@@ -63,7 +63,9 @@ The version that drops the operator from `operators` is the one that removes the
 from then on a version signed by any key of theirs is not trusted, so they
 cannot publish one that puts them back (README, *Trust starts from the
 operator's own signature, never from the sites*). Until then their signature
-still counts.
+still counts. Another operator can let them back in, with the same key, by
+`operator invite` and `operator add --request`; their versions after that
+count again.
 
 **Each remaining operator runs `paisans operator register` first**, on a workstation
 that has never published or registered, before the first step of either case

@@ -253,9 +253,10 @@ differently.
 * **A version counts only when signed by an operator listed in its parent.**
   Someone who is not an operator cannot extend the history, however many sites
   they control.
-* **Removal is final.** Once a trusted version drops an operator's key, nothing
-  later signed by that key is trusted, so an operator removed for cause cannot
-  publish a version that undoes it.
+* **Removal stands until another operator undoes it.** Once a trusted version
+  drops an operator's key, nothing signed by that key beside it is trusted, so
+  an operator removed for cause cannot publish a version that undoes it. The
+  other operators can add the same key back, and from then on it signs again.
 
 A version that was really published stays valid forever, so someone holding a
 site can hide the newer ones and serve an old one, whose secrets an apply would

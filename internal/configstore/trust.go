@@ -649,12 +649,15 @@ func (j *judgement) extend(sha string, history, cand map[string]bool) string {
 }
 
 // bars says why removals in r bar v, or "" when they do not: v is signed by a
-// key one of r's parents listed and r does not, and v is neither r nor an
-// ancestor of it. Judge refuses an anchor's history with unreadable operators and
+// key one of r's parents listed and r does not, and v is neither r, an
+// ancestor of it nor a descendant of it. A descendant signed by the removed
+// key has parents that list it again, so another operator added it back
+// after the removal; the removed key alone cannot, since nothing after r
+// lists it. Judge refuses an anchor's history with unreadable operators and
 // never makes a candidate of a version with them, so own.err is not expected
 // here; it is treated as removing nothing.
 func (j *judgement) bars(r, v string) string {
-	if r == v || j.ancestors(r)[v] {
+	if r == v || j.ancestors(r)[v] || j.ancestors(v)[r] {
 		return ""
 	}
 	fp := j.g.Versions[v].SignerFP
