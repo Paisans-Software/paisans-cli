@@ -100,6 +100,7 @@ func TestFromBuildInfo(t *testing.T) {
 		{"module pseudo-version after a pre-release", "", module("v0.3.0-rc.1.0.20261017120000-519299d5cb00"), Build{"0.3.0", "519299d5cb00", false}, "0.3.0 (519299d5cb00)"},
 		{"module pseudo-version after a release", "", module("v0.3.1-0.20261017120000-519299d5cb00+dirty"), Build{"0.3.0", "519299d5cb00", false}, "0.3.0 (519299d5cb00)"},
 		{"ldflags, a release tag", "v0.3.0-rc.1", nil, Build{"0.3.0", "v0.3.0-rc.1", false}, "0.3.0 (v0.3.0-rc.1)"},
+		{"ldflags, its own release tag", "v0.3.0", nil, Build{"0.3.0", "v0.3.0", false}, "0.3.0"},
 	} {
 		got := FromBuildInfo("0.3.0", c.ldCommit, c.info)
 		if got != c.want {
