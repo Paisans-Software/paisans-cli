@@ -1823,7 +1823,12 @@ primary; `SnippetFor` maps a role to `caddy.snippet.<role>.tmpl`, so a role a
 kind's template directory ships no file for cannot be declared, and a role
 outside that set is refused at validate rather than discovered at render, the
 same way an unknown `images` key is. `synapse` has a second role,
-`wellknown`, for a homeserver's delegation documents. Every kind that stores
+`wellknown`, for a homeserver's delegation documents. It is the one role that
+may share another app's primary hostname: `hostBlocks` in
+`internal/render/site.go` folds its route into that app's host block as a
+`handle /.well-known/matrix/*` written first, and `duplicateHostname` in
+`internal/validate` allows exactly that claim when one Caddy routes both
+apps. Every kind that stores
 objects has `media`, and it is the one role that exists without being
 declared: `kinds.MediaHostname` derives `<label>-media.<domain>` from the
 app's own hostname, and `hostnames.media` only overrides it. It is also the one

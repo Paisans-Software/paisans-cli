@@ -3436,3 +3436,35 @@ the switch is the change the operator asked for.
   automatic setting reads back as 300 seconds, so the record's own setting
   cannot be told apart from automatic; `dns init` writes automatic
   everywhere else.
+
+## 2026-10-25: A homeserver's delegation may share another app's hostname
+
+A community's apex is the name its members want in their Matrix identifiers,
+and it is usually already the community's own site, the account app or a blog.
+Refusing the second claim made that combination impossible: the operator chose
+between the identifiers they wanted and the site they had. Founder decision.
+
+The delegation documents are paths under `/.well-known/matrix/` and nothing
+else, so the gateway renders one host block for the name and routes those
+paths to the homeserver's `wellknown` snippet inside it, with every other path
+left to the app that holds the name. The toolkit owns the path, as
+`blueprints.WellknownPath`, beside `WellknownRole`, and wraps the snippet in a
+handle for it, so the snippet's own catch all 404 answers only for unknown
+documents under `/.well-known/matrix/` and the core catalog needs no change.
+
+The shared handle is written first in the block. Caddy sorts a handle with one
+path ahead of a bare one, but treats a named matcher of several conditions as
+having no path and keeps such handles in the order written
+(`caddyconfig/httpcaddyfile/directives.go`, `sortRoutes`, read at v2.11.7). A
+gated block's bypasses are such handles, so only being first reliably puts the
+delegation ahead of them and of the gate. Rendered and served by Caddy 2.11.7
+on 2026-10-25: the two documents answered from the homeserver's snippet, and
+`/`, `/.well-known/openid-configuration` and `/i/<token>` reached the account
+app's.
+
+Only that claim is shared. Its owner must be another app's primary hostname,
+because a media or join hostname's snippet answers every path itself and a
+homeserver's own hostname already serves its delegation. Both apps must be
+routed by one Caddy, because an app on a monitor is served there and the
+delegation would be on the gateway under the same DNS name. And one name holds
+one homeserver's delegation, because a user identifier names one homeserver.

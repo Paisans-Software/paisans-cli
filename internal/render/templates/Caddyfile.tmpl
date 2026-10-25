@@ -24,6 +24,19 @@
 	}
 {{- end }}
 {{- end -}}
+{{ define "shared" }}
+{{- range .Shared }}
+
+	# {{ .App }}'s {{ .Role }} routing, on a hostname this block's app holds,
+	# for its own paths only. The first handle in the block: Caddy sorts a
+	# handle with one path ahead of a bare one, but keeps a named matcher of
+	# several conditions in the order written, so this is ahead of the gate
+	# and every bypass. Never gated, because what asks for it is a machine.
+	handle {{ .Path }} {
+		import {{ .Snippet }}
+	}
+{{- end }}
+{{- end -}}
 # Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
 #
 # Inventory driven: a pinned app's hostname points at its location, everything
@@ -146,6 +159,7 @@ import {{ . }}
 	# Nothing upstream of the gate may name a user: these headers are only
 	# ever the gate's verified answer.
 	request_header -X-Auth-Request-*
+{{- template "shared" . }}
 {{- if .Bypass.ActivityPub }}
 
 	# ActivityPub reads. Anyone can ask for ActivityPub, so the app's signed
@@ -248,6 +262,7 @@ import {{ . }}
 	# Stripped here as on a gated hostname: nothing that reaches an app may
 	# name a user unless the gate put the name there.
 	request_header -X-Auth-Request-*
+{{- template "shared" . }}
 {{- template "autologin" . }}
 
 	# The app's sign-in page, with no gate session: sign in at the gate and
@@ -277,6 +292,7 @@ import {{ . }}
 	# name a user unless the gate put the name there, and an ungated app that
 	# trusted the header would otherwise trust whoever sent the request.
 	request_header -X-Auth-Request-*
+{{- template "shared" . }}
 
 	handle {
 		import {{ .Snippet }}
