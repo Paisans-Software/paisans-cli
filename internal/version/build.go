@@ -160,11 +160,12 @@ func (b Build) ShortCommit() string {
 	return c
 }
 
-// String is the version and the short commit, as "0.3.0 (519299d5cb00)",
-// "0.3.0-dev (519299d5cb00-dirty)" or "0.3.0 (v0.3.0)": the version alone
-// for a build that names no commit, which writes no record.
+// String is the version and the short commit, as "0.3.0 (519299d5cb00)" or
+// "0.3.0-dev (519299d5cb00-dirty)": the version alone for a build that names
+// no commit, which writes no record, and for one built from its own release
+// tag, whose commit is v<version> and would only repeat it.
 func (b Build) String() string {
-	if b.Commit == "" {
+	if b.Commit == "" || b.Commit == "v"+b.Version {
 		return b.Version
 	}
 	return fmt.Sprintf("%s (%s)", b.Version, b.ShortCommit())

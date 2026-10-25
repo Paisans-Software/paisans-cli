@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Fixed
+
+- `paisans version` prints a release build's version once, `paisans 0.3.0`, instead of repeating its tag as `(v0.3.0)`.
+
 ## [0.3.0-rc.9] - 2026-10-25
 
 ### Added
