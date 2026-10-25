@@ -199,7 +199,9 @@ func mergeNewer(r ui.Reporter, p deployer, g configstore.Gathered, execute bool)
 // the deploy changes on the sites: paisans-stack.yaml as a diff from that
 // version, the secrets by key name only, never a value. files are the
 // draft's as a version holds them, its "drafted from" line stripped. It
-// returns that version when the draft is it already, "" otherwise. A first
+// returns that version when the draft is it already, "" otherwise. Under the
+// difference it flags each change that puts back a value an older version had
+// before a later revision changed it (undoFlags). A first
 // version has nothing to differ from.
 func showChange(r ui.Reporter, sys configstore.Local, g configstore.Gathered, parents []string, files configstore.Files) (string, error) {
 	s := r.Step("what changes in the configuration")
@@ -234,6 +236,16 @@ func showChange(r ui.Reporter, sys configstore.Local, g configstore.Gathered, pa
 		lines = []string{"secrets.enc.yaml differs only in sops's metadata"}
 	}
 	r.Verbatim(lines)
+	// The history is only advice: a version that cannot be read for it does
+	// not stop the apply.
+	flags, err := undoFlags(sys, g, head, files)
+	if err != nil {
+		r.Warn("the draft could not be checked against the history", errLine(err)+". The difference above is complete.")
+		return "", nil
+	}
+	if len(flags) > 0 {
+		r.Verbatim(flags)
+	}
 	return "", nil
 }
 
