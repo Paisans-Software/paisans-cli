@@ -201,17 +201,18 @@ func TestNoUndoFlagForRootEraPaths(t *testing.T) {
 }
 
 // A first-parent chain that reaches a parent the gather does not hold stops
-// there: that boundary produces no flags.
+// there: the oldest gathered version added extra, but what it was added to
+// is unknown, so removing it puts nothing back.
 func TestNoUndoFlagAtAParentMissingFromTheGather(t *testing.T) {
 	sys, g, head := historyOf(t,
-		revision{1, "domain: one.example\n", noSecrets},
-		revision{2, "domain: two.example\n", noSecrets})
+		revision{1, "domain: x.example\n", noSecrets},
+		revision{2, "domain: x.example\nextra: 1\n", noSecrets})
 	for sha, v := range g.Versions {
 		if v.Revision == 1 {
 			delete(g.Versions, sha)
 		}
 	}
-	flags, err := undoFlags(sys, g, head, draftOf("domain: one.example\n", noSecrets))
+	flags, err := undoFlags(sys, g, head, draftOf("domain: x.example\n", noSecrets))
 	if err != nil || len(flags) != 0 {
 		t.Errorf("flags = %q, %v", flags, err)
 	}
