@@ -159,7 +159,7 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *confi
 	if v.same, err = showChange(r, t.sys, g, parents, files); err != nil {
 		return nil, err
 	}
-	if w := staleDraftWarning(t.sys, g, d); w != "" {
+	if w := staleDraftWarning(t.sys, g, d, raw.Paisans); w != "" {
 		r.Warn(w, "")
 	}
 	for _, p := range parents {
@@ -446,10 +446,17 @@ func (s *siteReview) publishWritten(r ui.Reporter, written []byte, store storeVe
 	return nil
 }
 
-// staleDraftWarning is the sentence to print when any of the draft's files
-// was last saved before the newest trusted version reached this workstation,
-// and "" otherwise, or when no arrival is recorded for that version.
-func staleDraftWarning(sys configstore.Local, g configstore.Gathered, d draft.Draft) string {
+// staleDraftWarning is the sentence to print when the draft's base is the
+// system copy's fallback, the draft's paisans-stack.yaml (paisans) having no
+// usable "drafted from" line, and any of its files was last saved before the
+// newest trusted version reached this workstation. It is "" otherwise, and
+// when no arrival is recorded for that version. A draft whose line names a
+// trusted version is never warned about: a deploy rewrites only that line,
+// so its other files keep older times.
+func staleDraftWarning(sys configstore.Local, g configstore.Gathered, d draft.Draft, paisans []byte) string {
+	if m, ok := draft.ReadMarker(paisans); ok && g.Verdict.Trusted[m.SHA] {
+		return ""
+	}
 	if len(g.Verdict.Heads) == 0 {
 		return ""
 	}

@@ -290,6 +290,9 @@ func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transpo
 		done += ", anchored on " + g.Versions[at].SignerFP
 	}
 	s.Done(done)
+	if g.ArrivalErr != nil {
+		r.Warn("the arrival of these versions could not be recorded", errLine(g.ArrivalErr)+". Apply cannot warn about a draft saved before the newest revision arrived.")
+	}
 	// A stack of one site has no peers, so a sync would bring nothing.
 	if !m.execute && len(sites) > 1 {
 		r.Note("the sites were not asked to sync with their peers first", "A dry run changes no site. --execute will start each site's sync before reading it, so versions only its peers hold arrive too.")

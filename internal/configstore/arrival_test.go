@@ -64,3 +64,20 @@ func TestDryRunRecordsArrival(t *testing.T) {
 		t.Fatalf("arrived %v %v", got, ok)
 	}
 }
+
+// Two records of one version, as racing gathers leave, read as the first.
+func TestRecordArrivalTwiceKeepsTheFirst(t *testing.T) {
+	l := Local{Dir: t.TempDir()}
+	sha := "1111111111111111111111111111111111111111"
+	g := Gathered{Verdict: Verdict{Trusted: map[string]bool{sha: true}}}
+	first, second := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC), time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC)
+	if err := l.RecordArrival(g, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.RecordArrival(g, second); err != nil {
+		t.Fatal(err)
+	}
+	if at, ok := l.ArrivedAt(sha); !ok || !at.Equal(first) {
+		t.Fatalf("got %v %v", at, ok)
+	}
+}

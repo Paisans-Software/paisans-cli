@@ -204,10 +204,13 @@ var now = time.Now
 
 // RecordArrival records, for each trusted version of g not yet recorded, when
 // it first reached this workstation: one "<sha> <RFC3339 UTC>" line each in
-// .paisans/arrivals. A recorded line is never rewritten, so a later gather
-// that sees the version again keeps the first time. A gather calls it for
-// whatever Local it gathers into, a dry run included; the scratch directory
-// of a deployment with no system copy gets a record that is discarded with it.
+// .paisans/arrivals. Lines are only ever appended, one short write each, so
+// two gathers racing lose none; a version they both record has two lines, and
+// ArrivedAt reads the first. A gather calls it for whatever Local it gathers
+// into, a dry run included; the scratch directory of a deployment with no
+// system copy gets a record that is discarded with it. The first gather on a
+// copy stamps its whole trusted history with that time, since nothing says
+// when each version really arrived.
 func (l Local) RecordArrival(g Gathered, at time.Time) error {
 	have, err := l.arrivals()
 	if err != nil {
@@ -216,17 +219,26 @@ func (l Local) RecordArrival(g Gathered, at time.Time) error {
 	var add []string
 	for _, sha := range slices.Sorted(maps.Keys(g.Verdict.Trusted)) {
 		if _, ok := have[sha]; !ok && g.Verdict.Trusted[sha] {
-			add = append(add, sha+" "+at.UTC().Format(time.RFC3339))
+			add = append(add, sha+" "+at.UTC().Format(time.RFC3339)+"\n")
 		}
 	}
 	if len(add) == 0 {
 		return nil
 	}
-	data, err := os.ReadFile(l.state(arrivalsFile))
-	if err != nil && !os.IsNotExist(err) {
+	if err := l.ensureState(); err != nil {
 		return err
 	}
-	return l.writeState(arrivalsFile, strings.TrimSpace(string(data)+"\n"+strings.Join(add, "\n")))
+	f, err := os.OpenFile(l.state(arrivalsFile), os.O_APPEND|os.O_CREATE|os.O_WRONLY, stateFileMode)
+	if err != nil {
+		return err
+	}
+	for _, line := range add {
+		if _, err := f.WriteString(line); err != nil {
+			f.Close()
+			return err
+		}
+	}
+	return f.Close()
 }
 
 // ArrivedAt is when sha first reached this workstation, and false when no
@@ -252,6 +264,9 @@ func (l Local) arrivals() (map[string]time.Time, error) {
 	for _, line := range strings.Split(string(data), "\n") {
 		f := strings.Fields(line)
 		if len(f) != 2 {
+			continue
+		}
+		if _, seen := have[f[0]]; seen {
 			continue
 		}
 		if t, err := time.Parse(time.RFC3339, f[1]); err == nil {
@@ -559,6 +574,9 @@ type Gathered struct {
 	// Seen is the change to the seen record this gather leads to, nil for
 	// none; Local.RecordSeen writes it.
 	Seen *SeenChange
+	// ArrivalErr is why the arrival record could not be written, nil when it
+	// was. It never fails a gather; the command says so.
+	ArrivalErr error
 }
 
 // Direct is the sites reached directly, in name order.
@@ -655,9 +673,7 @@ func gather(l Local, sites map[string]apply.Transport, id string, a Anchor, o Ga
 	}
 	g, err = judgeHeld(l, cache, g, id, a)
 	if len(g.Verdict.Trusted) > 0 {
-		if rerr := l.RecordArrival(g, now()); rerr != nil && err == nil {
-			err = rerr
-		}
+		g.ArrivalErr = l.RecordArrival(g, now())
 	}
 	return g, err
 }
