@@ -437,21 +437,9 @@ func (l Local) Checkout(sha string) error {
 	return l.SetHead(sha)
 }
 
-// Incoming is where a pull that meets local edits puts the head's files.
+// Incoming is where a fetch puts the files of versions it does not take as
+// the system copy's own, each head under IncomingFor.
 func (l Local) Incoming() string { return l.state(incomingDir) }
-
-// WriteIncoming writes the version sha's three files to Incoming.
-func (l Local) WriteIncoming(sha string) error {
-	cache, err := l.Cache()
-	if err != nil {
-		return err
-	}
-	f, err := cache.Files(sha)
-	if err != nil {
-		return err
-	}
-	return writeFiles(l.Incoming(), f)
-}
 
 // IncomingFor is where one head of a fork's files go: incoming/<sha>.
 func (l Local) IncomingFor(sha string) string { return filepath.Join(l.Incoming(), sha) }

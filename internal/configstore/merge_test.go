@@ -63,7 +63,11 @@ func TestMergeDifferentEditsOfOneKeyConflictWithoutValues(t *testing.T) {
 	if !reflect.DeepEqual(conflicts, []string{"external.a"}) {
 		t.Fatalf("conflicts %v", conflicts)
 	}
-	shown := fmt.Sprint(conflicts, err, m == nil)
+	// A conflict keeps ours, and the rest merges.
+	if got := flatten(m); !reflect.DeepEqual(got, map[string]string{"external.a": "ours-value", "external.b": "2"}) {
+		t.Fatalf("merged %v", got)
+	}
+	shown := fmt.Sprint(conflicts, err)
 	for _, v := range []string{"base-value", "ours-value", "theirs-value"} {
 		if strings.Contains(shown, v) {
 			t.Errorf("%q appears in %s", v, shown)

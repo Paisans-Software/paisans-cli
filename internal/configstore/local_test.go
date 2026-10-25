@@ -975,9 +975,6 @@ func TestAPlaintextVersionIsNeverWrittenToDisk(t *testing.T) {
 	if head, _ := l.Head(); head != "" {
 		t.Errorf("head %s", head)
 	}
-	if err := l.WriteIncoming(v2); err == nil {
-		t.Error("WriteIncoming wrote a plaintext version")
-	}
 	if err := l.WriteIncomingFor(v2); err == nil {
 		t.Error("WriteIncomingFor wrote a plaintext version")
 	}

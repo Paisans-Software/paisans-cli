@@ -77,22 +77,6 @@ func runDeployment(args []string, stdin io.Reader, stdout io.Writer) error {
 // configHelp is the --config flag's help, the same for every subcommand.
 const configHelp = "path to the deployment declaration; the store's state is kept in .paisans/ beside it"
 
-// workstationOf is the workstation whose paisans-stack.yaml is at path. The three
-// files of a version have fixed names, so the configuration must be named
-// paisans-stack.yaml for the files on disk to be the ones a version holds.
-// Dir is absolute, so every message naming it or what is under it says where
-// the files are when read later or elsewhere, not ".".
-func workstationOf(path string) (configstore.Local, error) {
-	if filepath.Base(path) != config.FileName {
-		return configstore.Local{}, &ui.Problem{Hint: "--config must name a file called " + config.FileName, Explain: "A stored version holds " + config.FileName + ", secrets.enc.yaml and .sops.yaml by those names, so the files beside --config must carry them. Got " + path + "."}
-	}
-	dir, err := filepath.Abs(filepath.Dir(path))
-	if err != nil {
-		return configstore.Local{}, &ui.Problem{Hint: "the directory of --config cannot be resolved", Explain: errLine(err) + ".", Cause: err}
-	}
-	return configstore.Local{Dir: dir}, nil
-}
-
 // statePath is where l records name: what a refusal naming a record says
 // to look at.
 func statePath(l configstore.Local, name string) string {
@@ -561,9 +545,10 @@ func runDeploymentPull(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("deployment pull", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, configHelp)
+	id := fs.String("id", "", "the deployment, in a folder with no draft, when this workstation holds more than one")
 	root := fs.String("root", "", "pin this version as the root, the version trust starts from")
 	keyPath := fs.String("key", "", keyHelp)
-	execute := fs.Bool("execute", false, "write the sites' newest version to the local files")
+	execute := fs.Bool("execute", false, "move the system copy to the sites' newest version and merge it into the draft")
 	answers := yesFlag(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -575,15 +560,27 @@ func runDeploymentPull(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	l, err := workstationOf(*configPath)
+	sys, d, deploymentID, err := systemFor(*configPath, *id)
 	if err != nil {
 		return err
 	}
-	cfg, err := config.Load(*configPath)
+	if !d.Has() {
+		if held := draftFiles(d); len(held) > 0 {
+			return &ui.Problem{Hint: "there is part of a draft in " + d.Dir, Explain: "It holds " + strings.Join(held, ", ") + " and no " + config.FileName + ", and starting a draft would replace them. Move them away, or use another folder."}
+		}
+	}
+	cfg, _, err := readConfig(sys, d)
 	if err != nil {
 		return err
 	}
-	a, err := anchorFor(l, *root)
+	// The system copy's head before the gather: the base of a draft with
+	// no usable "drafted from" line, and what moving the system copy
+	// checks nothing else wrote since.
+	before, err := sys.Head()
+	if err != nil {
+		return err
+	}
+	a, err := anchorFor(sys, *root)
 	if err != nil {
 		return err
 	}
@@ -596,7 +593,7 @@ func runDeploymentPull(args []string, stdin io.Reader, stdout io.Writer) error {
 	noteKeyIgnored(r, ignored)
 	sites := configTransports(cfg)
 	m := gatherMode{execute: *execute, answers: ans, noAnchor: noAnchorNamed(", or run " + progname.Cmd() + " operator register to sign the version you hold")}
-	g, err := gatherAt(r, l, sites, cfg.ID, a, m, stdin, stdout)
+	g, err := gatherAt(r, sys, sites, deploymentID, a, m, stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -607,62 +604,56 @@ func runDeploymentPull(args []string, stdin io.Reader, stdout io.Writer) error {
 		return forkProblem(g)
 	}
 	if len(g.Verdict.Heads) == 0 {
-		r.Result("the sites hold no version yet; %s deployment publish makes the first", progname.Cmd())
+		r.Result("the sites hold no version yet; %s deployment apply makes the first", progname.Cmd())
 		return nil
 	}
 	head := g.Verdict.Heads[0]
-	base, err := l.Head()
-	if err != nil {
-		return err
-	}
-	cache, err := l.Cache()
-	if err != nil {
-		return err
-	}
-	headFiles, err := cache.Files(head)
-	if err != nil {
-		return err
-	}
-	localFiles, err := l.Files()
-	if err != nil {
-		return err
-	}
-	edited := !localFiles.Equal(headFiles)
-	if base != "" && edited {
-		if bf, err := cache.Files(base); err == nil {
-			edited = !localFiles.Equal(bf)
+	record := func(l configstore.Local) error { return recordPull(l, g, *root, held) }
+	if !d.Has() {
+		what := "start a draft of " + describe(g, head)
+		if !*execute {
+			r.Step(what).End(ui.Pending, "--execute will write it in "+d.Dir)
+			return nil
 		}
+		if err := moveSystemCopy(sys, deploymentID, before, head, record); err != nil {
+			return err
+		}
+		if err := startDraft(sys, d); err != nil {
+			return err
+		}
+		r.Result("started a draft of %s in %s", describe(g, head), d.Dir)
+		return nil
 	}
-	switch {
-	case base == head:
+	paisans, err := os.ReadFile(filepath.Join(d.Dir, config.FileName))
+	if err != nil {
+		return err
+	}
+	base := draftBase(r, sys, g, paisans, before)
+	if base == "" {
+		return &ui.Problem{Hint: "the system copy of " + deploymentID + " holds no version", Explain: "There is no version the draft in " + d.Dir + " was drafted from to merge the sites' newest into. " + recoverHint(deploymentID)}
+	}
+	if base == head {
 		if *execute {
-			if err := recordPull(l, g, *root, held); err != nil {
+			if err := moveSystemCopy(sys, deploymentID, before, head, record); err != nil {
 				return err
 			}
 		}
-		if edited {
-			r.Result("up to date with %s; the local edits are not published yet", describe(g, head))
-		} else {
-			r.Result("up to date with %s", describe(g, head))
-		}
-		return nil
-	case edited:
-		if handled, err := pullMergingSecrets(r, l, g, cfg.ID, head, base, *root, held, localFiles, headFiles, *execute, ans, stdin, stdout); handled {
-			return err
-		}
-		return pullOverEdits(r, l, g, head, base, localFiles, headFiles, *execute, stdout)
-	}
-	if !*execute {
-		r.Step("move the local files to "+describe(g, head)).End(ui.Pending, "--execute will write them")
+		r.Result("the draft is drafted from %s, the sites' newest", describe(g, head))
 		return nil
 	}
-	if err := l.Checkout(head); err != nil {
+	merge, err := mergeForward(r, sys, g, d, deploymentID, base, head, before, *execute, record)
+	if err != nil {
 		return err
 	}
-	if err := recordPull(l, g, *root, held); err != nil {
-		return err
+	rev := merge.marker.Revision
+	switch {
+	case len(merge.conflicts) > 0 && *execute:
+		return &ui.Problem{Hint: fmt.Sprintf("merged revision %d into this draft, with conflicts", rev), Explain: conflictsExplain(merge)}
+	case len(merge.conflicts) > 0:
+		return &ui.Problem{Hint: fmt.Sprintf("merging revision %d into this draft leaves conflicts", rev), Explain: conflictsExplain(merge) + " --execute writes the merge. Nothing was written."}
+	case *execute:
+		r.Result("merged %s into this draft; review it, then deploy it with %s deployment apply --execute", describe(g, head), progname.Cmd())
 	}
-	r.Result("moved the local files to %s", describe(g, head))
 	return nil
 }
 
@@ -680,31 +671,6 @@ func recordPull(l configstore.Local, g configstore.Gathered, root string, held m
 		}
 	}
 	return recordAnchorKey(l, g, held)
-}
-
-// pullOverEdits refuses a pull that would overwrite local edits made on an
-// older base, and shows what differs: paisans-stack.yaml as a diff, the secrets by
-// key name only. With execute the head's files go to .paisans/incoming/ for
-// a merge by hand.
-func pullOverEdits(r ui.Reporter, l configstore.Local, g configstore.Gathered, head, base string, local, theirs configstore.Files, execute bool, stdout io.Writer) error {
-	if err := showDifference(stdout, local, theirs); err != nil {
-		return err
-	}
-	where := "--execute will write the head's files to " + l.Incoming() + " to merge from"
-	if execute {
-		if err := l.WriteIncoming(head); err != nil {
-			return err
-		}
-		where = "The head's files are in " + l.Incoming() + "."
-	}
-	from := "no recorded base"
-	if base != "" {
-		from = "base " + base[:12]
-	}
-	return &ui.Problem{
-		Hint:    "the local files have edits the sites' newest version lacks",
-		Explain: fmt.Sprintf("They were edited from %s, and the sites hold %s. %s Merge them by hand, then publish with %s deployment publish --merge.", from, describe(g, head), where, progname.Cmd()),
-	}
 }
 
 // showDifference prints how the local files differ from the head's:

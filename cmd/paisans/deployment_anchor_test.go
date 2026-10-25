@@ -365,14 +365,9 @@ func TestConfigPullAnchorsOnTheNamedKey(t *testing.T) {
 	recoverHosts(t, answer)
 	allSitesUp(answer, nil)
 	agentHolding(t, pub)
-	l := configstore.Local{Dir: t.TempDir()}
-	if err := l.WriteFiles(files[0]); err != nil {
-		t.Fatal(err)
-	}
-	if err := l.SetHead(shas[0]); err != nil {
-		t.Fatal(err)
-	}
-	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
+	l := pullWorkstation(t, answer, "", shas[0], files[0])
+	allSitesUp(answer, nil)
+	cfgPath := l.cfg
 	var out bytes.Buffer
 	wantAdvice(t, runDeployment([]string{"pull", "--config", cfgPath, "--execute"}, noTerminalStdin(), &out))
 	if err := runDeployment([]string{"pull", "--config", cfgPath, "--key", pubFile(t, pub), "--execute"}, noTerminalStdin(), &out); err != nil {
@@ -449,9 +444,8 @@ func TestConfigPublishWithoutAnchorAdvises(t *testing.T) {
 func TestConfigLogPrintsTheRootsFullHash(t *testing.T) {
 	shas, answer, files := storedHistory(t, 2, 0)
 	l := pullWorkstation(t, answer, shas[0], shas[0], files[0])
-	mirrorSystemCopy(t, l)
 	var out bytes.Buffer
-	if err := runDeployment([]string{"log", "--config", filepath.Join(l.Dir, "paisans-stack.yaml")}, noTerminalStdin(), &out); err != nil {
+	if err := runDeployment([]string{"log", "--config", l.cfg}, noTerminalStdin(), &out); err != nil {
 		t.Fatal(problemText(err), err)
 	}
 	if !strings.Contains(out.String(), "root "+shas[0]) || strings.Contains(out.String(), "root "+shas[1]) {
@@ -504,15 +498,14 @@ func onOldIncarnation(t *testing.T, in incarnations) (configstore.Local, string)
 	if err := l.SetSigningKey(in.pub); err != nil {
 		t.Fatal(err)
 	}
-	cfg := filepath.Join(l.Dir, "paisans-stack.yaml")
 	var out bytes.Buffer
-	if err := runDeployment([]string{"pull", "--config", cfg, "--execute"}, noTerminalStdin(), &out); err != nil {
+	if err := runDeployment([]string{"pull", "--config", l.cfg, "--execute"}, noTerminalStdin(), &out); err != nil {
 		t.Fatal(problemText(err), err)
 	}
 	if rev, sha, _ := l.Seen(); rev != 3 || sha != in.o3 {
 		t.Fatalf("seen %d %s, want 3 %s", rev, sha, in.o3)
 	}
-	return l, cfg
+	return l.Local, l.cfg
 }
 
 // A workstation pinned to the older incarnation, whose sites now serve only
@@ -572,7 +565,7 @@ func TestConfigPullRefusalNamesNoServedRoot(t *testing.T) {
 	if err := l.SetSigningKey(pub); err != nil {
 		t.Fatal(err)
 	}
-	cfg := filepath.Join(l.Dir, "paisans-stack.yaml")
+	cfg := l.cfg
 	var out bytes.Buffer
 	if err := runDeployment([]string{"pull", "--config", cfg, "--execute"}, noTerminalStdin(), &out); err != nil {
 		t.Fatal(problemText(err), err)
@@ -609,7 +602,7 @@ func TestConfigPullNeverLowersSeenSilently(t *testing.T) {
 	if err := l.SetSigningKey(pub); err != nil {
 		t.Fatal(err)
 	}
-	cfg := filepath.Join(l.Dir, "paisans-stack.yaml")
+	cfg := l.cfg
 	var out bytes.Buffer
 	if err := runDeployment([]string{"pull", "--config", cfg, "--execute"}, noTerminalStdin(), &out); err != nil {
 		t.Fatal(problemText(err), err)

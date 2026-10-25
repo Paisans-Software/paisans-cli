@@ -25,10 +25,10 @@ import (
 // newer one without the operator noticing.
 //
 // The order is the point. Before the review: gather into the system copy's
-// store, and refuse a fork or a draft that is not based on the sites'
-// newest version, since applying it would undo whatever the newer version
-// changed. After the
-// approval and before the first change: check each host's record, which
+// store, refuse a fork, and merge into the draft a newer version than the
+// one it was drafted from, stopping there, since applying the draft as it
+// is would undo whatever the newer version changed (config_merge.go).
+// After the approval and before the first change: check each host's record, which
 // only reads. Then publish: deployment apply --site before its first change, apply
 // without --site once its site prepare steps have made every site's store
 // and before any other step changes a host (see runConverge). What is
@@ -92,10 +92,10 @@ type gathered struct {
 // published, its "drafted from" line stripped; nil reads them here, for
 // apply without --site, whose steps each check that they load the same.
 // It refuses, before the review, what --execute could not publish: files
-// that are not the three of a version, a fork, a draft whose base is not
-// the sites' newest version, a key no operator lists, and, with --execute,
-// a run that reaches no site. No base at all is a deployment's first
-// version.
+// that are not the three of a version, a fork, a key no operator lists,
+// and, with --execute, a run that reaches no site. A draft whose base is
+// older than the sites' newest version is merged forward, and the apply
+// stops (mergeNewer). No base at all is a deployment's first version.
 func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *configstore.Files, cfg *config.Config, execute bool, ans answerer, stdin io.Reader, stdout io.Writer) (storeVersion, error) {
 	d, err := draftAt(configPath)
 	if err != nil {
@@ -134,6 +134,9 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *confi
 	if g.Verdict.Fork {
 		return nil, forkProblem(g, "Nothing was applied.")
 	}
+	if heads := g.Verdict.Heads; len(heads) == 1 && t.base != "" && heads[0] != t.base {
+		return nil, mergeNewer(r, t.deployer, g, execute)
+	}
 	parents, err := configstore.Parents(g, t.base, false)
 	if err != nil {
 		return nil, &ui.Problem{Hint: "the draft is not based on the sites' newest version", Explain: err.Error() + ". Applying it would undo whatever that version changed. Nothing was applied.", Cause: err}
@@ -161,6 +164,32 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *confi
 		v.revision = g.Versions[v.same].Revision
 	}
 	return v, nil
+}
+
+// mergeNewer merges the sites' newest version, newer than the draft's
+// base, into the draft of p, and stops the apply, which deploys nothing:
+// the merged draft is reviewed and applied again. The system copy moves
+// to that version, and records the gather's seen record. A dry run says
+// what --execute merges and writes nothing.
+func mergeNewer(r ui.Reporter, p deployer, g configstore.Gathered, execute bool) error {
+	head := g.Verdict.Heads[0]
+	m, err := mergeForward(r, p.sys, g, p.d, p.id, p.base, head, p.head, execute, func(l configstore.Local) error { return l.RecordSeen(g) })
+	if err != nil {
+		return err
+	}
+	rev := m.marker.Revision
+	if !execute {
+		explain := fmt.Sprintf("The draft was drafted from %s, and the sites hold %s, which applying the draft would undo. --execute merges revision %d into this draft and stops, so the merged draft is reviewed before it is deployed.", shortSHA(p.base), describe(g, head), rev)
+		if len(m.conflicts) > 0 {
+			explain += "\n" + conflictsExplain(m)
+		}
+		return &ui.Problem{Hint: "the draft is behind the sites' newest version", Explain: explain + "\nNothing was written."}
+	}
+	explain := "Review the merged draft, then run " + progname.Cmd() + " deployment apply --execute again."
+	if len(m.conflicts) > 0 {
+		explain = conflictsExplain(m)
+	}
+	return &ui.Problem{Hint: fmt.Sprintf("merged revision %d into this draft; review it and run apply again", rev), Explain: explain + "\nNothing was deployed."}
 }
 
 // showChange shows, before the review, how the draft differs from the

@@ -162,7 +162,8 @@ var helpCommands = []helpCommand{
 		detail: "Without --site: take every site from " + config.FileName + " to a running stack, running init, site prepare, apply, site add, storage and dns init in the order the deployment needs. " +
 			"With --site: compare that site's rendered artifacts with what is on its host and show what would change.\n\n" +
 			"Changes nothing on a host without --execute; without --site, the dry run may add missing generated secrets to the local secrets file, and says so when it does.\n\n" +
-			"Both, and site prepare, review the keys and images " + config.FileName + " grants against what each host last applied; --execute asks for the word approve at a terminal when anything is added or changed, and asks nothing when nothing is. Before it, apply shows how the configuration differs from the sites' newest version: " + config.FileName + " as a diff, the secrets by key only.\n\n" +
+			"Both, and site prepare, review the keys and images " + config.FileName + " grants against what each host last applied; --execute asks for the word approve at a terminal when anything is added or changed, and asks nothing when nothing is. Before it, apply shows how the configuration differs from the sites' newest version: " + config.FileName + " as a diff, the secrets by key only. " +
+			"A draft drafted from an older version than the sites' newest is merged forward first, as deployment pull merges it, and with --execute the merge is written into the draft and the apply stops, deploying nothing: review the merged draft, settle any conflict it lists, and run apply again.\n\n" +
 			"--yes approves the review entry by entry, and types create and rollback when apply asks for them. " + yesTopic + "\n\n" +
 			"Before anything changes, every app it starts logs in to its mail server from its site, sending nothing; one that does not log in refuses the apply.\n\n" +
 			"Every run, --site included, reaches every site's host to classify it, and runs on the sites it has: a site whose host has not admitted the deployment is left out, a joined site that does not answer is kept with its own steps skipped, and the run ends degraded. --require-all: exit 1 when the run is degraded: a site pending or down.\n\n" +
@@ -355,9 +356,12 @@ var helpCommands = []helpCommand{
 	},
 	{
 		name:    "deployment pull",
-		summary: "Move the local files to the sites' newest version.",
-		usage:   []string{"paisans deployment pull [--config " + config.FileName + "] [--root <sha>] [--key <path.pub>] [--execute] [--yes]"},
-		detail: "Move the local files to the sites' newest version, or, over local edits, show the difference and put its files in .paisans/incoming/." +
+		summary: "Bring the system copy and the draft to the sites' newest version.",
+		usage:   []string{"paisans deployment pull [--config " + config.FileName + "] [--id <id>] [--root <sha>] [--key <path.pub>] [--execute] [--yes]"},
+		detail: "Move the system copy to the sites' newest version and merge that version into the draft, from the version the draft was drafted from: its \"drafted from\" line names it, or, without a usable line, the system copy's version is taken. " +
+			"paisans-stack.yaml and .sops.yaml merge path by path, a list being one value, with the draft's comments and key order kept; the secrets merge key by key, decrypted with this workstation's age key and encrypted again to the merged .sops.yaml's recipients. " +
+			"A path both sides changed differently is a conflict: the draft keeps its own value there, and the conflict is listed, a secret by its key only. The merged draft's \"drafted from\" line names the sites' newest version; review it and deploy it with deployment apply --execute. " +
+			"In a folder with no draft, start one from the sites' newest version, of the only deployment on this workstation or the one --id names. Writes nothing without --execute." +
 			configTrust + "\n\n" + keyTrust,
 	},
 	{

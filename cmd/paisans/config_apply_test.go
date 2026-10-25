@@ -557,8 +557,9 @@ func TestApplyRollbackOnAHostAsks(t *testing.T) {
 	}
 }
 
-// apply without --site gathers once before its review and refuses a stale
-// base there; once approved it checks every host's record before its first
+// apply without --site gathers once before its review and, on a stale
+// base, merges the sites' newest version into the draft and stops there;
+// once approved it checks every host's record before its first
 // step, and publishes once.
 func TestConvergeChecksTheStoreOnceBeforeItsSteps(t *testing.T) {
 	f := newApplyStore(t, 2)
@@ -574,7 +575,7 @@ func TestConvergeChecksTheStoreOnceBeforeItsSteps(t *testing.T) {
 		return err
 	}
 	err := converge(noTerminalStdin())
-	if err == nil || !strings.Contains(problemText(err), "not based on the sites' newest version") || !strings.Contains(problemText(err), "paisans deployment pull") || len(*ran) != 0 || rec.Index("section", "review") >= 0 {
+	if err == nil || !strings.Contains(problemText(err), "merged revision 2 into this draft; review it and run apply again") || len(*ran) != 0 || rec.Index("section", "review") >= 0 {
 		t.Fatalf("stale: %v, ran %q\n%s", err, *ran, rec.Lines())
 	}
 
@@ -1249,43 +1250,12 @@ func TestDeployRestoresSystemCopyOnPublishFailure(t *testing.T) {
 	}
 }
 
-// A draft drafted from a version older than the sites' newest is refused
-// until it is pulled forward, before the review and before any host
-// changes, naming deployment pull; the system copy and the draft are as
-// they were.
-func TestApplyRefusesNewerUntilPulled(t *testing.T) {
-	f := newApplyStore(t, 2)
-	f.based(t)
-	sysBefore, draftBefore := rawFiles(t, f.sys.Dir), rawFiles(t, f.dir)
-	log := loggingSSH(t, "")
-	hosts := fakeGrants(t, grantedWith(t, f, nil))
-	rec := recordConverge(t)
-	err := f.applySite(t, noTerminalStdin(), "--execute")
-	if err == nil || !strings.Contains(problemText(err), "not based on the sites' newest version") || !strings.Contains(problemText(err), "paisans deployment pull") {
-		t.Fatalf("got %v\n%s", err, rec.Lines())
-	}
-	if checked(logged(t, log)) || f.pushed() || hosts["vm"] != nil && hosts["vm"].writes != 0 {
-		t.Errorf("changed a host: checked %v, pushed %v", checked(logged(t, log)), f.pushed())
-	}
-	if rec.Has("pending", "review what paisans-stack.yaml grants") || rec.Index("step", "read what was granted") >= 0 {
-		t.Errorf("reviewed before refusing:\n%s", rec.Lines())
-	}
-	if h, _ := f.sys.Head(); h != f.shas[0] {
-		t.Errorf("head moved to %s", h)
-	}
-	if rev, _, _ := f.sys.Seen(); rev != 0 {
-		t.Errorf("a refused apply raised seen to %d", rev)
-	}
-	if !maps.Equal(rawFiles(t, f.sys.Dir), sysBefore) || !maps.Equal(rawFiles(t, f.dir), draftBefore) {
-		t.Error("a refused apply changed the system copy's files or the draft")
-	}
-}
-
 // The base is the version the draft's "drafted from" line names when the
 // system copy trusts it, whatever the system copy's own files are: a draft
 // of the sites' newest deploys on it. A line naming a version the history
 // does not hold is ignored, the system copy's head taken instead, and the
-// review says so.
+// review says so: the draft is then behind the sites, and is merged
+// forward.
 func TestApplyBaseIsTheDraftedFromVersion(t *testing.T) {
 	f := newApplyStore(t, 2)
 	f.based(t)
@@ -1317,7 +1287,7 @@ func TestApplyBaseIsTheDraftedFromVersion(t *testing.T) {
 	fakeGrants(t, grantedWith(t, g, nil))
 	rec = recordConverge(t)
 	err := g.applySite(t, noTerminalStdin(), "--execute")
-	if err == nil || !strings.Contains(problemText(err), "paisans deployment pull") || g.pushed() {
+	if err == nil || !strings.Contains(problemText(err), "merged revision 2 into this draft") || g.pushed() {
 		t.Fatalf("got %v\n%s", problemText(err), rec.Lines())
 	}
 	if !strings.Contains(rec.Lines(), "it is taken as drafted from revision 1, the system copy's") {
