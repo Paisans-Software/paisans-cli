@@ -12,6 +12,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Fixed
 
+- An operator removed and then added back by another operator signs again with the same key; only versions beside the removal stay barred, so a removed key still cannot undo its own removal.
 - `paisans version` prints a release build's version once, `paisans 0.3.0`, instead of repeating its tag as `(v0.3.0)`.
 
 ## [0.3.0-rc.9] - 2026-10-25

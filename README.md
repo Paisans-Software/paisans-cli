@@ -4642,7 +4642,7 @@ closes a forgery:
 |------|---------|
 | Shape: the tree holds exactly the three files and at most a sound blueprint snapshot, the signature is good, and the revision is one more than the highest parent's | a version of any other shape could carry files nothing reads, and a wrong revision breaks the order the head is chosen by |
 | The signer: every parent is trusted, and the signing key belongs to an operator listed in every parent's `paisans-stack.yaml` | someone who is not an operator cannot extend the history, however many sites they control |
-| Removal is final, key by key: when a trusted version drops a key a parent listed (an operator removed, or a key rotated out), every version signed by that key that is not an ancestor of the removal is not trusted | an operator removed for cause cannot publish a later-dated version that undoes it; a version that is not trusted removes nothing, so a forger cannot use one to remove a real operator |
+| Removal stands, key by key: when a trusted version drops a key a parent listed (an operator removed, or a key rotated out), every version signed by that key that is neither an ancestor nor a descendant of the removal is not trusted. A descendant signed by it has parents that list the key again, which only another operator can publish | an operator removed for cause cannot publish a later-dated version that undoes it, while the other operators can add the same key back; a version that is not trusted removes nothing, so a forger cannot use one to remove a real operator |
 
 The rule works key by key, not operator by operator, because rotating one of an
 operator's keys out must bar that key without barring the operator's others. Removals

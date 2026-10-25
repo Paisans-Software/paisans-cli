@@ -743,3 +743,45 @@ func TestJudgePinTheSitesDoNotServe(t *testing.T) {
 	g.Served = map[string]bool{}
 	wantHeads(t, judgeOK(t, f, Anchor{Root: "o1"}), "o4")
 }
+
+// A key removed and added back by another operator signs again: its versions
+// after the readmission are trusted. Its versions beside the removal stay
+// barred, and so does one it signs on the removal before it is added back.
+func TestJudgeReadmittedKey(t *testing.T) {
+	f := newFake()
+	f.add("v1", 1, "fp-alice", nil, "alice", "bob")
+	f.add("v2", 2, "fp-alice", on("v1"), "alice")        // removes bob
+	f.add("v3", 3, "fp-alice", on("v2"), "alice", "bob") // adds bob back
+	f.add("v4", 4, "fp-bob", on("v3"), "alice", "bob")
+	f.add("x2", 2, "fp-bob", on("v1"), "alice", "bob") // beside the removal
+	f.add("y3", 3, "fp-bob", on("v2"), "alice", "bob") // on the removal, alone
+	v := judgeOK(t, f, alice())
+	wantTrusted(t, v, "v1", "v2", "v3", "v4")
+	wantUntrusted(t, v, "x2", "removal")
+	wantUntrusted(t, v, "y3", "signer")
+	wantHeads(t, v, "v4")
+
+	// bob's own signature anchors his workstation once he is back.
+	v = judgeOK(t, f, Anchor{Signers: []string{"fp-bob"}})
+	wantTrusted(t, v, "v4")
+	wantHeads(t, v, "v4")
+	v = judgeOK(t, f, named("", "fp-bob"))
+	wantHeads(t, v, "v4")
+}
+
+// A merge of the readmission with a version beside the removal is not
+// trusted: one of its parents is barred.
+func TestJudgeReadmissionDoesNotLaunderABarredVersion(t *testing.T) {
+	f := newFake()
+	f.add("v1", 1, "fp-alice", nil, "alice", "bob")
+	f.add("v2", 2, "fp-alice", on("v1"), "alice")
+	f.add("v3", 3, "fp-alice", on("v2"), "alice", "bob")
+	f.add("x2", 2, "fp-bob", on("v1"), "alice", "bob")
+	f.add("m4", 4, "fp-bob", on("v3", "x2"), "alice", "bob")
+	v := judgeOK(t, f, alice())
+	wantUntrusted(t, v, "x2", "removal")
+	if v.Trusted["m4"] {
+		t.Fatal("a merge with a barred parent is trusted")
+	}
+	wantHeads(t, v, "v3")
+}
