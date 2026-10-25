@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Fixed
+
+- An operator removed and then added back by another operator signs again with the same key; only versions beside the removal stay barred, so a removed key still cannot undo its own removal.
+
 ## [0.3.0-rc.9] - 2026-10-25
 
 ### Added

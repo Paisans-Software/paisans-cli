@@ -142,10 +142,12 @@ that passes all of these:
 2. **The signer.** Every parent is trusted, and the signing key belongs to an
    admin listed in every parent's `paisans-stack.yaml`. Someone who is not an admin
    cannot extend the history, however many sites they control.
-3. **Removal is final, key by key.** When a trusted version drops a key that a
+3. **Removal stands, key by key.** When a trusted version drops a key that a
    parent listed (an admin removed, or one of their keys rotated out), every
-   version signed by that key that is not an ancestor of the removal is not
-   trusted. A version that is not trusted removes nothing. Removals in the
+   version signed by that key that is neither an ancestor nor a descendant of
+   the removal is not trusted. A descendant signed by the key has parents that
+   list it again: another admin added it back, which the removed key cannot
+   do itself, since nothing after the removal lists it. A version that is not trusted removes nothing. Removals in the
    anchor's own history always stand, because the operator signed after them.
    Two removals that each would bar the other, neither in the anchor's history,
    are refused and shown to the operator; nothing decides between them by
