@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
+	"github.com/paisans-software/paisans-cli/internal/draft"
 	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -156,6 +158,9 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *confi
 	v := &gathered{deployer: t.deployer, g: g, sites: sites, key: key, files: files, parents: parents, revision: 1, answers: ans}
 	if v.same, err = showChange(r, t.sys, g, parents, files); err != nil {
 		return nil, err
+	}
+	if w := staleDraftWarning(t.sys, g, d); w != "" {
+		r.Warn(w, "")
 	}
 	for _, p := range parents {
 		v.revision = max(v.revision, g.Versions[p].Revision+1)
@@ -439,4 +444,26 @@ func (s *siteReview) publishWritten(r ui.Reporter, written []byte, store storeVe
 		identity.applied(v.sha, v.revision)
 	}
 	return nil
+}
+
+// staleDraftWarning is the sentence to print when any of the draft's files
+// was last saved before the newest trusted version reached this workstation,
+// and "" otherwise, or when no arrival is recorded for that version.
+func staleDraftWarning(sys configstore.Local, g configstore.Gathered, d draft.Draft) string {
+	if len(g.Verdict.Heads) == 0 {
+		return ""
+	}
+	head := g.Verdict.Heads[0]
+	arrived, ok := sys.ArrivedAt(head)
+	if !ok {
+		return ""
+	}
+	for _, name := range []string{config.FileName, configstore.FileSecrets, configstore.FileSOPS} {
+		fi, err := os.Stat(filepath.Join(d.Dir, name))
+		if err == nil && fi.ModTime().Before(arrived) {
+			rev := g.Versions[head].Revision
+			return fmt.Sprintf("This draft was last saved before revision %d reached this workstation; it may not include revision %d's changes.", rev, rev)
+		}
+	}
+	return ""
 }

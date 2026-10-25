@@ -29,10 +29,11 @@ const (
 	rootFile      = "config-root"
 	headFile      = "config-head"
 	seenFile      = "config-seen"
+	arrivalsFile  = "arrivals"
 	signingFile   = "signing-key"
 	cacheDir      = "store.git"
 	incomingDir   = "incoming"
-	stateIgnore   = "store.git/\nincoming/\n" + signingFile + "\n" + headFile + "\n" + seenFile + "\n"
+	stateIgnore   = "store.git/\nincoming/\n" + signingFile + "\n" + headFile + "\n" + seenFile + "\n" + arrivalsFile + "\n"
 	stateFileMode = 0o644
 )
 
@@ -196,6 +197,68 @@ func (l Local) RecordSeen(g Gathered) error {
 		return l.acceptRollback(g.Seen.Revision, g.Seen.SHA)
 	}
 	return l.raiseSeen(g.Seen.Revision, g.Seen.SHA)
+}
+
+// now is the clock a gather records arrivals by.
+var now = time.Now
+
+// RecordArrival records, for each trusted version of g not yet recorded, when
+// it first reached this workstation: one "<sha> <RFC3339 UTC>" line each in
+// .paisans/arrivals. A recorded line is never rewritten, so a later gather
+// that sees the version again keeps the first time. A gather calls it for
+// whatever Local it gathers into, a dry run included; the scratch directory
+// of a deployment with no system copy gets a record that is discarded with it.
+func (l Local) RecordArrival(g Gathered, at time.Time) error {
+	have, err := l.arrivals()
+	if err != nil {
+		return err
+	}
+	var add []string
+	for _, sha := range slices.Sorted(maps.Keys(g.Verdict.Trusted)) {
+		if _, ok := have[sha]; !ok && g.Verdict.Trusted[sha] {
+			add = append(add, sha+" "+at.UTC().Format(time.RFC3339))
+		}
+	}
+	if len(add) == 0 {
+		return nil
+	}
+	data, err := os.ReadFile(l.state(arrivalsFile))
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return l.writeState(arrivalsFile, strings.TrimSpace(string(data)+"\n"+strings.Join(add, "\n")))
+}
+
+// ArrivedAt is when sha first reached this workstation, and false when no
+// record says, as for a version gathered before arrivals were recorded.
+func (l Local) ArrivedAt(sha string) (time.Time, bool) {
+	have, err := l.arrivals()
+	if err != nil {
+		return time.Time{}, false
+	}
+	t, ok := have[sha]
+	return t, ok
+}
+
+func (l Local) arrivals() (map[string]time.Time, error) {
+	data, err := os.ReadFile(l.state(arrivalsFile))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	have := map[string]time.Time{}
+	for _, line := range strings.Split(string(data), "\n") {
+		f := strings.Fields(line)
+		if len(f) != 2 {
+			continue
+		}
+		if t, err := time.Parse(time.RFC3339, f[1]); err == nil {
+			have[f[0]] = t
+		}
+	}
+	return have, nil
 }
 
 // AcceptRollback makes g carry the older head rb names as the record's new
@@ -590,7 +653,13 @@ func gather(l Local, sites map[string]apply.Transport, id string, a Anchor, o Ga
 		}
 		g.Reached = append(g.Reached, r)
 	}
-	return judgeHeld(l, cache, g, id, a)
+	g, err = judgeHeld(l, cache, g, id, a)
+	if len(g.Verdict.Trusted) > 0 {
+		if rerr := l.RecordArrival(g, now()); rerr != nil && err == nil {
+			err = rerr
+		}
+	}
+	return g, err
 }
 
 // HeldStore is the workstation's store as it is on disk, opened without
