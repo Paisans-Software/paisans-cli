@@ -129,8 +129,9 @@ func draftBase(r ui.Reporter, sys configstore.Local, g configstore.Gathered, pai
 // under the system copy's lock. It is refused, ending s, the step that
 // publishes, while another command holds the lock, and when another deploy
 // overtook this one, the system copy having moved since the gather. The
-// first deploy of a new deployment makes the system copy, and one that
-// fails leaves none. A deploy records the version in the system copy's
+// first deploy of a new deployment makes the system copy (stageSystem),
+// and one that fails leaves none, and leaves what the system copy's place
+// held as it was. A deploy records the version in the system copy's
 // saved.json, which deployment list shows.
 func (p *deployer) deploy(r ui.Reporter, s ui.Step, files configstore.Files, publish func(sys configstore.Local) (sha string, rev int, err error)) error {
 	st, err := openStore()
@@ -162,23 +163,34 @@ func (p *deployer) deploy(r ui.Reporter, s ui.Step, files configstore.Files, pub
 		s.Fail(moved)
 		return &ui.Problem{Hint: "another deploy overtook this one", Explain: fmt.Sprintf("The system copy of %s moved from %s to %s since this command gathered the sites' versions, so what it would sign no longer builds on the newest. Nothing was published. Run %s %s again, which gathers again.", p.id, headName(p.head), headName(head), progname.Cmd(), p.again), Cause: moved}
 	}
-	if !held {
-		if sys, err = st.Local(p.id); err != nil {
-			s.Fail(err)
+	if held {
+		sha, _, err := deployDraft(r, sys, p.d, files, func() (string, int, error) { return publish(sys) })
+		if err != nil {
 			return err
 		}
+		p.sys, p.head = sys, sha
+		recordHead(r, sys, p.source)
+		return nil
 	}
-	sha, rev, err := deployDraft(r, sys, p.d, files, func() (string, int, error) { return publish(sys) })
+	// The first deploy makes the system copy as a recovery does, in a
+	// directory of its own that is put in place once it records a head.
+	// The lock is this function's.
+	sys, staged, done, err := stageSystem(r, st, "deploy", p.id, "it held no system copy, only what a run that made none left.", nil, func() {}, nil)
 	if err != nil {
-		if !held {
-			if gone := os.RemoveAll(sys.Dir); gone != nil {
-				return errors.Join(err, gone)
-			}
-		}
+		s.Fail(err)
 		return err
 	}
+	sha, _, err := deployDraft(staged, sys, p.d, files, func() (string, int, error) { return publish(sys) })
+	if err == nil {
+		recordHead(staged, sys, p.source)
+	}
+	if err := done(err); err != nil {
+		return err
+	}
+	if sys, held, err = st.Held(p.id); err != nil || !held {
+		return errors.Join(err, fmt.Errorf("the system copy of %s is not in place", p.id))
+	}
 	p.sys, p.held, p.head = sys, true, sha
-	recordDeploy(r, st, files, sha, rev, p.source)
 	return nil
 }
 
@@ -190,16 +202,33 @@ func headName(sha string) string {
 	return shortSHA(sha)
 }
 
-// recordDeploy writes the system copy's saved.json for the version deployed,
-// which deployment list shows. A failure is a warning: the version is on the
-// sites and is the system copy's already.
-func recordDeploy(r ui.Reporter, st localstore.Store, files configstore.Files, sha string, rev int, source string) {
-	cfg, err := config.LoadBytes(files.Paisans)
-	if err == nil {
-		err = st.Record(localstore.Saved{ID: cfg.ID, Domain: cfg.Community.Domain, SHA: sha, Revision: rev, Status: localstore.Verified, Source: source, SavedAt: configNow().UTC()})
-	}
+// recordHead records that the head of the system copy sys moved: its
+// saved.json names the version the head now is, verified, with source as
+// where it came from. It is what deployment list shows, and what checkout
+// checks the head against, so every command that moves a system copy's
+// head records through it: a deploy, a pull or an apply that merged
+// forward, an attestation, a recovery or a join, and a fetch into a copy
+// with no head. sys may be the directory a run makes a system copy in,
+// which keeps the record when it is put in place. A failure is a warning:
+// the version is the system copy's already.
+func recordHead(r ui.Reporter, sys configstore.Local, source string) {
+	err := func() error {
+		head, err := sys.Head()
+		if err != nil || head == "" {
+			return errors.Join(err, errors.New("the system copy has no head"))
+		}
+		cache, err := sys.Cache()
+		if err != nil {
+			return err
+		}
+		cfg, err := config.Load(filepath.Join(sys.Dir, config.FileName))
+		if err != nil {
+			return err
+		}
+		return localstore.RecordIn(sys.Dir, localstore.Saved{ID: cfg.ID, Domain: cfg.Community.Domain, SHA: head, Revision: cache.Revision(head), Status: localstore.Verified, Source: source, SavedAt: configNow().UTC()})
+	}()
 	if err != nil {
-		r.Warn("the system copy's record was not written", errLine(err)+". The version is on the sites and is the system copy's; deployment list shows it without its record.")
+		r.Warn("the system copy's record was not written", errLine(err)+". The version is the system copy's; deployment list shows it without its record, and checkout refuses it until a pull or a deploy records it.")
 	}
 }
 

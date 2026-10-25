@@ -109,8 +109,7 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) (err 
 			return joinInvite(reporter(), d, invite, *execute, ans, stdin, stdout)
 		}
 	}
-	r := reporter()
-	sys, sites, done, err := registerSystem(r, *configPath, *id, d, *root, *execute)
+	sys, sites, r, done, err := registerSystem(reporter(), *configPath, *id, d, *root, *execute)
 	if err != nil {
 		return err
 	}
@@ -143,7 +142,8 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) (err 
 	return attest(r, sys, cfg, key, pin, *execute, ans, stdin, stdout)
 }
 
-// registerSystem is the system copy register attests from, and done, which
+// registerSystem is the system copy register attests from, staged, the
+// reporter to report the run through, and done, which
 // ends the run's hold on it and returns the run's error, runErr, as it
 // should be reported. A draft of a deployment with no system copy
 // here is refused, as systemFor refuses it, unless root pins the root: a
@@ -154,29 +154,29 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) (err 
 // directory; done puts that in place as the system copy only when the run
 // recorded a head there, as a dry run does not, and removes it. Otherwise
 // --execute holds the lock until done.
-func registerSystem(r ui.Reporter, configPath, id string, d draft.Draft, root string, execute bool) (sys configstore.Local, sites *config.Config, done func(runErr error) error, err error) {
+func registerSystem(r ui.Reporter, configPath, id string, d draft.Draft, root string, execute bool) (sys configstore.Local, sites *config.Config, staged ui.Reporter, done func(runErr error) error, err error) {
 	done = func(runErr error) error { return runErr }
 	st, err := openStore()
 	if err != nil {
-		return sys, nil, done, err
+		return sys, nil, r, done, err
 	}
 	release, locked := func() {}, false
 	if c := createdFrom(d, id, root); c != nil {
 		if release, err = st.Lock(c.ID); err != nil {
-			return sys, nil, done, err
+			return sys, nil, r, done, err
 		}
 		locked = true
 		_, ok, err := st.Held(c.ID)
 		if err != nil {
 			release()
-			return sys, nil, done, err
+			return sys, nil, r, done, err
 		}
 		if !ok {
-			sys, staged, err := stageSystem(r, st, "register", c.ID, "it held no system copy, only what a run that made none left.", []string{localstore.SavedFile}, release, nil)
+			sys, staged, end, err := stageSystem(r, st, "register", c.ID, "it held no system copy, only what a run that made none left.", []string{localstore.SavedFile}, release, nil)
 			if err != nil {
-				return sys, nil, done, err
+				return sys, nil, r, done, err
 			}
-			return sys, c, staged, nil
+			return sys, c, staged, end, nil
 		}
 		if !execute {
 			release()
@@ -186,39 +186,40 @@ func registerSystem(r ui.Reporter, configPath, id string, d draft.Draft, root st
 	sys, _, deploymentID, err := systemFor(configPath, id)
 	if err != nil {
 		release()
-		return sys, nil, done, err
+		return sys, nil, r, done, err
 	}
 	if execute && !locked {
 		if release, err = st.Lock(deploymentID); err != nil {
-			return sys, nil, done, err
+			return sys, nil, r, done, err
 		}
 	}
-	return sys, nil, func(runErr error) error { release(); return runErr }, nil
+	return sys, nil, r, func(runErr error) error { release(); return runErr }, nil
 }
 
 // stageSystem is where a run that makes deployment id's system copy works,
 // a directory of its own under the data directory and outside
 // deployments/, named for the command, so nothing it gathers is a system
-// copy until it records a head; and done, which ends the run. The caller
-// holds the lock on id, release, which done releases, as stageSystem does
-// when it fails. done puts the directory in place as the system copy only
-// when the run recorded a head there, as a dry run does not, then runs
-// placed, when set, on the system copy in its place, and removes the
-// directory. What the system copy's place held, but the entries keep
-// names, is moved aside, never
-// removed, and a warning names each entry, where it went, and why, which
-// says why that is no system copy to keep. done returns the run's error,
-// runErr, naming the system copy where it named the directory, or why the
-// system copy is not in place.
-func stageSystem(r ui.Reporter, st localstore.Store, command, id, why string, keep []string, release func(), placed func(sys configstore.Local) error) (configstore.Local, func(runErr error) error, error) {
-	sys, err := st.Staging(command + "-" + id + "-")
+// copy until it records a head; staged, the reporter r naming the system
+// copy's place wherever its output names that directory, for the run to
+// report through; and done, which ends the run. The caller holds the lock
+// on id, release, which done releases, as stageSystem does when it fails.
+// done puts the directory in place as the system copy only when the run
+// recorded a head there, as a dry run does not, then runs placed, when
+// set, on the system copy in its place, and removes the directory. What
+// the system copy's place held, but the entries keep names, is moved
+// aside, never removed, and a warning names each entry, where it went, and
+// why, which says why that is no system copy to keep. done returns the
+// run's error, runErr, naming the system copy where it named the
+// directory, or why the system copy is not in place.
+func stageSystem(r ui.Reporter, st localstore.Store, command, id, why string, keep []string, release func(), placed func(sys configstore.Local) error) (sys configstore.Local, staged ui.Reporter, done func(runErr error) error, err error) {
+	sys, err = st.Staging(command + "-" + id + "-")
 	if err != nil {
 		release()
-		return configstore.Local{}, nil, err
+		return configstore.Local{}, r, nil, err
 	}
 	staging := sys.Dir
 	dest := filepath.Join(st.Base, "deployments", id)
-	return sys, func(runErr error) error {
+	return sys, renamingReporter{r, staging, dest}, func(runErr error) error {
 		defer release()
 		var after error
 		if head, err := sys.Head(); err == nil && head != "" {
@@ -231,9 +232,11 @@ func stageSystem(r ui.Reporter, st localstore.Store, command, id, why string, ke
 				if runErr != nil {
 					what = "and stopped before the sites were known to hold it (" + errLine(runErr) + "); they may not have it"
 				}
-				p := &ui.Problem{Hint: "the new system copy of " + id + " could not be put in place", Explain: "This run recorded its head, " + shortSHA(head) + ", in " + staging + ", " + what + ". Move its entries into " + dest + ", the paisans state directory .paisans last: " + errLine(err) + ".", Cause: err}
-				r.Warn(p.Hint, p.Explain)
-				return p
+				left := ""
+				if aside != "" {
+					left = " Entries " + dest + " held may be in " + aside + " already, and others may remain in " + dest + "; move those aside first."
+				}
+				return &ui.Problem{Hint: "the new system copy of " + id + " could not be put in place", Explain: "This run recorded its head, " + shortSHA(head) + ", in " + staging + ", " + what + "." + left + " Move its entries into " + dest + ", the paisans state directory .paisans last: " + errLine(err) + ".", Cause: err}
 			}
 			if placed != nil {
 				if l, err := st.Local(id); err != nil {
@@ -318,18 +321,22 @@ func settle(staging, dest string, keep ...string) (aside string, moved []string,
 }
 
 // renamed is err with each mention of the directory from, where the run
-// worked and which is gone once it ends, naming to instead.
+// worked and which is gone once it ends, naming to instead. A Problem err
+// holds, at any depth, is what is shown, so it is the one renamed, its
+// Cause with it.
 func renamed(err error, from, to string) error {
 	if err == nil {
 		return nil
 	}
-	if p, ok := err.(*ui.Problem); ok {
+	var p *ui.Problem
+	if errors.As(err, &p) {
 		q := *p
-		q.Hint = strings.ReplaceAll(q.Hint, from, to)
-		q.Explain = strings.ReplaceAll(q.Explain, from, to)
+		q.Hint = renamePath(q.Hint, from, to)
+		q.Explain = renamePath(q.Explain, from, to)
+		q.Cause = renamed(q.Cause, from, to)
 		return &q
 	}
-	if !strings.Contains(err.Error(), from) {
+	if renamePath(err.Error(), from, to) == err.Error() {
 		return err
 	}
 	return renamedError{err, from, to}
@@ -340,8 +347,85 @@ type renamedError struct {
 	from, to string
 }
 
-func (e renamedError) Error() string { return strings.ReplaceAll(e.err.Error(), e.from, e.to) }
+func (e renamedError) Error() string { return renamePath(e.err.Error(), e.from, e.to) }
 func (e renamedError) Unwrap() error { return e.err }
+
+// renamePath is s with each mention of the path from, as a whole path or a
+// path under it, naming to instead: a longer name that starts with from is
+// another path, and is left.
+func renamePath(s, from, to string) string {
+	if from == "" {
+		return s
+	}
+	var b strings.Builder
+	for {
+		i := strings.Index(s, from)
+		if i < 0 {
+			b.WriteString(s)
+			return b.String()
+		}
+		end := i + len(from)
+		b.WriteString(s[:i])
+		if end == len(s) || !pathByte(s[end]) {
+			b.WriteString(to)
+		} else {
+			b.WriteString(from)
+		}
+		s = s[end:]
+	}
+}
+
+// pathByte reports whether c continues a file name. A dot does not: it
+// ends the sentence a path closes far more often than it starts a suffix.
+func pathByte(c byte) bool {
+	return c == '-' || c == '_' || ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || ('0' <= c && c <= '9')
+}
+
+// renamingReporter is a Reporter whose output names to wherever it would
+// name from: a run's output while it works in a directory that becomes the
+// system copy.
+type renamingReporter struct {
+	ui.Reporter
+	from, to string
+}
+
+func (r renamingReporter) n(s string) string { return renamePath(s, r.from, r.to) }
+
+func (r renamingReporter) Section(title string) { r.Reporter.Section(r.n(title)) }
+func (r renamingReporter) Step(title string) ui.Step {
+	return renamingStep{r.Reporter.Step(r.n(title)), r}
+}
+func (r renamingReporter) Warn(hint, detail string)   { r.Reporter.Warn(r.n(hint), r.n(detail)) }
+func (r renamingReporter) Note(hint, detail string)   { r.Reporter.Note(r.n(hint), r.n(detail)) }
+func (r renamingReporter) Explain(text string)        { r.Reporter.Explain(r.n(text)) }
+func (r renamingReporter) Refuse(hint, expl string)   { r.Reporter.Refuse(r.n(hint), r.n(expl)) }
+func (r renamingReporter) Trace(label, output string) { r.Reporter.Trace(r.n(label), r.n(output)) }
+func (r renamingReporter) Verbatim(lines []string) {
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		out[i] = r.n(l)
+	}
+	r.Reporter.Verbatim(out)
+}
+func (r renamingReporter) Detail(format string, args ...any) {
+	r.Reporter.Detail("%s", r.n(fmt.Sprintf(format, args...)))
+}
+func (r renamingReporter) Result(format string, args ...any) {
+	r.Reporter.Result("%s", r.n(fmt.Sprintf(format, args...)))
+}
+
+type renamingStep struct {
+	ui.Step
+	r renamingReporter
+}
+
+func (s renamingStep) Done(result string)           { s.Step.Done(s.r.n(result)) }
+func (s renamingStep) Fail(err error)               { s.Step.Fail(renamed(err, s.r.from, s.r.to)) }
+func (s renamingStep) End(m ui.Mark, result string) { s.Step.End(m, s.r.n(result)) }
+func (s renamingStep) Progress(text string)         { s.Step.Progress(s.r.n(text)) }
+func (s renamingStep) Detail(format string, args ...any) {
+	s.Step.Detail("%s", s.r.n(fmt.Sprintf(format, args...)))
+}
 
 // createdFrom is the draft's configuration when register may make its
 // deployment's system copy: root pins a root and d is a draft that loads,
@@ -431,6 +515,7 @@ func attest(r ui.Reporter, l configstore.Local, cfg *config.Config, key, pin str
 	default:
 		s.Done(sha[:12])
 	}
+	recordHead(r, l, "attested by operator register")
 	r.Result("registered %s; version %s is your anchor", k.Fingerprint, sha)
 	return nil
 }

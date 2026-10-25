@@ -135,7 +135,7 @@ func joinInvite(r ui.Reporter, d draft.Draft, invite operatorinvite.Invite, exec
 			r.Warn("the invite is still pending in "+ui.ShortPath(dir), fmt.Sprintf("Removing it failed: %v. The system copy is made, so register here no longer needs it; remove the directory by hand.", err))
 		}
 	}
-	sys, done, err := recoverFiles(r, d, dests, configstore.Anchor{Root: invite.Root}, invite.Deployment, held, execute, ans, stdin, stdout, recovery{accept: accept, source: "joined into " + d.Dir, promoted: promoted})
+	sys, staged, done, err := recoverFiles(r, d, dests, configstore.Anchor{Root: invite.Root}, invite.Deployment, held, execute, ans, stdin, stdout, recovery{accept: accept, source: "joined into " + d.Dir, promoted: promoted})
 	var ns *configstore.PinNotServedError
 	switch {
 	case errors.As(err, &ns) || errors.Is(err, configstore.ErrNoAnchor):
@@ -161,12 +161,12 @@ func joinInvite(r ui.Reporter, d draft.Draft, invite operatorinvite.Invite, exec
 		r.Step("attest the recovered version, signed with "+key.Fingerprint).End(ui.Pending, "--execute will sign and push it")
 		return done(nil)
 	}
-	checkJoinSecrets(r, sys.Dir, invite.Deployment)
+	checkJoinSecrets(staged, sys.Dir, invite.Deployment)
 	cfg, err := config.Load(filepath.Join(sys.Dir, config.FileName))
 	if err != nil {
 		return done(err)
 	}
-	return done(attest(r, sys, cfg, invite.Key, invite.Root, execute, ans, stdin, stdout))
+	return done(attest(staged, sys, cfg, invite.Key, invite.Root, execute, ans, stdin, stdout))
 }
 
 // notAppliedProblem is a join refused because the inviter's acceptance has

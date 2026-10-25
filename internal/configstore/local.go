@@ -1149,7 +1149,7 @@ func Parents(g Gathered, head string, merge bool) ([]string, error) {
 	heads := g.Verdict.Heads
 	switch {
 	case len(heads) == 0 && head != "":
-		return nil, fmt.Errorf("your base %s is held by no site that answered and is not in the local store; run %s deployment pull", head, progname.Cmd())
+		return nil, fmt.Errorf("your base %s is held by no site that answered and is not in the system copy's store; run %s deployment pull", head, progname.Cmd())
 	case len(heads) == 0 && merge:
 		return nil, errors.New("there is nothing to merge: no site holds a version")
 	case len(heads) == 0:

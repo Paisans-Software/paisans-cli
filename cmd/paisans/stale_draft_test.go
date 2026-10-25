@@ -134,3 +134,47 @@ func TestApplyWarnsOnceAboutAStaleMarkerlessDraft(t *testing.T) {
 		}
 	}
 }
+
+// An attestation signs the files of the version it attests again, so it
+// brings nothing a draft could be missing: the warning is judged from the
+// arrival of the version that brought the newest files, and names it.
+func TestStaleDraftJudgedFromTheVersionThatBroughtTheFiles(t *testing.T) {
+	sys, g, head := historyOf(t, revision{1, "a: 1\n", noSecrets}, revision{2, "a: 2\n", noSecrets}, revision{3, "a: 2\n", noSecrets})
+	var two string
+	for sha, v := range g.Versions {
+		if v.Revision == 2 {
+			two = sha
+		}
+	}
+	changed := time.Date(2026, 10, 2, 9, 0, 0, 0, time.UTC)
+	attested := changed.Add(2 * time.Hour)
+	g.Verdict = configstore.Verdict{Trusted: map[string]bool{two: true}, Heads: []string{two}}
+	if err := sys.RecordArrival(g, changed); err != nil {
+		t.Fatal(err)
+	}
+	g.Verdict = configstore.Verdict{Trusted: map[string]bool{two: true, head: true}, Heads: []string{head}}
+	if err := sys.RecordArrival(g, attested); err != nil {
+		t.Fatal(err)
+	}
+	d := draft.Draft{Dir: t.TempDir()}
+	saveAt := func(at time.Time) {
+		for _, name := range []string{config.FileName, configstore.FileSecrets, configstore.FileSOPS} {
+			p := filepath.Join(d.Dir, name)
+			if err := os.WriteFile(p, []byte("x\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chtimes(p, at, at); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	saveAt(changed.Add(time.Hour))
+	if got := staleDraftWarning(sys, g, d, []byte("x\n")); got != "" {
+		t.Fatalf("a draft saved after the files changed, before the attestation arrived, warned %q", got)
+	}
+	saveAt(changed.Add(-time.Hour))
+	want := "This draft was last saved before revision 2 reached this workstation; it may not include revision 2's changes."
+	if got := staleDraftWarning(sys, g, d, []byte("x\n")); got != want {
+		t.Fatalf("got %q", got)
+	}
+}

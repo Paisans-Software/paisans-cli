@@ -15,6 +15,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/draft"
 	"github.com/paisans-software/paisans-cli/internal/grant"
+	"github.com/paisans-software/paisans-cli/internal/localstore"
 )
 
 // The two paths the tests below edit: the community's name and bob's.
@@ -269,7 +270,12 @@ func TestApplyMergesNewerThenStops(t *testing.T) {
 		t.Errorf("head %s, want %s", h, sha)
 	}
 
-	_ = f.applySite(t, noTerminalStdin(), "--execute")
+	// The merged draft deploys and the apply goes on to the hosts, as far
+	// as the fake host lets it: its mesh, past the publish and the check.
+	err = f.applySite(t, noTerminalStdin(), "--execute")
+	if text := problemText(err); err == nil || !strings.Contains(text, "did not come up") || !checked(logged(t, log)) {
+		t.Errorf("the third apply did not go on to the hosts: %v\n%s", text, rec.Lines())
+	}
 	head, _ := f.sys.Head()
 	if cache, _ := f.sys.Cache(); head == sha || cache.Revision(head) != 3 || !f.pushed() {
 		t.Errorf("the merged draft was not deployed: head %s\n%s", head, rec.Lines())
@@ -302,5 +308,120 @@ func TestMergedDraftWriteFailureKeepsTheOldBase(t *testing.T) {
 	wantMerged(t, f.cfgPath, 1, f.shas[0], `name: "Their Community"`, "name: Bob Draft")
 	if h, _ := f.sys.Head(); h != f.shas[0] {
 		t.Errorf("the system copy moved to %s", h)
+	}
+}
+
+// checkoutInto runs deployment checkout --execute into an empty folder of
+// its own, and returns its paisans-stack.yaml.
+func checkoutInto(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), config.FileName)
+	if err := runDeployment([]string{"checkout", "--config", path, "--execute"}, noTerminalStdin(), &bytes.Buffer{}); err != nil {
+		t.Fatal(problemText(err))
+	}
+	return path
+}
+
+// listed is what deployment list prints.
+func listed(t *testing.T) string {
+	t.Helper()
+	var out bytes.Buffer
+	if err := runDeploymentList(nil, &out); err != nil {
+		t.Fatal(err)
+	}
+	return out.String()
+}
+
+// A pull that moves the system copy records its new head, so checkout,
+// which checks the head against the record, starts a draft of it, and
+// deployment list shows it.
+func TestPullThenCheckout(t *testing.T) {
+	f := newApplyStore(t, 1)
+	f.based(t)
+	st := must(openStore())
+	if err := st.Record(localstore.Saved{ID: fixtureDeploymentID, SHA: f.shas[0], Revision: 1, Status: localstore.Verified, Source: "applied"}); err != nil {
+		t.Fatal(err)
+	}
+	sha := f.sitesHold(t, replaced(t, f.files[0], communityName, `name: "Their Community"`), f.shas[0], 2)
+	if _, err := f.pull(t, "--execute"); err != nil {
+		t.Fatal(problemText(err))
+	}
+	wantMerged(t, checkoutInto(t), 2, sha, `name: "Their Community"`)
+	if out := listed(t); !strings.Contains(out, shortSHA(sha)) || !strings.Contains(out, "pulled by deployment pull") {
+		t.Errorf("deployment list does not show revision 2:\n%s", out)
+	}
+}
+
+// An attestation signs the version it attests again, files unchanged: a
+// draft marked with the attested version is not merged, and apply deploys
+// it on the attestation, rewriting its line to the version deployed.
+func TestApplyGoesOnFromAnAttestation(t *testing.T) {
+	f := newApplyStore(t, 1)
+	f.based(t)
+	att := f.sitesHold(t, f.files[0], f.shas[0], 2)
+	if err := f.write(replaced(t, f.files[0], bobName, "name: Bob Draft")); err != nil {
+		t.Fatal(err)
+	}
+	log := loggingSSH(t, "")
+	fakeGrants(t, grantedWith(t, f, &grant.ConfigPart{Hash: att, Revision: 2}))
+	rec := recordConverge(t)
+	// The apply goes on to the hosts, as far as the fake host lets it.
+	err := f.applySite(t, noTerminalStdin(), "--execute")
+	if text := problemText(err); err == nil || !strings.Contains(text, "did not come up") || !checked(logged(t, log)) {
+		t.Fatalf("an attestation stopped the apply: %v\n%s", text, rec.Lines())
+	}
+	head, _ := f.sys.Head()
+	cache, _ := f.sys.Cache()
+	if head == att || cache.Revision(head) != 3 || !f.pushed() {
+		t.Fatalf("the draft was not deployed on the attestation: head %s\n%s", head, rec.Lines())
+	}
+	vs := must(cache.Versions(os.DevNull))
+	for _, v := range vs {
+		if v.SHA == head && (len(v.Parents) != 1 || v.Parents[0] != att) {
+			t.Errorf("deployed on %v, want %s", v.Parents, att)
+		}
+	}
+	wantMerged(t, f.cfgPath, 3, head, "name: Bob Draft")
+}
+
+// pull of a draft marked with the attested version rewrites only its line,
+// to the attestation, and says the draft is up to date; a dry run writes
+// nothing.
+func TestPullTakesAnAttestationAsUpToDate(t *testing.T) {
+	f := newApplyStore(t, 1)
+	f.based(t)
+	att := f.sitesHold(t, f.files[0], f.shas[0], 2)
+	edited := replaced(t, f.files[0], bobName, "name: Bob Draft")
+	if err := f.write(edited); err != nil {
+		t.Fatal(err)
+	}
+	draftBefore := rawFiles(t, f.dir)
+	out, err := f.pull(t)
+	if err != nil {
+		t.Fatal(problemText(err))
+	}
+	if !maps.Equal(rawFiles(t, f.dir), draftBefore) || !strings.Contains(out, "--execute will write it") {
+		t.Errorf("the dry run wrote the draft or did not say what --execute does:\n%s", out)
+	}
+	out, err = f.pull(t, "--execute")
+	if err != nil {
+		t.Fatal(problemText(err))
+	}
+	if !strings.Contains(out, "the draft is up to date with revision 2") || strings.Contains(out, "merge revision") {
+		t.Errorf("the pull did not say the draft is up to date:\n%s", out)
+	}
+	wantMerged(t, f.cfgPath, 2, att, "name: Bob Draft")
+	after := rawFiles(t, f.dir)
+	for name, body := range draftBefore {
+		if name == config.FileName {
+			if !bytes.Equal(draft.StripMarker([]byte(after[name])), edited.Paisans) {
+				t.Errorf("the pull changed more of %s than its line:\n%s", name, after[name])
+			}
+		} else if after[name] != body {
+			t.Errorf("the pull changed %s", name)
+		}
+	}
+	if h, _ := f.sys.Head(); h != att {
+		t.Errorf("head %s, want %s", h, att)
 	}
 }

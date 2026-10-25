@@ -210,6 +210,48 @@ func TestApplyWithNoBasePublishesTheRoot(t *testing.T) {
 	}
 }
 
+// The first deploy makes the system copy in a directory of its own: one
+// no site took leaves what the system copy's place held as it was, and one
+// that succeeds moves that aside under replaced/, never removing it.
+func TestFirstDeployKeepsWhatThePlaceHeld(t *testing.T) {
+	f := newApplyStore(t, 0)
+	left := filepath.Join(f.sys.Dir, "left-by-a-run")
+	if err := os.MkdirAll(f.sys.Dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(left, []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configSiteTransport = func(name string, _ config.Site) apply.Transport {
+		return &storeHost{name: name, answer: f.answer, runs: f.runs, noPush: true}
+	}
+	loggingSSH(t, "")
+	fakeGrants(t, grantedWith(t, f, nil))
+	recordConverge(t)
+	if err := f.applySite(t, noTerminalStdin(), "--execute"); err == nil || !strings.Contains(problemText(err), "no site took the version") {
+		t.Fatalf("got %v", problemText(err))
+	}
+	if b, err := os.ReadFile(left); err != nil || string(b) != "x\n" {
+		t.Fatalf("a first deploy no site took removed what was there: %v", err)
+	}
+	if _, ok, _ := must(openStore()).Held(fixtureDeploymentID); ok {
+		t.Fatal("a first deploy no site took left a system copy")
+	}
+
+	allSitesUp(f.answer, f.runs)
+	_ = f.applySite(t, noTerminalStdin(), "--execute")
+	if head, _ := f.sys.Head(); head == "" {
+		t.Fatal("the first deploy made no system copy")
+	}
+	asides, _ := filepath.Glob(filepath.Join(dataDir(t), "replaced", fixtureDeploymentID+"-*", "left-by-a-run"))
+	if len(asides) != 1 {
+		t.Fatalf("what the place held is not kept under replaced/: %v", asides)
+	}
+	if rec, ok, _ := must(openStore()).Load(fixtureDeploymentID); !ok || rec.Status != localstore.Verified || rec.Revision != 1 {
+		t.Errorf("record %+v", rec)
+	}
+}
+
 // Edited local files on the sites' head are published as the next
 // revision before the first change.
 func TestApplyPublishesTheNextRevisionFirst(t *testing.T) {

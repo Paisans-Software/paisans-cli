@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/configstore"
+	"github.com/paisans-software/paisans-cli/internal/draft"
 	"github.com/paisans-software/paisans-cli/internal/localstore"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -530,5 +532,152 @@ func TestRenamedNamesTheSystemCopy(t *testing.T) {
 	}
 	if renamed(nil, "a", "b") != nil {
 		t.Fatal("nil became an error")
+	}
+	// A Problem wrapped in another error is the one shown, so it is
+	// renamed, its Cause too; a longer name that starts with the directory
+	// is another path, and is left.
+	cause := errors.New("read /tmp/register-x/.paisans/config-head")
+	wrapped := renamed(fmt.Errorf("register: %w", &ui.Problem{Hint: "in /tmp/register-x", Explain: "not /tmp/register-xy, but /tmp/register-x.", Cause: cause}), "/tmp/register-x", "/data/deployments/x")
+	var q *ui.Problem
+	if !errors.As(wrapped, &q) || q.Hint != "in /data/deployments/x" || q.Explain != "not /tmp/register-xy, but /data/deployments/x." {
+		t.Fatalf("got %+v", q)
+	}
+	if q.Cause.Error() != "read /data/deployments/x/.paisans/config-head" || !errors.Is(q.Cause, cause) {
+		t.Fatalf("cause %v", q.Cause)
+	}
+}
+
+// What a run prints while it works in its own directory names the system
+// copy's place: the reporter stageSystem returns renames it.
+func TestStagedOutputNamesTheSystemCopy(t *testing.T) {
+	var rec ui.Recorder
+	r := renamingReporter{&rec, "/tmp/recover-x", "/data/deployments/x"}
+	r.Warn("in /tmp/recover-x", "see /tmp/recover-x/.paisans/arrivals")
+	r.Step("write /tmp/recover-x/paisans-stack.yaml").Done("/tmp/recover-x")
+	r.Result("kept /tmp/recover-xy")
+	text := rec.Lines()
+	if strings.Contains(text, "/tmp/recover-x/") || strings.Contains(text, "/tmp/recover-x\n") || !strings.Contains(text, "/data/deployments/x/.paisans/arrivals") || !strings.Contains(text, "kept /tmp/recover-xy") {
+		t.Fatalf("got\n%s", text)
+	}
+}
+
+// A run that recorded its head but whose system copy cannot be put in
+// place says so once, as its error, naming what failed, where the head is,
+// the run's own error, and that what the place held may be partly moved
+// aside.
+func TestStageSettleFailureIsSaidOnce(t *testing.T) {
+	st := localstore.Store{Base: t.TempDir()}
+	dest := filepath.Join(st.Base, "deployments", fixtureDeploymentID)
+	if err := os.MkdirAll(dest, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dest, "left"), []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var rec ui.Recorder
+	released := false
+	sys, _, done, err := stageSystem(&rec, st, "recover", fixtureDeploymentID, "it held what a run left.", nil, func() { released = true }, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sys.SetHead(strings.Repeat("a", 40)); err != nil {
+		t.Fatal(err)
+	}
+	// replaced/ is a file, so nothing can be moved aside.
+	if err := os.WriteFile(filepath.Join(st.Base, "replaced"), []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err = done(errors.New("push refused"))
+	text := problemText(err)
+	for _, w := range []string{"could not be put in place", sys.Dir, "push refused", "they may not have it"} {
+		if !strings.Contains(text, w) {
+			t.Errorf("the error lacks %q:\n%s", w, text)
+		}
+	}
+	if strings.Contains(rec.Lines(), "could not be put in place") {
+		t.Errorf("the failure was also printed:\n%s", rec.Lines())
+	}
+	if !released {
+		t.Error("the lock was not released")
+	}
+	if _, err := os.Stat(filepath.Join(sys.Dir, ".paisans", "config-head")); err != nil {
+		t.Errorf("the directory holding the head is gone: %v", err)
+	}
+
+	// Once entries are moved aside and the rest fails, the error says what
+	// may remain where.
+	if err := os.Remove(filepath.Join(st.Base, "replaced")); err != nil {
+		t.Fatal(err)
+	}
+	sys, _, done, err = stageSystem(&rec, st, "recover", fixtureDeploymentID, "it held what a run left.", nil, func() {}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sys.SetHead(strings.Repeat("a", 40)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dest, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dest, 0o700) })
+	text = problemText(done(nil))
+	if !strings.Contains(text, "may remain in "+dest) {
+		t.Errorf("the error does not say what may remain:\n%s", text)
+	}
+}
+
+// aliceAndBob is a history of two versions signed by alice, whose
+// paisans-stack.yaml lists bob as an operator, the sites answering with it
+// and the agent holding bob's key, which signs: a system copy and draft of
+// the first version, nothing recorded.
+func aliceAndBob(t *testing.T, runs *[]string) (s store, akey, yaml string, shas []string, l workstation) {
+	t.Helper()
+	akey, apub := testKey(t)
+	bkey, bpub := testKey(t)
+	s = newStore(t)
+	yaml = withOperatorBob(t, apub, bpub)
+	v1, f1 := s.commit(t, yaml, "", nil, 1, akey)
+	l = registerWorkstation(t, s.answer(t), f1, runs, bpub)
+	savedSign := configSignWith
+	configSignWith = func(string) string { return bkey }
+	t.Cleanup(func() { configSignWith = savedSign })
+	return s, akey, yaml, []string{v1}, l
+}
+
+// An attestation moves the system copy's head, and records it over what
+// the record said before: checkout then starts a draft of the
+// attestation, and deployment list shows it.
+func TestRegisterThenCheckout(t *testing.T) {
+	_, _, _, shas, l := aliceAndBob(t, nil)
+	st := must(openStore())
+	if err := st.Record(localstore.Saved{ID: fixtureDeploymentID, Status: localstore.Unverified, Source: "fetched"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOperator([]string{"register", "--root", shas[0], "--config", l.config(), "--execute"}, noTerminalStdin(), &bytes.Buffer{}); err != nil {
+		t.Fatal(problemText(err))
+	}
+	head, _ := l.sys.Head()
+	if head == shas[0] {
+		t.Fatal("no attestation was signed")
+	}
+	if m, ok := draft.ReadMarker(must(os.ReadFile(checkoutInto(t)))); !ok || m.SHA != head || m.Revision != 2 {
+		t.Errorf("the draft is drafted from %+v, want the attestation %s", m, head)
+	}
+	if out := listed(t); !strings.Contains(out, shortSHA(head)) || !strings.Contains(out, "attested by operator register") || strings.Contains(out, "unverified") {
+		t.Errorf("deployment list does not show the attestation:\n%s", out)
+	}
+}
+
+// A directory holding a record alone is no system copy: a recovery takes
+// its place, and the warning that names what is moved aside says why.
+func TestHeldAlreadyGivesAReasonForARecordAlone(t *testing.T) {
+	withDataDir(t)
+	st := must(openStore())
+	if err := st.Record(localstore.Saved{ID: fixtureDeploymentID, Status: localstore.Unverified}); err != nil {
+		t.Fatal(err)
+	}
+	why, err := heldAlready(st, fixtureDeploymentID, "")
+	if err != nil || why == "" {
+		t.Fatalf("why %q, %v", why, err)
 	}
 }

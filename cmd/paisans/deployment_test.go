@@ -959,6 +959,33 @@ func TestPublishFirstVersionFromOneSiteAsksNothing(t *testing.T) {
 	}
 }
 
+// log gathers from the sites the system copy names, never a draft's: a
+// draft that names other sites changes nothing it reaches.
+func TestLogGathersFromTheSystemCopysSites(t *testing.T) {
+	shas, answer, files := storedHistory(t, 2, 0)
+	recoverHosts(t, answer)
+	var runs []string
+	allSitesUp(answer, &runs)
+	w := newWorkstation(t, files[0])
+	if err := w.sys.SetRoot(shas[0]); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.sys.SetHead(shas[0]); err != nil {
+		t.Fatal(err)
+	}
+	other := strings.ReplaceAll(string(files[0].Paisans), "home-a", "elsewhere")
+	if err := os.WriteFile(w.config(), []byte(other), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runDeployment([]string{"log", "--config", w.config()}, noTerminalStdin(), &bytes.Buffer{}); err != nil {
+		t.Fatal(problemText(err))
+	}
+	reached := strings.Join(runs, "\n")
+	if !strings.Contains(reached, "home-a: ") || strings.Contains(reached, "elsewhere: ") {
+		t.Fatalf("log reached the draft's sites:\n%s", reached)
+	}
+}
+
 // log judges from the system copy's pinned root and gathers into its store,
 // whatever the folder holds, and writes nothing into the folder or the
 // system copy's files and head. With no draft it reads the sites from the

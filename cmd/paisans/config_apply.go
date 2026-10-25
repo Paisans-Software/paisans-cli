@@ -137,7 +137,13 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *confi
 		return nil, forkProblem(g, "Nothing was applied.")
 	}
 	if heads := g.Verdict.Heads; len(heads) == 1 && t.base != "" && heads[0] != t.base {
-		return nil, mergeNewer(r, t.deployer, g, execute)
+		// Versions that only sign the base's files again, as an
+		// attestation does, leave nothing to merge: the draft goes on
+		// from the sites' newest, and its deploy rewrites the line.
+		if !unchangedSince(t.sys, g, t.base, heads[0]) {
+			return nil, mergeNewer(r, t.deployer, g, execute)
+		}
+		t.base = heads[0]
 	}
 	parents, err := configstore.Parents(g, t.base, false)
 	if err != nil {
@@ -178,7 +184,7 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *confi
 // what --execute merges and writes nothing.
 func mergeNewer(r ui.Reporter, p deployer, g configstore.Gathered, execute bool) error {
 	head := g.Verdict.Heads[0]
-	m, err := mergeForward(r, p.sys, g, p.d, p.id, p.base, head, p.head, execute, func(l configstore.Local) error { return l.RecordSeen(g) })
+	m, err := mergeForward(r, p.sys, g, p.d, p.id, p.base, head, p.head, "merged forward by deployment apply", execute, func(l configstore.Local) error { return l.RecordSeen(g) })
 	if err != nil {
 		return err
 	}
@@ -449,7 +455,9 @@ func (s *siteReview) publishWritten(r ui.Reporter, written []byte, store storeVe
 // staleDraftWarning is the sentence to print when the draft's base is the
 // system copy's fallback, the draft's paisans-stack.yaml (paisans) having no
 // usable "drafted from" line, and any of its files was last saved before the
-// newest trusted version reached this workstation. It is "" otherwise, and
+// trusted version that brought the newest files reached this workstation:
+// the sites' newest, or the oldest of the versions before it that hold its
+// files (filesRun). It is "" otherwise, and
 // when no arrival is recorded for that version. A draft whose line names a
 // trusted version is never warned about: a deploy rewrites only that line,
 // so its other files keep older times.
@@ -460,15 +468,18 @@ func staleDraftWarning(sys configstore.Local, g configstore.Gathered, d draft.Dr
 	if len(g.Verdict.Heads) == 0 {
 		return ""
 	}
-	head := g.Verdict.Heads[0]
-	arrived, ok := sys.ArrivedAt(head)
+	// The version that brought the newest files: an attestation after it
+	// signs them again and changes nothing a draft could be missing.
+	run := filesRun(sys, g, g.Verdict.Heads[0])
+	brought := run[len(run)-1]
+	arrived, ok := sys.ArrivedAt(brought)
 	if !ok {
 		return ""
 	}
 	for _, name := range []string{config.FileName, configstore.FileSecrets, configstore.FileSOPS} {
 		fi, err := os.Stat(filepath.Join(d.Dir, name))
 		if err == nil && fi.ModTime().Before(arrived) {
-			rev := g.Versions[head].Revision
+			rev := g.Versions[brought].Revision
 			return fmt.Sprintf("This draft was last saved before revision %d reached this workstation; it may not include revision %d's changes.", rev, rev)
 		}
 	}

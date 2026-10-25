@@ -10,8 +10,8 @@
 // state. A deploy (deployment apply --execute, deployment publish
 // --execute) makes the version it published the system copy's; a recovery,
 // a join and operator register --root make one from the sites; and
-// paisans deployment fetch fills one from a host, judging what it serves by
-// the same trust rules as deployment pull. A lock under locks/ is held while
+// paisans deployment fetch records what a host serves into one, judged by
+// the same trust rules as deployment pull, and fills one with no head. A lock under locks/ is held while
 // a command writes a copy, and a copy a recovery replaces is kept under
 // replaced/.
 package localstore
@@ -254,11 +254,18 @@ func (s Store) Record(rec Saved) error {
 	if err != nil {
 		return err
 	}
+	return RecordIn(l.Dir, rec)
+}
+
+// RecordIn writes rec as the saved.json of the copy in dir: a system copy
+// in its place, or one a run is making in a directory of its own, which
+// keeps the record when it is put in place.
+func RecordIn(dir string, rec Saved) error {
 	data, err := json.MarshalIndent(rec, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(l.Dir, ".saved-*")
+	tmp, err := os.CreateTemp(dir, ".saved-*")
 	if err != nil {
 		return err
 	}
@@ -270,7 +277,7 @@ func (s Store) Record(rec Saved) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), filepath.Join(l.Dir, SavedFile))
+	return os.Rename(tmp.Name(), filepath.Join(dir, SavedFile))
 }
 
 // Load is deployment id's saved.json, and false when it has none.

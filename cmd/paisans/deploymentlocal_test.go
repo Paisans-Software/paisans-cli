@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -341,12 +342,14 @@ func TestRecoverReplacesOnlyWhatItMay(t *testing.T) {
 	})
 }
 
-// A deployment saved before is fetched as pull would take it: the host's
-// newer version, judged from the saved anchor, becomes the saved copy.
-func TestFetchUpdatesASavedDeployment(t *testing.T) {
+// A system copy with a head moves only by a deploy or a pull: a fetch
+// records in its store the versions the host holds, judged from its anchor,
+// and leaves its head, its files and its record as they were, naming
+// deployment pull for the newer version.
+func TestFetchLeavesAHeadedCopyWhereItIs(t *testing.T) {
 	st := ownStore(t)
 	shas, answer, files := storedHistory(t, 2, 0)
-	// What an earlier save left: the first version, its root pinned.
+	// What an earlier recovery left: the first version, its root pinned.
 	l, _ := st.Local(fixtureID(t))
 	cache, _ := l.Cache()
 	g := mustBundle(t, answer)
@@ -359,10 +362,51 @@ func TestFetchUpdatesASavedDeployment(t *testing.T) {
 	if err := l.SetRoot(shas[0]); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Record(localstore.Saved{ID: fixtureID(t), SHA: shas[0], Revision: 1, Status: localstore.Verified}); err != nil {
+	want := localstore.Saved{ID: fixtureID(t), SHA: shas[0], Revision: 1, Status: localstore.Verified, Source: "recovered"}
+	if err := st.Record(want); err != nil {
 		t.Fatal(err)
 	}
+	before := fileContents(t, l.Dir)
+	fetchFrom(t, registryHolding(t, fixtureID(t)), answer)
+	rep := plainReporter(t)
+	if err := runDeployment([]string{"fetch", "--ssh", "admin@203.0.113.9"}, noTerminalStdin(), &bytes.Buffer{}); err != nil {
+		t.Fatal(problemText(err))
+	}
+	if h, _ := l.Head(); h != shas[0] {
+		t.Errorf("the fetch moved the head to %s", h)
+	}
+	if got, _ := l.Files(); !got.Equal(files[0]) {
+		t.Error("the fetch changed the system copy's files")
+	}
+	if rec, _, _ := st.Load(fixtureID(t)); rec != want {
+		t.Errorf("record %+v, want %+v", rec, want)
+	}
+	for _, name := range []string{"paisans-stack.yaml", "secrets.enc.yaml", ".sops.yaml", "saved.json", ".paisans/config-head", ".paisans/config-root"} {
+		if fileContents(t, l.Dir)[name] != before[name] {
+			t.Errorf("the fetch changed %s", name)
+		}
+	}
+	if rev, sha, _ := l.Seen(); rev != 2 || sha != shas[1] {
+		t.Errorf("seen %d %s, want the host's revision 2", rev, sha)
+	}
+	out := rep.String()
+	for _, w := range []string{"keep the system copy at " + shortSHA(shas[0]), "deployment pull moves the system copy to it", "1 recorded into a system copy here"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("the output lacks %q:\n%s", w, out)
+		}
+	}
+}
 
+// A system copy with an anchor and no head, as a run that recorded a root
+// and stopped leaves, is checked out by a fetch: the host's newest trusted
+// version becomes its files and head, recorded as verified.
+func TestFetchChecksOutACopyWithNoHead(t *testing.T) {
+	st := ownStore(t)
+	shas, answer, files := storedHistory(t, 2, 0)
+	l, _ := st.Local(fixtureID(t))
+	if err := l.SetRoot(shas[0]); err != nil {
+		t.Fatal(err)
+	}
 	fetchFrom(t, registryHolding(t, fixtureID(t)), answer)
 	if err := runDeployment([]string{"fetch", "--ssh", "admin@203.0.113.9"}, noTerminalStdin(), &bytes.Buffer{}); err != nil {
 		t.Fatal(problemText(err))
@@ -371,8 +415,10 @@ func TestFetchUpdatesASavedDeployment(t *testing.T) {
 	if rec.SHA != shas[1] || rec.Revision != 2 || rec.Status != localstore.Verified || rec.Source != "fetched from admin@203.0.113.9:22" || rec.Domain != "example.org" {
 		t.Errorf("record %+v", rec)
 	}
-	got, _ := l.Files()
-	if !got.Equal(files[1]) {
+	if h, _ := l.Head(); h != shas[1] {
+		t.Errorf("head %s", h)
+	}
+	if got, _ := l.Files(); !got.Equal(files[1]) {
 		t.Error("the saved files are not the newest version")
 	}
 }
@@ -484,4 +530,24 @@ func mustBundle(t *testing.T, answer string) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// A fetch that could not record when its versions arrived says so, as
+// every gather does.
+func TestFetchWarnsWhenArrivalsAreNotRecorded(t *testing.T) {
+	ownStore(t)
+	_, answer, _ := storedHistory(t, 2, 0)
+	fetchFrom(t, registryHolding(t, fixtureID(t)), answer)
+	saved := fetchGather
+	t.Cleanup(func() { fetchGather = saved })
+	fetchGather = func(l configstore.Local, host string, tr apply.Transport, id string) (configstore.Gathered, error) {
+		g, err := saved(l, host, tr, id)
+		g.ArrivalErr = errors.New("arrivals: read-only file system")
+		return g, err
+	}
+	rep := plainReporter(t)
+	_ = runDeployment([]string{"fetch", "--ssh", "admin@203.0.113.9"}, noTerminalStdin(), &bytes.Buffer{})
+	if !strings.Contains(rep.String(), "the arrival of these versions could not be recorded") {
+		t.Errorf("no warning:\n%s", rep.String())
+	}
 }

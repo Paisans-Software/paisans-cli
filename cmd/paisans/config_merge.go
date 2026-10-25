@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -159,9 +160,9 @@ func secretsMergeProblem(what string) error {
 // mergeForward merges the draft d, drafted from base, forward onto head,
 // the sites' newest version g holds. With execute it writes the merged
 // draft (writeMergedDraft), then moves the system copy to head
-// (moveSystemCopy). It shows the merged draft against head, and
+// (moveSystemCopy), source naming the command. It shows the merged draft against head, and
 // returns the merge.
-func mergeForward(r ui.Reporter, sys configstore.Local, g configstore.Gathered, d draft.Draft, id, base, head, gatheredHead string, execute bool, record func(configstore.Local) error) (merged, error) {
+func mergeForward(r ui.Reporter, sys configstore.Local, g configstore.Gathered, d draft.Draft, id, base, head, gatheredHead, source string, execute bool, record func(configstore.Local) error) (merged, error) {
 	m, err := mergeDraft(sys, d, id, base, head)
 	if err != nil {
 		return m, err
@@ -187,7 +188,7 @@ func mergeForward(r ui.Reporter, sys configstore.Local, g configstore.Gathered, 
 			s.Fail(err)
 			return m, err
 		}
-		if err := moveSystemCopy(sys, id, gatheredHead, head, record); err != nil {
+		if err := moveSystemCopy(r, sys, id, gatheredHead, head, source, record); err != nil {
 			s.Fail(err)
 			return m, err
 		}
@@ -198,6 +199,42 @@ func mergeForward(r ui.Reporter, sys configstore.Local, g configstore.Gathered, 
 		r.Verbatim(lines)
 	}
 	return m, nil
+}
+
+// filesRun is head and the versions before it, by first parents, that g
+// holds and whose three files are head's, newest first: what an
+// attestation, which signs the files of the version it attests again,
+// leaves behind it. Its last entry is the version that brought head's
+// files. A version the system copy's store cannot read ends it.
+func filesRun(sys configstore.Local, g configstore.Gathered, head string) []string {
+	cache, ok, err := sys.HeldStore()
+	if err != nil || !ok {
+		return []string{head}
+	}
+	want, err := cache.Files(head)
+	if err != nil {
+		return []string{head}
+	}
+	run := []string{head}
+	for sha := head; ; {
+		v, ok := g.Versions[sha]
+		if !ok || len(v.Parents) == 0 {
+			return run
+		}
+		sha = v.Parents[0]
+		if f, err := cache.Files(sha); err != nil || !f.Equal(want) || slices.Contains(run, sha) {
+			return run
+		}
+		run = append(run, sha)
+	}
+}
+
+// unchangedSince reports whether every version from base to head, by
+// first parents, has base's three files, as after an attestation of base:
+// a draft drafted from base is then drafted from head, with nothing to
+// merge.
+func unchangedSince(sys configstore.Local, g configstore.Gathered, base, head string) bool {
+	return slices.Contains(filesRun(sys, g, head), base)
 }
 
 // writeMerged writes the three files of a merged draft. Tests replace it.
@@ -220,10 +257,11 @@ func writeMergedDraft(d draft.Draft, m merged) error {
 }
 
 // moveSystemCopy moves the system copy to head, the sites' newest version,
-// under its lock, and records with record what the gather saw. It is
-// refused when the system copy moved from gathered, its head at the
-// gather, since then another command wrote it.
-func moveSystemCopy(sys configstore.Local, id, gathered, head string, record func(configstore.Local) error) error {
+// under its lock, records with record what the gather saw, and records the
+// head it is at (recordHead), source naming the command. It is refused
+// when the system copy moved from gathered, its head at the gather, since
+// then another command wrote it.
+func moveSystemCopy(r ui.Reporter, sys configstore.Local, id, gathered, head, source string, record func(configstore.Local) error) error {
 	st, err := openStore()
 	if err != nil {
 		return err
@@ -249,7 +287,11 @@ func moveSystemCopy(sys configstore.Local, id, gathered, head string, record fun
 			return err
 		}
 	}
-	return record(sys)
+	if err := record(sys); err != nil {
+		return err
+	}
+	recordHead(r, sys, source)
+	return nil
 }
 
 // conflictsExplain lists the conflicts of m and says what settles them.
