@@ -172,6 +172,8 @@ func (f joinFixture) wroteNothing(t *testing.T) {
 	if pushed(*f.runs) {
 		t.Errorf("pushed to a site: %q", *f.runs)
 	}
+	noFolderState(t, f.dir)
+	noSystemCopy(t)
 }
 
 func wantAskInviter(t *testing.T, err error) {
@@ -214,16 +216,17 @@ func TestJoinEverySiteRefusedTheLogin(t *testing.T) {
 	f.wroteNothing(t)
 }
 
-// With the head listing carol, --execute writes the three files, records
-// the invite's root and carol's key, and pushes an attestation; the secrets
-// open with her age key, so no remedy is named.
-func TestJoinRecoversAndAttests(t *testing.T) {
+// With the head listing carol, --execute makes the system copy from the
+// sites, records the invite's root and carol's key there, pushes an
+// attestation, and starts a draft of it in the folder; the secrets open
+// with her age key, so no remedy is named.
+func TestJoinCreatesSystemCopyAndDraft(t *testing.T) {
 	f := newJoinFixture(t, true, true)
 	out, err := f.register(t, "--execute")
 	if err != nil {
 		t.Fatal(problemText(err), err)
 	}
-	l := configstore.Local{Dir: f.dir}
+	l := heldCopy(t)
 	got, err := l.Files()
 	if err != nil || !got.Equal(f.head2) {
 		t.Fatalf("files %v", err)
@@ -236,6 +239,10 @@ func TestJoinRecoversAndAttests(t *testing.T) {
 	}
 	if h, _ := l.Head(); h == "" || h == f.head {
 		t.Fatalf("head %q: no attestation recorded", h)
+	}
+	wantDraftOf(t, f.dir, l)
+	if rec, ok, _ := must(openStore()).Load(fixtureDeploymentID); !ok || rec.Status != localstore.Verified || rec.Source != "joined into "+f.dir {
+		t.Errorf("record %+v", rec)
 	}
 	if !pushed(*f.runs) {
 		t.Fatalf("no attestation pushed: %q", *f.runs)
@@ -278,7 +285,7 @@ func TestJoinSaysWhenSecretsDoNotOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(problemText(err), err)
 	}
-	if !(configstore.Local{Dir: f.dir}).HasFiles() || !pushed(*f.runs) {
+	if !(configstore.Local{Dir: f.dir}).HasFiles() || !heldCopy(t).HasFiles() || !pushed(*f.runs) {
 		t.Fatal("the join did not complete")
 	}
 	if !strings.Contains(out, "operator add --request") || !strings.Contains(out, "deployment pull") {
@@ -300,7 +307,7 @@ func TestJoinSaysWhenYourKeyIsNotReached(t *testing.T) {
 	if err != nil {
 		t.Fatal(problemText(err), err)
 	}
-	if !(configstore.Local{Dir: f.dir}).HasFiles() || !pushed(*f.runs) {
+	if !(configstore.Local{Dir: f.dir}).HasFiles() || !heldCopy(t).HasFiles() || !pushed(*f.runs) {
 		t.Fatal("the join did not complete")
 	}
 	recipient, _, _, err := readAgeBinding(fixtureDeploymentID)
@@ -401,9 +408,9 @@ func TestJoinRerunAfterFailedPush(t *testing.T) {
 	if _, err := f.register(t, "--execute"); err == nil {
 		t.Fatal("the push did not fail")
 	}
-	l := configstore.Local{Dir: f.dir}
-	if !l.HasFiles() {
-		t.Fatal("the files were not written before the push")
+	l := heldCopy(t)
+	if !(configstore.Local{Dir: f.dir}).HasFiles() || !l.HasFiles() {
+		t.Fatal("the system copy and the draft were not made before the push")
 	}
 	*f.runs = nil
 	allSitesUp(answer, f.runs)
@@ -551,7 +558,8 @@ func TestInviteAnswerAcceptJoin(t *testing.T) {
 	if err := runOperator([]string{"register", "--config", carolConfig, "--execute"}, noTerminalStdin(), &bytes.Buffer{}); err != nil {
 		t.Fatalf("%s\n%s", problemText(err), report.String())
 	}
-	l := configstore.Local{Dir: dir}
+	l := heldCopy(t)
+	wantDraftOf(t, dir, l)
 	if k, _ := l.SigningKey(); k != bare(carolPub) {
 		t.Fatalf("signing key %q, want carol's", k)
 	}

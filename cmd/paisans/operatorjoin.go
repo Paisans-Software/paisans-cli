@@ -13,6 +13,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/draft"
 	"github.com/paisans-software/paisans-cli/internal/operatorinvite"
 	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -97,14 +98,16 @@ func pendingList(ids []string) string {
 	return strings.Join(lines, "\n")
 }
 
-// joinInvite recovers the deployment invite names into l, from the invite's
-// root and sites alone, once the newest version lists the invite's key under
-// its username, and with execute signs the attestation of the recovered
-// version with that key. A root a site serves is never trusted in place of
-// the invite's. Whether the recovered secrets open is said, not refused.
-// Once the files are written the invite is no longer pending, since from
-// then on register in l.Dir is plain register; the age binding is kept.
-func joinInvite(r ui.Reporter, l configstore.Local, invite operatorinvite.Invite, execute bool, ans answerer, stdin io.Reader, stdout io.Writer) error {
+// joinInvite makes the system copy of the deployment invite names, from the
+// invite's root and sites alone, once the newest version lists the invite's
+// key under its username, signs with execute the attestation of the
+// recovered version with that key in the system copy, and starts a draft of
+// it in d, a folder with no draft. A root a site serves is never trusted in
+// place of the invite's. Whether the recovered secrets open is said, not
+// refused. Once the system copy is made the invite is no longer pending,
+// since from then on register in d.Dir is plain register; the age binding
+// is kept.
+func joinInvite(r ui.Reporter, d draft.Draft, invite operatorinvite.Invite, execute bool, ans answerer, stdin io.Reader, stdout io.Writer) error {
 	key, _, err := config.ParseKeyLine(invite.Key)
 	if err != nil {
 		return err
@@ -112,7 +115,7 @@ func joinInvite(r ui.Reporter, l configstore.Local, invite operatorinvite.Invite
 	if !agentHolds(agentKeys(), key.Fingerprint) {
 		return &ui.Problem{Hint: "the ssh-agent does not hold the invite's key", Explain: fmt.Sprintf("The invite is for %s, and the sites let it in and the attestation is signed with it. Load it with ssh-add and run this again. Nothing was written.", key.Fingerprint)}
 	}
-	r.Section("join " + invite.Domain + " as " + invite.Username + " into " + l.Dir)
+	r.Section("join " + invite.Domain + " as " + invite.Username + " into " + d.Dir)
 	var dests []config.Destination
 	for _, s := range invite.Sites {
 		dests = append(dests, config.Destination{User: s.User, Host: s.Host, Port: s.Port})
@@ -124,7 +127,7 @@ func joinInvite(r ui.Reporter, l configstore.Local, invite operatorinvite.Invite
 		return notAppliedProblem(fmt.Sprintf("The sites' newest version does not list %s under operators.%s.", key.Fingerprint, invite.Username), "", nil)
 	}
 	held := map[string]string{key.Fingerprint: invite.Key}
-	err = recoverFiles(r, l, dests, configstore.Anchor{Root: invite.Root}, invite.Deployment, held, execute, ans, stdin, stdout, accept)
+	sys, done, err := recoverFiles(r, d, dests, configstore.Anchor{Root: invite.Root}, invite.Deployment, held, execute, ans, stdin, stdout, accept, "joined into "+d.Dir)
 	var ns *configstore.PinNotServedError
 	switch {
 	case errors.As(err, &ns) || errors.Is(err, configstore.ErrNoAnchor):
@@ -144,23 +147,22 @@ func joinInvite(r ui.Reporter, l configstore.Local, invite operatorinvite.Invite
 		err = notAppliedProblem(fmt.Sprintf("No site the invite names let %s in.", key.Fingerprint), hostsAre, err)
 	}
 	if err != nil {
-		return err
+		return done(err)
 	}
 	if !execute {
 		r.Step("attest the recovered version, signed with "+key.Fingerprint).End(ui.Pending, "--execute will sign and push it")
-		return nil
+		return done(nil)
 	}
 	if err := removePending(invite.Deployment); err != nil {
 		dir, _ := pendingDir(invite.Deployment)
-		r.Warn("the invite is still pending in "+ui.ShortPath(dir), fmt.Sprintf("Removing it failed: %v. The files are written, so register here no longer needs it; remove the directory by hand.", err))
+		r.Warn("the invite is still pending in "+ui.ShortPath(dir), fmt.Sprintf("Removing it failed: %v. The system copy is made, so register here no longer needs it; remove the directory by hand.", err))
 	}
-	path := filepath.Join(l.Dir, config.FileName)
-	checkJoinSecrets(r, l.Dir, invite.Deployment)
-	cfg, err := config.Load(path)
+	checkJoinSecrets(r, sys.Dir, invite.Deployment)
+	cfg, err := config.Load(filepath.Join(sys.Dir, config.FileName))
 	if err != nil {
-		return err
+		return done(err)
 	}
-	return attest(r, l, cfg, invite.Key, invite.Root, execute, ans, stdin, stdout)
+	return done(attest(r, sys, cfg, invite.Key, invite.Root, execute, ans, stdin, stdout))
 }
 
 // notAppliedProblem is a join refused because the inviter's acceptance has

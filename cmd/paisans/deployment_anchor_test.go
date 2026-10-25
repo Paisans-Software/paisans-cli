@@ -73,6 +73,7 @@ func wantAdvice(t *testing.T, err error) {
 // on the newest version it signed, the gather names it, and --execute
 // records it, since the agent holds it and an operator of the head lists it.
 func TestConfigRecoverAnchorsOnTheNamedKey(t *testing.T) {
+	withDataDir(t)
 	shas, answer, files, _, pub := storedHistoryKey(t, 2, 1)
 	recoverHosts(t, answer)
 	allSitesUp(answer, nil)
@@ -99,6 +100,7 @@ func TestConfigRecoverAnchorsOnTheNamedKey(t *testing.T) {
 	if err := runDeployment(recoverArgs(dir, "--key", key, "--execute"), noTerminalStdin(), &out); err != nil {
 		t.Fatal(problemText(err), err)
 	}
+	l = heldCopy(t)
 	if got, _ := l.Files(); !got.Equal(files[1]) {
 		t.Fatal("recover did not write the newest version's files")
 	}
@@ -116,6 +118,7 @@ func TestConfigRecoverAnchorsOnTheNamedKey(t *testing.T) {
 // Without --key, no key in the agent is tried, even one that signed every
 // version: a recovery needs --key or --root, and says so.
 func TestConfigRecoverWithoutKeyIgnoresTheAgent(t *testing.T) {
+	withDataDir(t)
 	_, answer, _, _, pub := storedHistoryKey(t, 1, 0)
 	recoverHosts(t, answer)
 	_, attacker := testKey(t)
@@ -130,6 +133,7 @@ func TestConfigRecoverWithoutKeyIgnoresTheAgent(t *testing.T) {
 	if (configstore.Local{Dir: dir}).HasFiles() {
 		t.Fatal("a refused recovery wrote the files")
 	}
+	noSystemCopy(t)
 }
 
 // --key with a public key the agent does not hold, as a colleague's,
@@ -146,7 +150,7 @@ func TestConfigRecoverAnchorsOnKeyFile(t *testing.T) {
 	if err := runDeployment(recoverArgs(dir, "--key", path, "--execute"), noTerminalStdin(), &out); err != nil {
 		t.Fatal(problemText(err), err)
 	}
-	l := configstore.Local{Dir: dir}
+	l := heldCopy(t)
 	if h, _ := l.Head(); h != shas[1] {
 		t.Fatalf("head %s, want %s", h, shas[1])
 	}
@@ -179,6 +183,7 @@ func TestConfigRecoverAnchorsOnKeyFile(t *testing.T) {
 // root neither blocks nor overrides it, the run says it was ignored, and it
 // is not recorded.
 func TestConfigRecoverPinnedRootWins(t *testing.T) {
+	withDataDir(t)
 	key, pub := testKey(t)
 	okey, opub := testKey(t)
 	s := newStore(t)
@@ -199,7 +204,7 @@ func TestConfigRecoverPinnedRootWins(t *testing.T) {
 	if !strings.Contains(rep.String(), "--key ignored: a root is pinned") {
 		t.Fatalf("no note that --key was ignored:\n%s", rep.String())
 	}
-	l := configstore.Local{Dir: dir}
+	l := heldCopy(t)
 	if got, _ := l.Files(); !got.Equal(f) {
 		t.Fatal("recover did not write the pinned root's files")
 	}
@@ -211,6 +216,7 @@ func TestConfigRecoverPinnedRootWins(t *testing.T) {
 // A named key that signed versions under two roots is refused: which is this
 // deployment's is for --root to say. Nothing is written or recorded.
 func TestConfigRecoverNamedKeyUnderTwoRootsIsRefused(t *testing.T) {
+	withDataDir(t)
 	akey, apub := testKey(t)
 	_, bpub := testKey(t)
 	_, cpub := testKey(t)
@@ -233,6 +239,7 @@ func TestConfigRecoverNamedKeyUnderTwoRootsIsRefused(t *testing.T) {
 	if l.HasFiles() {
 		t.Fatal("a refused recovery wrote the files")
 	}
+	noSystemCopy(t)
 	if k, _ := l.SigningKey(); k != "" {
 		t.Fatalf("a refused recovery recorded the signing key %q", k)
 	}
@@ -243,6 +250,7 @@ func TestConfigRecoverNamedKeyUnderTwoRootsIsRefused(t *testing.T) {
 // after the operator's last version, gets nothing trusted from --key alone:
 // the key trusts only versions it signed, and the refusal asks for --root.
 func TestConfigRecoverNamedKeyRefusesAnOldIncarnationsNewerVersion(t *testing.T) {
+	withDataDir(t)
 	akey, apub := testKey(t)
 	mkey, mpub := testKey(t)
 	s := newStore(t)
@@ -264,6 +272,7 @@ func TestConfigRecoverNamedKeyRefusesAnOldIncarnationsNewerVersion(t *testing.T)
 	if l.HasFiles() {
 		t.Fatal("a refused recovery wrote the files")
 	}
+	noSystemCopy(t)
 	if k, _ := l.SigningKey(); k != "" {
 		t.Fatalf("a refused recovery recorded the signing key %q", k)
 	}
@@ -275,6 +284,7 @@ func TestConfigRecoverNamedKeyRefusesAnOldIncarnationsNewerVersion(t *testing.T)
 // Every version a named key leads to trusting must declare the deployment
 // being recovered: a history that names another id is refused.
 func TestConfigRecoverNamedKeyRefusesAnotherDeploymentsVersion(t *testing.T) {
+	withDataDir(t)
 	key, pub := testKey(t)
 	cfg, err := config.Load(fixtureConfig())
 	if err != nil {
@@ -298,12 +308,14 @@ func TestConfigRecoverNamedKeyRefusesAnotherDeploymentsVersion(t *testing.T) {
 	if (configstore.Local{Dir: dir}).HasFiles() {
 		t.Fatal("a refused recovery wrote the files")
 	}
+	noSystemCopy(t)
 }
 
 // --key naming a key a version removed is refused, even though the agent
 // holds it and the removed key signed a version on the removal; the current
 // key recovers the removal's line and is recorded.
 func TestConfigRecoverNamedRemovedKeyIsRefused(t *testing.T) {
+	withDataDir(t)
 	oldKey, oldPub := testKey(t)
 	newKey, newPub := testKey(t)
 	_, cpub := testKey(t)
@@ -327,6 +339,7 @@ func TestConfigRecoverNamedRemovedKeyIsRefused(t *testing.T) {
 	if l.HasFiles() {
 		t.Fatal("a refused recovery wrote the files")
 	}
+	noSystemCopy(t)
 	if k, _ := l.SigningKey(); k != "" {
 		t.Fatalf("a refused recovery recorded the signing key %q", k)
 	}
@@ -335,7 +348,7 @@ func TestConfigRecoverNamedRemovedKeyIsRefused(t *testing.T) {
 	if err := runDeployment(recoverArgs(dir, "--key", pubFile(t, newPub), "--execute"), noTerminalStdin(), &out); err != nil {
 		t.Fatal(problemText(err), err)
 	}
-	l = configstore.Local{Dir: dir}
+	l = heldCopy(t)
 	if got, _ := l.Files(); !got.Equal(f2) {
 		t.Fatal("recover wrote another version's files")
 	}
@@ -508,6 +521,7 @@ func onOldIncarnation(t *testing.T, in incarnations) (configstore.Local, string)
 // A different --root is refused against the pin, and no refusal lowers the
 // seen record. Following the advice recovers the current line.
 func TestConfigPullWhenTheSitesServeNoneOfThePin(t *testing.T) {
+	withDataDir(t)
 	in := newIncarnations(t)
 	l, cfg := onOldIncarnation(t, in)
 	sitesServe(in.newAnswer, in.newAnswer)
@@ -538,7 +552,7 @@ func TestConfigPullWhenTheSitesServeNoneOfThePin(t *testing.T) {
 	if err := runDeployment(recoverArgs(dir, "--root", in.n1, "--execute"), noTerminalStdin(), &out); err != nil {
 		t.Fatal(problemText(err), err)
 	}
-	fresh := configstore.Local{Dir: dir}
+	fresh := heldCopy(t)
 	if got, _ := fresh.Files(); !got.Equal(in.fn2) {
 		t.Fatal("recover did not write the current line's head")
 	}
@@ -618,6 +632,7 @@ func TestConfigPullNeverLowersSeenSilently(t *testing.T) {
 // A --root that is not held, mistyped or an old one, is named as such, not
 // answered with what the sites serve.
 func TestConfigRecoverUnheldRootIsNamed(t *testing.T) {
+	withDataDir(t)
 	_, answer, _ := storedVersion(t)
 	recoverHosts(t, answer)
 	var out bytes.Buffer

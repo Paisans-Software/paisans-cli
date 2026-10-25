@@ -224,61 +224,6 @@ func (s Store) Lock(id string) (unlock func(), err error) {
 	return unlock, nil
 }
 
-// Save makes the copy of deployment id the version sha that src's cache
-// holds: every version src has gathered is copied into the copy's cache, so
-// later fetches judge from the same history, the version's files are
-// written, and signingKey, the key the version was signed with, is recorded
-// as the copy's anchor. A root pinned in src is pinned in the copy too
-// unless the copy pins one already.
-func (s Store) Save(src configstore.Local, sha string, revision int, signingKey string, rec Saved) error {
-	dst, err := s.Local(rec.ID)
-	if err != nil {
-		return err
-	}
-	from, err := src.Cache()
-	if err != nil {
-		return err
-	}
-	bundle, err := from.Bundle()
-	if err != nil {
-		return err
-	}
-	if bundle == nil {
-		return fmt.Errorf("%s holds no version to save", src.Dir)
-	}
-	to, err := dst.Cache()
-	if err != nil {
-		return err
-	}
-	if err := to.FetchBundle(bundle); err != nil {
-		return err
-	}
-	if err := dst.Checkout(sha); err != nil {
-		return err
-	}
-	if signingKey != "" {
-		if err := dst.SetSigningKey(signingKey); err != nil {
-			return err
-		}
-	}
-	if root, err := src.Root(); err != nil {
-		return err
-	} else if root != "" {
-		if have, err := dst.Root(); err != nil {
-			return err
-		} else if have == "" {
-			if err := dst.SetRoot(root); err != nil {
-				return err
-			}
-		}
-	}
-	if err := dst.Remember(revision, sha); err != nil {
-		return err
-	}
-	rec.SHA, rec.Revision, rec.Status = sha, revision, Verified
-	return s.Record(rec)
-}
-
 // Record writes rec as deployment rec.ID's saved.json.
 func (s Store) Record(rec Saved) error {
 	l, err := s.Local(rec.ID)

@@ -114,23 +114,86 @@ func TestApplyDryRunSavesNothing(t *testing.T) {
 	}
 }
 
-// A recovery saves what it recovered.
-func TestRecoverSavesTheVersion(t *testing.T) {
+// A recovery makes the system copy from the sites, its root pinned and the
+// record deployment list shows, and starts a draft of it in the folder,
+// which holds nothing else.
+func TestRecoverCreatesSystemCopyAndDraft(t *testing.T) {
 	st := ownStore(t)
-	sha, answer, _ := storedVersion(t)
+	sha, answer, f := storedVersion(t)
 	recoverHosts(t, answer)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	if err := runDeployment([]string{"recover", "--from", "ubuntu@203.0.113.9", "--root", sha, "--config", filepath.Join(dir, "paisans-stack.yaml"), "--execute"}, noTerminalStdin(), &out); err != nil {
-		t.Fatal(err)
+		t.Fatal(problemText(err))
+	}
+	sys := heldCopy(t)
+	if got, err := sys.Files(); err != nil || !got.Equal(f) {
+		t.Fatalf("the system copy's files: %v", err)
+	}
+	if h, _ := sys.Head(); h != sha {
+		t.Errorf("head %q", h)
+	}
+	if r, _ := sys.Root(); r != sha {
+		t.Errorf("the recovery's pinned root was not recorded: %q", r)
 	}
 	rec, ok, _ := st.Load(fixtureID(t))
-	if !ok || rec.SHA != sha || rec.Status != localstore.Verified || rec.Source != "recovered into "+dir {
+	if !ok || rec.SHA != sha || rec.Revision != 1 || rec.Status != localstore.Verified || rec.Source != "recovered into "+dir {
 		t.Fatalf("record %+v", rec)
 	}
-	l, _ := st.Local(fixtureID(t))
-	if r, _ := l.Root(); r != sha {
-		t.Errorf("the recovery's pinned root was not carried: %q", r)
+	wantDraftOf(t, dir, sys)
+	entries, _ := os.ReadDir(st.Base)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "recover-") {
+			t.Errorf("the directory the recovery worked in is left: %s", e.Name())
+		}
+	}
+}
+
+// A recovery only creates: a folder holding any of the three files is
+// refused, and so is a deployment whose system copy this workstation holds,
+// naming pull and checkout; neither is changed.
+func TestRecoverRefusesExistingDraft(t *testing.T) {
+	ownStore(t)
+	sha, answer, _ := storedVersion(t)
+	recoverHosts(t, answer)
+	recover := func(dir string) error {
+		return runDeployment([]string{"recover", "--from", "ubuntu@203.0.113.9", "--root", sha, "--config", filepath.Join(dir, "paisans-stack.yaml"), "--execute"}, noTerminalStdin(), &bytes.Buffer{})
+	}
+	part := t.TempDir()
+	if err := os.WriteFile(filepath.Join(part, "secrets.enc.yaml"), []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := recover(part); err == nil || !strings.Contains(problemText(err), filepath.Join(part, "secrets.enc.yaml")) {
+		t.Fatalf("part of a draft: %v", problemText(err))
+	}
+	noSystemCopy(t)
+	if got, _ := os.ReadFile(filepath.Join(part, "secrets.enc.yaml")); string(got) != "x\n" {
+		t.Error("the folder's file was changed")
+	}
+
+	first := t.TempDir()
+	if err := recover(first); err != nil {
+		t.Fatal(problemText(err))
+	}
+	sys := heldCopy(t)
+	before := tree(t, sys.Dir)
+	second := t.TempDir()
+	err := recover(second)
+	text := problemText(err)
+	if err == nil || !strings.Contains(text, "deployment checkout --id "+fixtureDeploymentID) || !strings.Contains(text, "deployment pull") {
+		t.Fatalf("a system copy held: %v", text)
+	}
+	if (configstore.Local{Dir: second}).HasFiles() {
+		t.Error("a refused recovery started a draft")
+	}
+	after := tree(t, sys.Dir)
+	for p, v := range before {
+		if after[p] != v {
+			t.Errorf("%s changed", p)
+		}
+	}
+	if len(after) != len(before) {
+		t.Errorf("the system copy changed: %d entries, was %d", len(after), len(before))
 	}
 }
 
@@ -197,6 +260,47 @@ func TestFetchSetsAsideAnUnknownDeployment(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), fixtureID(t)) || !strings.Contains(out.String(), "unverified") {
 		t.Errorf("list:\n%s", out.String())
+	}
+}
+
+// A fetch writes the system copy only: nothing in the folder it runs in,
+// and what it sets aside stays in the system copy's own .paisans. It holds
+// the system copy's lock while it writes, so one another command holds
+// fetches nothing.
+func TestFetchWritesOnlySystemCopy(t *testing.T) {
+	st := ownStore(t)
+	shas, answer, _ := storedHistory(t, 2, 0)
+	id := fixtureID(t)
+	fetchFrom(t, registryHolding(t, id), answer)
+	folder := t.TempDir()
+	t.Chdir(folder)
+
+	release, err := st.Lock(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runDeployment([]string{"fetch", "--ssh", "admin@203.0.113.9"}, noTerminalStdin(), &bytes.Buffer{})
+	release()
+	if err == nil || !strings.Contains(problemText(err), "not fetched") {
+		t.Fatalf("a fetch beside a held lock: %v", problemText(err))
+	}
+	if _, ok, _ := st.Held(id); ok {
+		t.Fatal("a fetch wrote the system copy another command holds")
+	}
+
+	if err := runDeployment([]string{"fetch", "--ssh", "admin@203.0.113.9"}, noTerminalStdin(), &bytes.Buffer{}); err != nil {
+		t.Fatal(problemText(err))
+	}
+	if entries, _ := os.ReadDir(folder); len(entries) != 0 {
+		t.Fatalf("the fetch wrote %d entries in the folder it ran in", len(entries))
+	}
+	l, _ := st.Local(id)
+	set := filepath.Join(l.IncomingFor(shas[1]), "paisans-stack.yaml")
+	if !strings.HasPrefix(set, filepath.Join(l.Dir, ".paisans")+string(filepath.Separator)) {
+		t.Fatalf("set aside outside the system copy's .paisans: %s", set)
+	}
+	if _, err := os.Stat(set); err != nil {
+		t.Fatalf("the newest version is not set aside: %v", err)
 	}
 }
 

@@ -313,3 +313,52 @@ func noFolderState(t *testing.T, dir string) {
 		t.Errorf("%s holds .paisans: %v", dir, err)
 	}
 }
+
+// heldCopy is the fixture deployment's system copy in the data directory,
+// and fails the test when there is none.
+func heldCopy(t *testing.T) configstore.Local {
+	t.Helper()
+	sys, ok, err := must(openStore()).Held(fixtureDeploymentID)
+	if err != nil || !ok {
+		t.Fatalf("no system copy of %s: %v", fixtureDeploymentID, err)
+	}
+	return sys
+}
+
+// noSystemCopy fails the test when the data directory holds a system copy
+// of the fixture deployment, or a directory a run made one in.
+func noSystemCopy(t *testing.T) {
+	t.Helper()
+	st := must(openStore())
+	if _, ok, err := st.Held(fixtureDeploymentID); err != nil || ok {
+		t.Errorf("a system copy of %s was made: %v", fixtureDeploymentID, err)
+	}
+	entries, _ := os.ReadDir(st.Base)
+	for _, e := range entries {
+		if strings.Contains(e.Name(), fixtureDeploymentID) {
+			t.Errorf("%s is left in the data directory", e.Name())
+		}
+	}
+}
+
+// wantDraftOf fails the test unless dir holds a draft of sys's head: its
+// three files, the "drafted from" line naming the head, and nothing else of
+// Paisans'.
+func wantDraftOf(t *testing.T, dir string, sys configstore.Local) {
+	t.Helper()
+	m, f, err := systemHead(sys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := draft.Draft{Dir: dir}.Files()
+	if err != nil {
+		t.Fatalf("no draft in %s: %v", dir, err)
+	}
+	if mk, ok := draft.ReadMarker(got.Paisans); !ok || mk != m {
+		t.Errorf("the draft's line is %+v (%v), want %+v", mk, ok, m)
+	}
+	if !bytes.Equal(draft.StripMarker(got.Paisans), draft.StripMarker(f.Paisans)) || !bytes.Equal(got.Secrets, f.Secrets) || !bytes.Equal(got.SOPS, f.SOPS) {
+		t.Error("the draft's files are not the system copy's head's")
+	}
+	noFolderState(t, dir)
+}

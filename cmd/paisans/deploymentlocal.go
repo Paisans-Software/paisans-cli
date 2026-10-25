@@ -21,39 +21,13 @@ import (
 
 // What follows is the workstation's saved deployments (internal/localstore):
 // a deploy makes the version it publishes the system copy's
-// (deploydraft.go), deployment recover --execute saves the version it
-// recovers, deployment fetch saves what a host holds, and deployment list
-// shows them.
+// (deploydraft.go), deployment recover --execute and the join make the
+// system copy from the sites (recoverFiles), deployment fetch saves what a
+// host holds, and deployment list shows them.
 
 // openStore is the saved deployments. Tests point it at a directory of their
 // own through localstore.DirVariable.
 var openStore = localstore.Open
-
-// saveVersion saves version sha of the deployment whose files are in l, as
-// the trust rules there judged it, with what it is and where it came from.
-// key is the key line the version was signed with, "" when this workstation
-// did not sign it. A failure is a warning: the version is on the sites
-// already, and the saved copy is the operator's convenience, not the store.
-func saveVersion(r ui.Reporter, l configstore.Local, sha string, revision int, files configstore.Files, key, source string) {
-	s := r.Step("save " + sha[:12] + " to this workstation's deployments")
-	err := func() error {
-		cfg, err := config.LoadBytes(files.Paisans)
-		if err != nil {
-			return err
-		}
-		st, err := openStore()
-		if err != nil {
-			return err
-		}
-		return st.Save(l, sha, revision, key, localstore.Saved{ID: cfg.ID, Domain: cfg.Community.Domain, Source: source, SavedAt: configNow().UTC()})
-	}()
-	if err != nil {
-		s.End(ui.Warned, "not saved")
-		r.Explain(errLine(err) + ". The version is on the sites; deployment fetch saves it later.")
-		return
-	}
-	s.Done("")
-}
 
 // runDeploymentList is `paisans deployment list`: the saved deployments as a
 // table on stdout, so it can be piped. It reads the saved deployments only.
@@ -188,6 +162,12 @@ func runDeploymentFetch(args []string) error {
 // fetchOne fetches deployment id into the store and says how it was saved,
 // "" when it was not.
 func fetchOne(r ui.Reporter, st localstore.Store, host string, t apply.Transport, id, domain, source string) localstore.Status {
+	release, err := st.Lock(id)
+	if err != nil {
+		r.Warn("not fetched", errLine(err))
+		return ""
+	}
+	defer release()
 	l, err := st.Local(id)
 	if err != nil {
 		r.Warn("not fetched", errLine(err))

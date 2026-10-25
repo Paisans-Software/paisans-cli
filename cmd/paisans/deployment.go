@@ -19,6 +19,8 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/draft"
+	"github.com/paisans-software/paisans-cli/internal/localstore"
 	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"gopkg.in/yaml.v3"
@@ -118,14 +120,22 @@ func anchorFor(l configstore.Local, root string) (configstore.Anchor, error) {
 	if root == "" {
 		return a, nil
 	}
-	if !shaShape(root) {
-		return a, &ui.Problem{Hint: fmt.Sprintf("--root %q is not a commit id", root), Explain: "Give the full hash of the root to pin, as " + progname.Cmd() + " deployment log prints it on a root's line."}
+	if err := rootShape(root); err != nil {
+		return a, err
 	}
 	if a.Root != "" && a.Root != root {
 		return a, &ui.Problem{Hint: "--root differs from the pinned root", Explain: fmt.Sprintf("This workstation pinned %s in %s. Drop --root, or remove that file if the pin is wrong.", a.Root, statePath(l, "config-root"))}
 	}
 	a.Root = root
 	return a, nil
+}
+
+// rootShape refuses a --root that is not a full commit id.
+func rootShape(root string) error {
+	if root != "" && !shaShape(root) {
+		return &ui.Problem{Hint: fmt.Sprintf("--root %q is not a commit id", root), Explain: "Give the full hash of the root to pin, as " + progname.Cmd() + " deployment log prints it on a root's line."}
+	}
+	return nil
 }
 
 // namedAnchor adds the key keyPath names, a public key file, to a, for pull,
@@ -936,7 +946,7 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 	root := fs.String("root", "", "pin this version as the root, the version trust starts from")
 	keyPath := fs.String("key", "", keyHelp)
 	id := fs.String("id", "", "the deployment's id, when the hosts' logins belong to more than one")
-	execute := fs.Bool("execute", false, "write the recovered files and state")
+	execute := fs.Bool("execute", false, "make the system copy from the sites and start a draft of it")
 	answers := yesFlag(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -951,23 +961,21 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 	if len(from) == 0 {
 		return &ui.Problem{Hint: "deployment recover needs --from", Explain: "Name a host of the deployment with --from user@host[:port], or an alias of your ssh config, Eg: --from admin@203.0.113.9 or --from home-a; every site the recovered configuration names is reached after it."}
 	}
-	l, err := workstationOf(*configPath)
+	d, err := draftAt(*configPath)
 	if err != nil {
 		return err
 	}
-	if l.HasFiles() {
-		return &ui.Problem{Hint: "there are configuration files here already", Explain: "Recovery writes onto a workstation with nothing, so it never overwrites a file. Use " + progname.Cmd() + " deployment pull where the files exist, or recover into an empty directory with --config."}
-	}
-	a, err := anchorFor(l, *root)
-	if err != nil {
+	// A recovery starts from nothing recorded: the root it pins, or the key
+	// it names.
+	if err := rootShape(*root); err != nil {
 		return err
 	}
-	a, held, ignored, err := namedAnchor(a, *keyPath)
+	a, held, ignored, err := namedAnchor(configstore.Anchor{Root: *root}, *keyPath)
 	if err != nil {
 		return err
 	}
 	r := reporter()
-	r.Section("recover into " + l.Dir)
+	r.Section("recover into " + d.Dir)
 	noteKeyIgnored(r, ignored)
 	var dests []config.Destination
 	for _, f := range from {
@@ -977,61 +985,91 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 		}
 		dests = append(dests, dest)
 	}
-	return recoverFiles(r, l, dests, a, *id, held, *execute, ans, stdin, stdout, nil)
+	_, done, err := recoverFiles(r, d, dests, a, *id, held, *execute, ans, stdin, stdout, nil, "recovered into "+d.Dir)
+	return done(err)
 }
 
-// recoverFiles is a recovery onto l, a workstation without files, from
-// dests, trusting from a: it finds the deployment (id when given), gathers
-// from every site its newest versions name, and, with execute, writes the
-// head's files and records the root and, from held, the signing key. accept,
-// when set, runs on each head's configuration before anything is written,
-// and a refusal from it is returned as it is; with accept, which only the
-// join of operator register sets, a fork is refused with nothing written.
-func recoverFiles(r ui.Reporter, l configstore.Local, dests []config.Destination, a configstore.Anchor, id string, held map[string]string, execute bool, ans answerer, stdin io.Reader, stdout io.Writer, accept func(head *config.Config) error) error {
+// recoverFiles is a recovery, from dests and trusting from a, of a
+// deployment this workstation holds no system copy of, into d, a folder
+// with no draft: it finds the deployment (id when given), gathers from
+// every site its newest versions name, and, with execute, makes the system
+// copy the head's, recording there the root and, from held, the signing
+// key. accept, when set, runs on each head's configuration before anything
+// is recorded, and a refusal from it is returned as it is; with accept,
+// which only the join of operator register sets, a fork is said as one
+// before any head is judged.
+//
+// The run holds the system copy's lock and works in a directory of its own
+// (stageSystem), sys; done ends it as stageSystem's done does, and, once
+// the system copy is in place, records source as where it came from and
+// starts a draft of its head in d. done is never nil, and the caller
+// returns what it returns.
+func recoverFiles(r ui.Reporter, d draft.Draft, dests []config.Destination, a configstore.Anchor, id string, held map[string]string, execute bool, ans answerer, stdin io.Reader, stdout io.Writer, accept func(head *config.Config) error, source string) (sys configstore.Local, done func(runErr error) error, err error) {
+	done = func(runErr error) error { return runErr }
+	if files := draftFiles(d); len(files) > 0 {
+		return sys, done, &ui.Problem{Hint: "there is a draft in " + d.Dir + " already", Explain: "It holds " + strings.Join(files, ", ") + ". A recovery starts a draft only in a folder without one, so it never overwrites a file. Use " + progname.Cmd() + " deployment pull where the draft is, or name an empty directory with --config."}
+	}
 	deploymentID, hosts, err := recoverID(r, dests, id)
 	if err != nil {
-		return err
+		return sys, done, err
 	}
-	noAnchor := noAnchorNamed("")
-	g, err := gatherAt(r, l, hosts, deploymentID, a, gatherMode{execute: execute, answers: ans, noAnchor: noAnchor}, stdin, stdout)
+	st, err := openStore()
 	if err != nil {
+		return sys, done, err
+	}
+	release, err := st.Lock(deploymentID)
+	if err != nil {
+		return sys, done, err
+	}
+	if err := heldAlready(st, deploymentID); err != nil {
+		release()
+		return sys, done, err
+	}
+	sys, staged, err := stageSystem(r, st, "recover", deploymentID, release, func(sys configstore.Local) error {
+		m, err := startRecovered(r, st, sys, d, source)
+		if err == nil && accept == nil {
+			r.Result("recovered revision %d, %s, into %s, and started a draft of it in %s", m.Revision, shortSHA(m.SHA), sys.Dir, d.Dir)
+		}
 		return err
+	})
+	if err != nil {
+		return sys, done, err
+	}
+	done = staged
+	noAnchor := noAnchorNamed("")
+	g, err := gatherAt(r, sys, hosts, deploymentID, a, gatherMode{execute: execute, answers: ans, noAnchor: noAnchor}, stdin, stdout)
+	if err != nil {
+		return sys, done, err
 	}
 	if len(g.Verdict.Heads) == 0 {
-		return &ui.Problem{Hint: "no host named holds a version", Explain: "Nothing was recovered. Name another host with --from.", Cause: configstore.UnreachedError(g)}
+		return sys, done, &ui.Problem{Hint: "no host named holds a version", Explain: "Nothing was recovered. Name another host with --from.", Cause: configstore.UnreachedError(g)}
 	}
 	// Every site a trusted head names is reached, not only the hosts given,
 	// so a host serving an old version is superseded by the newer versions the
 	// rest hold. With a fork, every head's sites are reached.
-	sites, err := recoverSites(l, g, deploymentID)
+	sites, err := recoverSites(sys, g, deploymentID)
 	if err != nil {
-		return err
+		return sys, done, err
 	}
 	r.Section("every site the newest versions name")
-	g, err = gatherAt(r, l, sites, deploymentID, a, gatherMode{execute: execute, accepted: g.Seen, answers: ans, noAnchor: noAnchor}, stdin, stdout)
+	g, err = gatherAt(r, sys, sites, deploymentID, a, gatherMode{execute: execute, accepted: g.Seen, answers: ans, noAnchor: noAnchor}, stdin, stdout)
 	if err != nil {
-		return err
+		return sys, done, err
 	}
 	if accept != nil {
 		// A fork is said as one before any head is judged, since each
 		// head's refusal would name only itself.
 		if g.Verdict.Fork {
-			return &ui.Problem{Hint: "the sites hold a fork", Explain: "Two trusted versions build on one parent:\n" + forkHeads(g) + "\nAn operator who holds the files resolves it with " + progname.Cmd() + " deployment publish --merge; run " + progname.Cmd() + " operator register --execute here again once they have. No configuration file was written."}
+			return sys, done, &ui.Problem{Hint: "the sites hold a fork", Explain: "Two trusted versions build on one parent:\n" + forkHeads(g) + "\nAn operator who holds the files resolves it with " + progname.Cmd() + " deployment publish --merge; run " + progname.Cmd() + " operator register --execute here again once they have. No configuration file was written."}
 		}
-		if err := acceptHeads(l, g, accept); err != nil {
-			return err
+		if err := acceptHeads(sys, g, accept); err != nil {
+			return sys, done, err
 		}
 	}
+	// A fork has no one version to make the system copy from, and the
+	// versions gathered go with the directory the run worked in.
 	if g.Verdict.Fork {
-		if !execute {
-			return forkProblem(g, "--execute will write each head's files to "+l.Incoming()+"/<sha>/.")
-		}
-		for _, h := range g.Verdict.Heads {
-			if err := l.WriteIncomingFor(h); err != nil {
-				return err
-			}
-		}
-		return forkProblem(g, "Each head's files are in "+l.Incoming()+"/<sha>/; nothing else was written.")
+		return sys, done, forkProblem(g, "This workstation holds no system copy to check the heads out from, so an operator who holds one makes the merge; once it is published, recover again. Nothing was written.")
 	}
 	head := g.Verdict.Heads[0]
 	pin := a.Root
@@ -1044,24 +1082,70 @@ func recoverFiles(r ui.Reporter, l configstore.Local, dests []config.Destination
 	// incarnation every answering site serves, so the root it leads to is
 	// the operator's to confirm, by its full hash.
 	if a.Named && pin != "" {
-		r.Warn("confirm the root "+pin+" with another operator before applying", "--key trusted the history it leads to, and a key alone cannot tell this deployment's history from an older incarnation every site that answered serves. Compare it with their .paisans/config-root, or a root's line of their "+progname.Cmd()+" deployment log.")
+		r.Warn("confirm the root "+pin+" with another operator before applying", "--key trusted the history it leads to, and a key alone cannot tell this deployment's history from an older incarnation every site that answered serves. Compare it with a root's line of their "+progname.Cmd()+" deployment log.")
 	}
 	if !execute {
-		r.Step("write the files of "+describe(g, head)).End(ui.Pending, "--execute will write them")
+		r.Step("make the system copy from "+describe(g, head)+" and start a draft of it in "+d.Dir).End(ui.Pending, "--execute will write them")
+		return sys, done, nil
+	}
+	// The head is recorded last, by the checkout: a run that stops before
+	// it leaves no system copy.
+	if err := recordPull(sys, g, pin, held); err != nil {
+		return sys, done, err
+	}
+	if err := sys.Checkout(head); err != nil {
+		return sys, done, err
+	}
+	return sys, done, nil
+}
+
+// heldAlready refuses a recovery or a join of deployment id when this
+// workstation holds its system copy: they make one where there is none,
+// and never replace one. A system copy with no head, or one a fetch
+// recorded as unverified or a fork, holds no version to start a draft
+// from, and the recovery takes its place.
+func heldAlready(st localstore.Store, id string) error {
+	sys, ok, err := st.Held(id)
+	if err != nil || !ok {
+		return err
+	}
+	head, err := sys.Head()
+	if err != nil || head == "" {
+		return err
+	}
+	rec, ok, err := st.Load(id)
+	if err != nil {
+		return err
+	}
+	if ok && (rec.Status == localstore.Unverified || rec.Status == localstore.Fork) {
 		return nil
 	}
-	if err := l.Checkout(head); err != nil {
-		return err
+	return &ui.Problem{Hint: "this workstation holds the system copy of " + id + " already", Explain: "A recovery or a join makes a system copy where there is none, and never replaces one; it is in " + sys.Dir + ". Start a draft from it with " + progname.Cmd() + " deployment checkout --id " + id + " --config <empty directory>/" + config.FileName + " --execute, and bring a draft to the sites' newest version with " + progname.Cmd() + " deployment pull."}
+}
+
+// startRecovered ends a recovery once its system copy, sys, is in place:
+// it records source as where the system copy came from, which deployment
+// list shows, and starts a draft of its head in d, which returns.
+func startRecovered(r ui.Reporter, st localstore.Store, sys configstore.Local, d draft.Draft, source string) (draft.Marker, error) {
+	m, f, err := systemHead(sys)
+	if err != nil {
+		return m, err
 	}
-	if err := recordPull(l, g, pin, held); err != nil {
-		return err
+	recordDeploy(r, st, f, m.SHA, m.Revision, source)
+	s := r.Step("start a draft in " + d.Dir)
+	id := filepath.Base(sys.Dir)
+	checkout := "The system copy is made; start a draft from it in an empty folder with " + progname.Cmd() + " deployment checkout --id " + id + " --config <empty directory>/" + config.FileName + " --execute."
+	if files := draftFiles(d); len(files) > 0 {
+		err := &ui.Problem{Hint: "no draft was started in " + d.Dir, Explain: "It holds " + strings.Join(files, ", ") + ", written while this run went on. " + checkout}
+		s.Fail(err)
+		return m, err
 	}
-	if files, err := l.Files(); err == nil {
-		key, _ := l.SigningKey()
-		saveVersion(r, l, head, g.Versions[head].Revision, files, key, "recovered into "+l.Dir)
+	if err := d.Write(f, m); err != nil {
+		s.Fail(err)
+		return m, &ui.Problem{Hint: "no draft was started in " + d.Dir, Explain: errLine(err) + ". " + checkout, Cause: err}
 	}
-	r.Result("recovered %s into %s", describe(g, head), l.Dir)
-	return nil
+	s.Done(fmt.Sprintf("drafted from revision %d, %s", m.Revision, shortSHA(m.SHA)))
+	return m, nil
 }
 
 // acceptHeads runs accept on the configuration of each of g's heads, from

@@ -233,6 +233,7 @@ func must[T any](v T, err error) T {
 // A recovery that reaches one of the fixture's four sites directly writes
 // the files at no terminal, with nothing asked.
 func TestConfigRecoverFromOneSiteAsksNothing(t *testing.T) {
+	withDataDir(t)
 	sha, answer, f := storedVersion(t)
 	recoverHosts(t, answer)
 	dir := t.TempDir()
@@ -245,7 +246,7 @@ func TestConfigRecoverFromOneSiteAsksNothing(t *testing.T) {
 	if strings.Contains(out.String(), "partial") {
 		t.Fatalf("output names partial: %q", out.String())
 	}
-	l := configstore.Local{Dir: dir}
+	l := heldCopy(t)
 	got, err := l.Files()
 	if err != nil || !got.Equal(f) {
 		t.Fatalf("files %v", err)
@@ -260,6 +261,7 @@ func TestConfigRecoverFromOneSiteAsksNothing(t *testing.T) {
 
 // Without --execute a recovery writes nothing.
 func TestConfigRecoverDryRunWritesNothing(t *testing.T) {
+	withDataDir(t)
 	sha, answer, _ := storedVersion(t)
 	recoverHosts(t, answer)
 	dir := t.TempDir()
@@ -271,11 +273,13 @@ func TestConfigRecoverDryRunWritesNothing(t *testing.T) {
 	if (configstore.Local{Dir: dir}).HasFiles() {
 		t.Fatal("files written")
 	}
+	noSystemCopy(t)
 }
 
 // A recovery names the directory it writes into as a full path, even when
 // --config is relative: "recover into ." does not say where the files went.
 func TestConfigRecoverPrintsTheDirectoryInFull(t *testing.T) {
+	withDataDir(t)
 	sha, answer, _ := storedVersion(t)
 	recoverHosts(t, answer)
 	t.Chdir(t.TempDir())
@@ -294,6 +298,7 @@ func TestConfigRecoverPrintsTheDirectoryInFull(t *testing.T) {
 
 // Recovery is onto a workstation with nothing, and needs an anchor.
 func TestConfigRecoverRefusals(t *testing.T) {
+	withDataDir(t)
 	sha, answer, _ := storedVersion(t)
 	recoverHosts(t, answer)
 	dir := t.TempDir()
@@ -737,6 +742,7 @@ func TestConfigATriedRootRaisesNothing(t *testing.T) {
 // A site holding mallory's versions, longer than the real history, moves
 // nothing: pull keeps the files, and recover writes the real head's.
 func TestConfigForgedVersionsChangeNoFiles(t *testing.T) {
+	withDataDir(t)
 	shas, answer, files := storedHistory(t, 2, 3)
 	l := pullWorkstation(t, answer, shas[0], shas[1], files[1])
 	var out bytes.Buffer
@@ -754,42 +760,44 @@ func TestConfigForgedVersionsChangeNoFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := configstore.Local{Dir: dir}
+	r := heldCopy(t)
 	if got, _ := r.Files(); !got.Equal(files[1]) {
 		t.Fatalf("recover wrote %q", got.Paisans[len(got.Paisans)-20:])
 	}
 }
 
-// A recovery that finds a fork writes each head's files to incoming/<sha>
-// with --execute and chooses neither.
-func TestConfigRecoverOnAForkWritesEachHead(t *testing.T) {
+// A recovery that finds a fork refuses, choosing neither head, and names the
+// merge an operator who holds the system copy makes: it makes no system
+// copy, writes nothing in the folder, and leaves no directory it worked in.
+func TestRecoverForkRefuses(t *testing.T) {
+	withDataDir(t)
 	key, pub := testKey(t)
 	s := newStore(t)
 	yaml := fixtureAs(t, pub)
 	root, _ := s.commit(t, yaml, "", nil, 1, key)
-	a, fa := s.commit(t, yaml, "# a\n", []string{root}, 2, key)
-	b, fb := s.commit(t, yaml, "# b\n", []string{root}, 2, key)
+	s.commit(t, yaml, "# a\n", []string{root}, 2, key)
+	s.commit(t, yaml, "# b\n", []string{root}, 2, key)
 	answer := s.answer(t)
 	recoverHosts(t, answer)
 	allSitesUp(answer, nil)
-	dir := t.TempDir()
-	var out bytes.Buffer
-	err := runDeployment([]string{"recover", "--from", "ubuntu@203.0.113.9", "--root", root, "--config", filepath.Join(dir, "paisans-stack.yaml"), "--execute"}, noTerminalStdin(), &out)
-	if err == nil || !strings.Contains(problemText(err), "publish --merge") {
-		t.Fatalf("got %v", err)
-	}
-	l := configstore.Local{Dir: dir}
-	if l.HasFiles() {
-		t.Fatal("a fork's recovery wrote the files")
-	}
-	for sha, want := range map[string]configstore.Files{a: fa, b: fb} {
-		got, err := (configstore.Local{Dir: l.IncomingFor(sha)}).Files()
-		if err != nil || !got.Equal(want) {
-			t.Fatalf("incoming %s: %v", sha[:12], err)
+	for _, execute := range []bool{false, true} {
+		dir := t.TempDir()
+		args := []string{"recover", "--from", "ubuntu@203.0.113.9", "--root", root, "--config", filepath.Join(dir, "paisans-stack.yaml")}
+		if execute {
+			args = append(args, "--execute")
 		}
-		if fi, err := os.Stat(filepath.Join(l.IncomingFor(sha), "secrets.enc.yaml")); err != nil || fi.Mode().Perm() != 0o600 {
-			t.Fatalf("secrets mode %v %v", fi.Mode(), err)
+		err := runDeployment(args, noTerminalStdin(), &bytes.Buffer{})
+		text := problemText(err)
+		for _, want := range []string{"the sites hold a fork", "deployment checkout --head", "deployment publish --merge", "recover again"} {
+			if err == nil || !strings.Contains(text, want) {
+				t.Errorf("execute %v: lacks %q: %v", execute, want, text)
+			}
 		}
+		entries, _ := os.ReadDir(dir)
+		if len(entries) != 0 {
+			t.Errorf("execute %v: the folder holds %d entries", execute, len(entries))
+		}
+		noSystemCopy(t)
 	}
 }
 

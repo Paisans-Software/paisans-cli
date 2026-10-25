@@ -368,10 +368,11 @@ var helpCommands = []helpCommand{
 	},
 	{
 		name:    "deployment recover",
-		summary: "Write the newest configuration onto an empty directory.",
+		summary: "Make the system copy from the sites and start a draft of it.",
 		usage:   []string{"paisans deployment recover --from <user@host[:port] or ssh alias>... [--root <sha>] [--key <path.pub>] [--id <id>]\n                       [--config " + config.FileName + "] [--execute] [--yes]"},
-		detail: "Onto an empty directory, gather from the --from hosts and every site the trusted heads name, and write the head's files, or each head's in .paisans/incoming/ with a fork. " +
-			"With --execute, the recovered version is also saved to this workstation's saved deployments (see deployment list)." +
+		detail: "For a deployment this workstation holds no system copy of, gather from the --from hosts and every site the trusted heads name, and with --execute make the system copy the head's, with its root and key, and start a draft of it in the directory of --config, which must hold none of the three files. " +
+			"A deployment whose system copy is here already is refused, naming deployment checkout and deployment pull; a fork is refused, naming the merge an operator who holds the system copy makes, and nothing is written. " +
+			"The system copy is listed by deployment list." +
 			configTrust + "\n\n" + keyTrust + "\n\n" + sshAliasTopic,
 	},
 	{
@@ -379,7 +380,7 @@ var helpCommands = []helpCommand{
 		summary: "List the deployments saved on this workstation.",
 		usage:   []string{"paisans deployment list"},
 		detail: "List every deployment saved on this workstation: its id, domain, revision, version, whether it is verified, where it came from and when. " +
-			"deployment apply --execute and deployment recover --execute save the version they publish or recover; deployment fetch saves what a host holds. " +
+			"deployment apply --execute saves the version it publishes, deployment recover --execute and the join of operator register make the system copy they recover; deployment fetch saves what a host holds. " +
 			"Saved deployments are kept in ~/Library/Application Support/Paisans on macOS, and in $XDG_DATA_HOME/paisans (~/.local/share/paisans) elsewhere, or in $" + localstore.DirVariable + " when set. " +
 			"Each is a directory holding " + config.FileName + ", secrets.enc.yaml and .sops.yaml, which any command takes with --config. Reads nothing else, and changes nothing.",
 	},
@@ -461,7 +462,7 @@ var helpCommands = []helpCommand{
 			"The invite and the inviter's key wait as the deployment's pending invite in invites/<deployment id>/ of the workstation's data directory, where deployment list's saved deployments live, and the first answer binds the age key it named to the deployment in age/<deployment id>.recipient there. Every later answer for the deployment searches all the sources for the bound key and uses the one that holds it, and is refused, with no key made, when none does; removing the binding file starts over with another key. " +
 			"Reaches no host and takes no --key, --root, --id or --execute. Refuses an invite to a deployment whose pending invite is a different one, naming the file to remove to abandon it, before anything is made. A key kept in a file comes with the export SOPS_AGE_KEY_FILE line that points sops at it, and the request is followed on stderr by what comes next.\n\n" +
 			"Run without --invite in a directory without the files, with an invite pending, it joins: the one invite pending, or the one --id names when several are. --key or --root without --id registers instead. With several pending and no --id it refuses and lists their directories; removing one abandons that invite. " +
-			"The join recovers the files from the invite's root and sites once an operator has accepted the request (operator add --request) and applied it (deployment apply --execute), and refuses before that with advice to ask the inviter. It signs your attestation with the invite's key and removes the pending invite once the files are written. It then says whether the secrets open with your age key and, when they do not, whether the fix is this workstation's or the acceptance's. Writing needs --execute; without it, the join says what it would write.\n\n" +
+			"The join makes the system copy from the invite's root and sites, and starts a draft of it in the directory, once an operator has accepted the request (operator add --request) and applied it (deployment apply --execute), and refuses before that with advice to ask the inviter. It signs your attestation with the invite's key and removes the pending invite once the system copy is made. A deployment whose system copy is here already is refused. It then says whether the secrets open with your age key and, when they do not, whether the fix is this workstation's or the acceptance's. Writing needs --execute; without it, the join says what it would write.\n\n" +
 			"Changes only the sites' configuration stores, and nothing without --execute. It goes ahead on whichever sites answer, and with --execute it asks for the word rollback at a terminal when the newest version is older than one seen here before; --yes types it. " + yesTopic,
 	},
 	{

@@ -16,6 +16,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/draft"
+	"github.com/paisans-software/paisans-cli/internal/localstore"
 	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -106,7 +107,7 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) (err 
 			if *keyPath != "" || *root != "" {
 				return &ui.Problem{Hint: "--key and --root do not apply to a join", Explain: "The pending invite names the key you sign with and the root trust starts from."}
 			}
-			return joinInvite(reporter(), l, invite, *execute, ans, stdin, stdout)
+			return joinInvite(reporter(), d, invite, *execute, ans, stdin, stdout)
 		}
 	}
 	r := reporter()
@@ -172,37 +173,11 @@ func registerSystem(r ui.Reporter, configPath, id string, d draft.Draft, root st
 			return sys, nil, done, err
 		}
 		if !ok {
-			// The run works in a directory of its own, outside deployments/,
-			// so nothing it gathers is a system copy until it records a head.
-			staging, err := os.MkdirTemp(st.Base, "register-"+c.ID+"-")
+			sys, staged, err := stageSystem(r, st, "register", c.ID, release, nil)
 			if err != nil {
-				release()
 				return sys, nil, done, err
 			}
-			sys = configstore.Local{Dir: staging}
-			dest := filepath.Join(st.Base, "deployments", c.ID)
-			return sys, c, func(runErr error) error {
-				defer release()
-				if head, err := sys.Head(); err == nil && head != "" {
-					aside, err := settle(staging, dest)
-					if aside != "" {
-						r.Warn("what "+dest+" recorded is moved aside to "+aside, "That directory held no system copy, and the one this run made is in its place. Remove "+aside+" once you know nothing in it is needed.")
-					}
-					if err != nil {
-						what := "and pushed it as reported above"
-						if runErr != nil {
-							what = "and stopped before the sites were known to hold it (" + errLine(runErr) + "); they may not have it"
-						}
-						p := &ui.Problem{Hint: "the new system copy of " + c.ID + " could not be put in place", Explain: "This run recorded its head, " + shortSHA(head) + ", in " + staging + ", " + what + ". Move that directory's contents into " + dest + ", the paisans state directory .paisans last: " + errLine(err) + ".", Cause: err}
-						r.Warn(p.Hint, p.Explain)
-						return p
-					}
-				}
-				if err := os.RemoveAll(staging); err != nil {
-					r.Warn("the directory the run worked in is left in "+staging, errLine(err)+". It holds no system copy; remove it.")
-				}
-				return renamed(runErr, staging, dest)
-			}, nil
+			return sys, c, staged, nil
 		}
 		if !execute {
 			release()
@@ -222,9 +197,58 @@ func registerSystem(r ui.Reporter, configPath, id string, d draft.Draft, root st
 	return sys, nil, func(runErr error) error { release(); return runErr }, nil
 }
 
+// stageSystem is where a run that makes deployment id's system copy works,
+// a directory of its own under the data directory and outside
+// deployments/, named for the command, so nothing it gathers is a system
+// copy until it records a head; and done, which ends the run. The caller
+// holds the lock on id, release, which done releases, as stageSystem does
+// when it fails. done puts the directory in place as the system copy only
+// when the run recorded a head there, as a dry run does not, then runs
+// placed, when set, on the system copy in its place, and removes the
+// directory. It returns the run's error, runErr, naming the system copy
+// where it named the directory, or why the system copy is not in place.
+func stageSystem(r ui.Reporter, st localstore.Store, command, id string, release func(), placed func(sys configstore.Local) error) (configstore.Local, func(runErr error) error, error) {
+	staging, err := os.MkdirTemp(st.Base, command+"-"+id+"-")
+	if err != nil {
+		release()
+		return configstore.Local{}, nil, err
+	}
+	sys := configstore.Local{Dir: staging}
+	dest := filepath.Join(st.Base, "deployments", id)
+	return sys, func(runErr error) error {
+		defer release()
+		var after error
+		if head, err := sys.Head(); err == nil && head != "" {
+			aside, err := settle(staging, dest)
+			if aside != "" {
+				r.Warn("what "+dest+" recorded is moved aside to "+aside, "That directory held no trusted version, and the system copy this run made is in its place. Remove "+aside+" once you know nothing in it is needed.")
+			}
+			if err != nil {
+				what := "and pushed it as reported above"
+				if runErr != nil {
+					what = "and stopped before the sites were known to hold it (" + errLine(runErr) + "); they may not have it"
+				}
+				p := &ui.Problem{Hint: "the new system copy of " + id + " could not be put in place", Explain: "This run recorded its head, " + shortSHA(head) + ", in " + staging + ", " + what + ". Move that directory's contents into " + dest + ", the paisans state directory .paisans last: " + errLine(err) + ".", Cause: err}
+				r.Warn(p.Hint, p.Explain)
+				return p
+			}
+			if placed != nil {
+				after = placed(configstore.Local{Dir: dest})
+			}
+		}
+		if err := os.RemoveAll(staging); err != nil {
+			r.Warn("the directory the run worked in is left in "+staging, errLine(err)+". It holds no system copy; remove it.")
+		}
+		if runErr = renamed(runErr, staging, dest); runErr == nil {
+			return after
+		}
+		return runErr
+	}, nil
+}
+
 // settle puts the system copy made in staging at dest: the directory
 // itself when dest is not there, else each of its entries in place of
-// dest's, which holds no system copy. What dest's .paisans held is moved
+// dest's, which holds no trusted version. What dest's .paisans held is moved
 // aside, never removed, and aside names where. .paisans, which holds the
 // head, goes in last, so dest is a system copy only once its files are
 // there.
