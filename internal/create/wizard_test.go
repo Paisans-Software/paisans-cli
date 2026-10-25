@@ -91,7 +91,7 @@ func TestWizardWritesEachNamedShape(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%v\n%s", err, out)
 			}
-			data, err := Render(w.Answers, testID, testOrigin)
+			data, err := Render(w.Answers, testID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -150,7 +150,7 @@ func TestOneOperatorIsAccepted(t *testing.T) {
 	if len(w.Answers.Operators) != 1 {
 		t.Fatalf("operators = %v, want alice alone", w.Answers.Operators)
 	}
-	data, err := Render(w.Answers, testID, testOrigin)
+	data, err := Render(w.Answers, testID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestTheHealthPageOnTheGateway(t *testing.T) {
 	if w.Answers.Sites[1].Has(config.RoleMonitor) {
 		t.Error("AllSites changed the answered sites")
 	}
-	data, err := Render(w.Answers, testID, testOrigin)
+	data, err := Render(w.Answers, testID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +314,7 @@ func TestAnsweringAgainKeepsEveryAnswerAsTheDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := Render(w.Answers, testID, testOrigin)
+	first, err := Render(w.Answers, testID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +325,7 @@ func TestAnsweringAgainKeepsEveryAnswerAsTheDefault(t *testing.T) {
 		if err := w.Ask(s); err != nil {
 			t.Fatalf("%s: %v\n%s", s, err, out.String())
 		}
-		again, err := Render(w.Answers, testID, testOrigin)
+		again, err := Render(w.Answers, testID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -484,7 +484,7 @@ func TestDisplayNameIsAskedAndKept(t *testing.T) {
 	if strings.Contains(out, "Name shown at sign in for the sign in") {
 		t.Errorf("Pocket ID has no client of its own, but was asked for a display name:\n%s", out)
 	}
-	data, err := Render(w.Answers, "0123456789abcdef", Origin{Version: "test", Date: "2026-01-01"})
+	data, err := Render(w.Answers, "0123456789abcdef")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,7 +543,7 @@ func TestWizardWritesOpenSignup(t *testing.T) {
 	if w.Answers.Account.Signup != "open" {
 		t.Fatalf("signup is %q, want open", w.Answers.Account.Signup)
 	}
-	data, err := Render(w.Answers, testID, testOrigin)
+	data, err := Render(w.Answers, testID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -579,7 +579,7 @@ func TestTheSSHUserMayBeLeftEmpty(t *testing.T) {
 	if strings.Contains(out.String(), "must already exist") {
 		t.Errorf("the question still asks for an existing user:\n%s", out.String())
 	}
-	data, err := Render(w.Answers, testID, testOrigin)
+	data, err := Render(w.Answers, testID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -591,7 +591,7 @@ func TestTheSSHUserMayBeLeftEmpty(t *testing.T) {
 	}
 
 	w.Answers.Sites[0].SSHUser = "admin"
-	data, err = Render(w.Answers, testID, testOrigin)
+	data, err = Render(w.Answers, testID)
 	if err != nil {
 		t.Fatal(err)
 	}

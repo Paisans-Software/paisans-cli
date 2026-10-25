@@ -17,10 +17,6 @@ import (
 
 const testID = "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
 
-// testOrigin names a fixed binary and date, so the golden files do not change
-// with the build or the day.
-var testOrigin = Origin{Version: "v0.0.0-test", Date: "2026-01-02"}
-
 // answersFor is what the wizard collects for shape, with every capability
 // when all is set and none otherwise, every gateable app members only when
 // gated is.
@@ -126,7 +122,7 @@ func TestNamedShapesValidate(t *testing.T) {
 				if c.onGateway {
 					a.Monitor, a.MonitorOnGateway = nil, true
 				}
-				data, err := Render(a, testID, testOrigin)
+				data, err := Render(a, testID)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -170,7 +166,7 @@ func TestQuotedAnswersReadBackUnchanged(t *testing.T) {
 	a.Name = `- "Paisans": a #community`
 	a.Operators[0].Name = `Zoë "Z" O'Brien: #1`
 	a.SMTP.FromName = "yes"
-	data, err := Render(a, testID, testOrigin)
+	data, err := Render(a, testID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +187,7 @@ func TestQuotedAnswersReadBackUnchanged(t *testing.T) {
 func TestOneMachineWithTheMonitorOnTheGatewayRendersTheGoldenFile(t *testing.T) {
 	a := answersFor(ShapeOneMachine, true, false)
 	a.Monitor, a.MonitorOnGateway = nil, true
-	data, err := Render(a, testID, testOrigin)
+	data, err := Render(a, testID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +221,7 @@ func TestPocketIDManagementWithoutMailValidates(t *testing.T) {
 	a.Apps = a.Apps[:1]
 	a.PocketID = PocketIDAccounts{Signups: "open"}
 	a.SMTP = SMTP{}
-	data, err := Render(a, testID, testOrigin)
+	data, err := Render(a, testID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +261,7 @@ func TestCustomShapeIsSynchronousWithTwoDataSites(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			a := answersFor(ShapeCustom, false, false)
 			a.Sites = c.sites
-			data, err := Render(a, testID, testOrigin)
+			data, err := Render(a, testID)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/create"
@@ -55,7 +54,6 @@ func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 
-	by := create.Origin{Version: toolkitVersion(), Date: time.Now().Format("2006-01-02")}
 	p := create.NewPrompter(stdin, stdout)
 	w := create.NewWizard(p)
 	w.DefaultUser = deployment.Deployment{ID: id}.Prefix()
@@ -68,7 +66,7 @@ func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 		if err := w.Ask(section); err != nil {
 			return createAborted(err)
 		}
-		data, err := create.Render(w.Answers, id, by)
+		data, err := create.Render(w.Answers, id)
 		if err != nil {
 			return err
 		}
