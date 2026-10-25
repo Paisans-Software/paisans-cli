@@ -24,7 +24,7 @@ type Graph struct {
 
 // Anchor is what the operator holds that nobody else can forge: their own
 // signing keys, a pinned root, or both. Signers is a set of fingerprints:
-// the key .paisans/signing-key records, or, with Named, the key the operator
+// the signing key the system copy records, or, with Named, the key the operator
 // names with --key on a workstation that records none. Signers never come
 // from the sites or the ssh-agent.
 //
@@ -453,7 +453,7 @@ func (j *judgement) named(a Anchor, order, cyclic []string) (Verdict, error) {
 		return Verdict{}, &anchorError{fmt.Sprintf("no version the trust rules trust is signed by the key --key names, %s, and no root is pinned", key)}
 	case 1:
 	default:
-		return Verdict{}, &anchorError{fmt.Sprintf("the key --key names, %s, signed versions under more than one root, and which is this deployment's is not for a key to say: get the current root from another operator, the full hash in their .paisans/config-root or on a root's line of their %s deployment log, and recover with --root <sha>. A root may be held only in this workstation's own cache, .paisans/store.git, from an earlier run; on a workstation recovering from nothing, removing .paisans/ clears it", key, progname.Cmd())}
+		return Verdict{}, &anchorError{fmt.Sprintf("the key --key names, %s, signed versions under more than one root, and which is this deployment's is not for a key to say: get the current root from another operator, the root their system copy pins, the full hash on a root's line of their %s deployment log, and recover with --root <sha>. A root may be held only in this system copy's own store, from an earlier run; recovering with --root <sha> replaces that system copy, keeping the old one under replaced/ of the data directory", key, progname.Cmd())}
 	}
 	v, err := j.from(roots[0], order, cyclic)
 	if err != nil {
@@ -495,7 +495,7 @@ func (j *judgement) named(a Anchor, order, cyclic []string) (Verdict, error) {
 			return Verdict{}, &anchorError{fmt.Sprintf("the key --key names, %s, is not a key of an operator the newest version %s lists", key, h)}
 		}
 		if !slices.Contains(a.Signers, j.g.Versions[h].SignerFP) {
-			return Verdict{}, &anchorError{fmt.Sprintf("the newest version %s is signed by %s, not by the key --key names, %s; a key alone cannot tell this deployment's history from one it signed before a redeploy, so it trusts only versions it signed: get the current root from another operator, the full hash in their .paisans/config-root or on a root's line of their %s deployment log, and pin it with --root <sha>", h, j.g.Versions[h].SignerFP, key, progname.Cmd())}
+			return Verdict{}, &anchorError{fmt.Sprintf("the newest version %s is signed by %s, not by the key --key names, %s; a key alone cannot tell this deployment's history from one it signed before a redeploy, so it trusts only versions it signed: get the current root from another operator, the root their system copy pins, the full hash on a root's line of their %s deployment log, and pin it with --root <sha>", h, j.g.Versions[h].SignerFP, key, progname.Cmd())}
 		}
 	}
 	return out, nil

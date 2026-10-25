@@ -18,6 +18,11 @@ changes share a bullet. Detailed notes are on the corresponding
 - `operator age-key` makes or shows the operator's age key for a deployment.
 - `--site` of `doctor` and `operator add`, `--only` and `--recreate` of `deployment apply`, `--replaced` of `secrets rotate` and `--name` of `dns prune` take several values separated by commas.
 - `deployment apply` shows, before its review, how the configuration differs from the sites' newest version: `paisans-stack.yaml` as a diff, the secrets by key name only.
+- `deployment apply` and `pull` merge a draft behind the sites forward from its "drafted from" line, keeping the draft's value on conflicts; the review flags undone changes; `checkout --head` writes another trusted head.
+
+### Changed
+
+- Each deployment has one system copy in the data directory, the only state trusted; a folder holds just a draft of the three files, and writers start one there from the system copy.
 
 ### Fixed
 

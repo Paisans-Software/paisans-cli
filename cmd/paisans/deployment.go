@@ -27,12 +27,13 @@ import (
 )
 
 // What follows is `paisans deployment`: the signed copies of the configuration
-// every site keeps (docs/specs/2026-10-12-config-store.md). publish puts the
-// local files on the sites as a new version, pull brings the sites' newest
-// trusted version to the local files, log lists every version, and recover
-// writes the newest onto a workstation that has nothing. Every decision about
-// which version to trust is made here, on the workstation, from the
-// operator's own anchor; the sites only store.
+// every site keeps (docs/specs/2026-10-12-config-store.md). publish puts a
+// draft on the sites as a new version, pull brings the sites' newest trusted
+// version into the system copy and merges it into the draft, log lists every
+// version, and recover makes the system copy on a workstation that has
+// none (docs/specs/2026-10-24-system-copy.md). Every decision about which
+// version to trust is made here, on the workstation, from the system copy's
+// anchor; the sites only store, and a draft's folder holds only the draft.
 
 // configSiteTransport is how a config command reaches a site paisans-stack.yaml
 // declares: its ssh section. Tests replace it.
@@ -75,7 +76,7 @@ func runDeployment(args []string, stdin io.Reader, stdout io.Writer) error {
 }
 
 // configHelp is the --config flag's help, the same for every subcommand.
-const configHelp = "path to the deployment declaration; the store's state is kept in .paisans/ beside it"
+const configHelp = "path to the draft's deployment declaration; what trust is read from is kept in the system copy, never beside it"
 
 // statePath is where l records name: what a refusal naming a record says
 // to look at.
@@ -202,7 +203,7 @@ func noteKeyIgnored(r ui.Reporter, ignored bool) {
 }
 
 // keyHelp is the --key flag's help for pull, log and recover.
-const keyHelp = "a public key file (.pub) you trust, to start trust from when .paisans/signing-key records none; recorded as the signing key when your ssh-agent holds it"
+const keyHelp = "a public key file (.pub) you trust, to start trust from when the system copy records no signing key; recorded as its signing key when your ssh-agent holds it"
 
 // noAnchorNamed is what a pull, log or recover refusal for a missing anchor
 // says to do, with otherwise added for a workstation that has files.
@@ -676,7 +677,7 @@ func recordPull(l configstore.Local, g configstore.Gathered, root string, held m
 	return recordAnchorKey(l, g, held)
 }
 
-// showDifference prints how the local files differ from the head's:
+// showDifference prints how the system copy's files differ from the head's:
 // paisans-stack.yaml as a diff, the secrets by key name only, never a value.
 func showDifference(stdout io.Writer, local, theirs configstore.Files) error {
 	lines, err := difference(local, theirs, localAndHead)
@@ -694,9 +695,9 @@ func showDifference(stdout io.Writer, local, theirs configstore.Files) error {
 // only one side holds.
 type sides struct{ dirA, dirB, inA, inB string }
 
-// localAndHead is how pull and register name the sides: the local files,
+// localAndHead is how register names the sides: the system copy's files,
 // then the head's.
-var localAndHead = sides{dirA: "local/", dirB: "head/", inA: "the local file", inB: "the head"}
+var localAndHead = sides{dirA: "system/", dirB: "head/", inA: "the system copy", inB: "the head"}
 
 // difference is how b's files differ from a's, as lines: paisans-stack.yaml
 // as a unified diff, the secrets by key name only, never a value, and

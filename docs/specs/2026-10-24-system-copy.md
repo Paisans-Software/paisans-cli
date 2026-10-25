@@ -1,6 +1,6 @@
 # One system copy per deployment, drafts in folders
 
-Status: approved by the founder on 2026-10-24; not yet implemented.
+Status: approved by the founder on 2026-10-24; implemented as described here.
 
 A workstation keeps one copy of each deployment it runs, in the Paisans data
 directory: the **system copy**. It is the only state Paisans trusts on the
@@ -80,19 +80,32 @@ It is written only by:
   `deployment pull` move the system copy's files to a newer trusted head;
   every other sync (`log`, `register`, a dry run) records versions and
   nothing else, so the files stay the base the next merge needs;
-* **a recovery or a join**, which create the system copy from the sites.
+* **a recovery or a join**, which create the system copy from the sites;
+* **`operator register --root`**, for a deployment with no system copy here:
+  a pinned root anchors alone, so register makes the system copy from the
+  version the pin leads to;
+* **`deployment fetch`**, which fills a system copy from a host, judged from
+  the copy's anchor, or set aside as unverified where there is none.
 
-The system copy has a lock, held only while a command writes it: two writers
-at once is refused, the second naming the first. A deploy that another
+A run that creates a system copy works in a directory of its own under the
+data directory and puts it in place under `deployments/<id>/` only once it
+records a head, so a dry run or a failed run leaves none. What the place held
+before is moved aside whole into `replaced/` of the data directory, never
+removed, and the run names where.
+
+The system copy has a lock, `locks/<id>.lock` in the data directory, held only
+while a command writes it: two writers at once is refused, the second naming
+the first. A deploy that another
 deploy overtook between its sync and its publish is refused at publish by the
 existing check that the version's parent is the sites' head, and says to run
 apply again.
 
 A deployment with no system copy on this workstation gets one only from a
-recovery, a join, or the first deploy of a new deployment (`init` or `create`
-made it, and no site holds a version yet). A draft of an existing deployment
-whose system copy is missing is refused, naming `deployment recover` or the
-join; no other command anchors trust on its own.
+recovery, a join, `operator register --root`, `deployment fetch`, or the first
+deploy of a new deployment (`init` or `create` made it, and no site holds a
+version yet). A draft of an existing deployment whose system copy is missing is
+refused, naming `deployment recover` or the join; no other command anchors
+trust on its own.
 
 ## Drafts
 
@@ -146,31 +159,39 @@ undo flags and the stale-draft warning cover a draft whatever its base.
 
 ## Deploying a draft
 
-`deployment apply` (and `publish`) with a draft:
+`deployment apply` with a draft:
 
 1. **Sync** the system copy from the sites.
 2. **Find the draft's base**: the version its "drafted from" line names, or,
    without a usable line, the system copy's files before the sync.
 3. **When the sites' newest version is the base**, the draft is the next
-   version. The review shows it against the system copy (below).
+   version. The review shows it against the sites' newest version (below).
 4. **When the sites' newest version is newer than the base** (another
    operator deployed, from any workstation or another folder of this one),
    the system copy moves to it, and the draft is merged forward with a
    three-way merge: base is the base found in step 2, ours is the draft,
-   theirs is the sites' newest version. The merge is new work: `paisans-stack.yaml`
-   merges path by path on its YAML node tree (a list is one value; comments
-   and key order come from the draft), and the secrets merge by key after
-   decryption, extending the secrets-only merge `deployment pull` has today.
-   What does not conflict merges. On a conflict the draft keeps its own value
-   for each conflicting path, the conflicting paths are listed (secret keys by
-   name only), and nothing is deployed; the operator edits the draft and runs
-   apply again. Either way the apply stops after writing the merged draft;
-   the operator reviews it and runs apply again.
+   theirs is the sites' newest version. `paisans-stack.yaml`
+   and `.sops.yaml` merge path by path on their YAML node trees (a list is one
+   value, `creation_rules` is always one value, and comments and key order
+   come from the draft); a file with a YAML anchor or alias is refused, since
+   a merge cannot place one. The secrets merge by key after decryption with
+   this workstation's age key and are encrypted again to the merged
+   `.sops.yaml`'s recipients; a merge is refused while either side has a mesh
+   rekey or a secrets rotation under way. What does not conflict merges. On a
+   conflict the draft keeps its own value for each conflicting path, and the
+   conflicting paths are listed once, at the merge (secret keys by name only);
+   the merged draft's "drafted from" line names the sites' newest version, so
+   the next apply deploys what the operator settles. Either way the apply
+   stops after writing the merged draft, deploying nothing; the operator
+   reviews it and runs apply again.
 5. **When the sites hold a fork**, apply refuses and names
-   `deployment publish --merge`, which resolves it into one signed version as
-   it does today; the draft is then merged forward from it on the next apply.
+   `deployment publish --merge`, which resolves it into one signed version; the draft is then merged forward from it on the next apply.
 6. **A dry run** syncs the store and arrival record only: it writes no draft
    and moves no files, and says what an `--execute` run would merge.
+
+`deployment publish` deploys a draft whose base is the sites' newest version
+as apply does, and refuses one whose base is older, naming `deployment pull`,
+which merges it forward as step 4 does.
 
 A deployed draft's files become the system copy, and the draft's "drafted
 from" line is rewritten to name the version just deployed. The folder is
@@ -180,24 +201,28 @@ otherwise left as it is: the operator keeps editing it.
 
 Before approval, `deployment apply`'s review shows:
 
-* **The draft against the system copy.** A unified diff of
+* **The draft against the version it deploys onto**, the sites' newest, which
+  is the draft's base by the time it deploys. A unified diff of
   `paisans-stack.yaml`, the secret keys added, removed or changed (never their
-  values), and whether `.sops.yaml` differs. (This part ships first, ahead of
-  this design, against the sites' newest version.)
+  values), and whether `.sops.yaml` differs.
 * **Undo flags.** For each path the draft changes (a dotted path into
   `paisans-stack.yaml`, or a secret key), Paisans walks the system copy's
   trusted history back from the head to the most recent revision that changed
   that path. When the draft's value equals the value from before that
   revision, the line is flagged: `sites.home-b: added back; revision 15
   (signed by alice) removed it.` A deliberate undo and an accidental one look
-  the same here, so the flag informs and never refuses.
-* **A stale-draft warning.** When any draft file was last modified before the
-  newest revision reached this workstation (both times from this machine's
-  clock, the second from the system copy's arrival record), the review warns
-  once: `This draft was last saved before revision 15 reached this
+  the same here, so the flag informs and never refuses. The walk follows first
+  parents only, and the flags of every path under one key that name the same
+  revision and wording fold into one line for that key.
+* **A stale-draft warning.** For a draft with no usable "drafted from" line,
+  when any of its files was last modified before the newest revision reached
+  this workstation (both times from this machine's clock, the second from the
+  system copy's arrival record), the review warns once: `This draft was last saved before revision 15 reached this
   workstation; it may not include revision 15's changes.` It is a warning, not
   a refusal: a file copy can reset a modification time, so the signal can miss
-  a stale draft but never marks a fresh one stale.
+  a stale draft but never marks a fresh one stale. A draft whose line names a
+  trusted version has its base already, and gets no warning. A version with no
+  arrival record gives none either.
 
 The approval prompt that exists today decides.
 
@@ -206,10 +231,16 @@ The approval prompt that exists today decides.
 * `deployment pull` syncs the system copy, then, in a folder with a draft,
   merges the draft forward as step 4 above, from the base step 2 finds.
   Without a draft it starts one.
-* `deployment checkout [--id]` starts a draft in the folder from the system
-  copy. It refuses a folder that already holds a draft.
+* `deployment checkout [--id <full id>] [--head <sha>]` starts a draft in the
+  folder from the system copy, or, with `--head`, from another trusted head of
+  its store, the files a hand merge for `deployment publish --merge` starts
+  from. It refuses a folder that already holds a draft.
 * `deployment recover` and the operator join create the system copy from the
-  sites and start a draft in the folder.
+  sites and start a draft in the folder. Both refuse a folder holding a draft
+  and a deployment whose system copy here has a version; recover replaces such
+  a copy only when an explicit `--root` differs from the root it pinned, or it
+  pinned none, keeping the old one under `replaced/`. A fork during a recovery
+  is refused and nothing is written.
 * `deployment list` lists the system copies; `deployment fetch` fills one from
   a host as today.
 * `operator register` attests from the system copy.
@@ -228,9 +259,10 @@ The approval prompt that exists today decides.
 ## Documentation
 
 `README.md` (*Every site keeps signed copies of the configuration*, *This
-workstation keeps every deployment it applies*), `docs/commands.md` and help
-describe the system copy and drafts in current-state wording; the config-store
-spec's *Workstation* wording follows.
+workstation keeps one system copy of each deployment*, *A folder holds a
+draft*, *A draft behind the sites is merged forward*), `docs/commands.md` and
+help describe the system copy and drafts in current-state wording; the
+config-store spec's *Workstation* wording follows.
 
 ## Testing
 
@@ -253,7 +285,13 @@ spec's *Workstation* wording follows.
   saved after does not.
 * The lock: two writers at once.
 
-## Left to the builder
+## Layout
 
-* The system copy's internal layout and the arrival record's format.
-* How path flattening handles lists in `paisans-stack.yaml`.
+* The system copy's trust state is in its `.paisans/`, as the config-store
+  spec's *Commands* lists it, with `arrivals` beside it: one
+  `<sha> <RFC3339 UTC>` line per version, only ever appended, duplicates
+  tolerated, the first line for a version standing. A failed append warns
+  and never fails the gather.
+* Path flattening names each mapping key by its dotted path and treats a list
+  as one value, the same flattening the merge, the undo flags and the review
+  use.

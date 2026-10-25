@@ -75,6 +75,16 @@ func (d Draft) Has() bool {
 	return err == nil
 }
 
+// HasAny reports whether the folder holds any of the three files.
+func (d Draft) HasAny() bool {
+	for _, n := range []string{config.FileName, configstore.FileSecrets, configstore.FileSOPS} {
+		if _, err := os.Lstat(d.path(n)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 // Files reads the three files. Paisans keeps its marker line.
 func (d Draft) Files() (configstore.Files, error) {
 	var f configstore.Files

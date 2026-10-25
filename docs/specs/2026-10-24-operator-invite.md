@@ -81,8 +81,8 @@ It holds nothing secret:
 | `key` | the new operator's SSH public key, as type and base64 with no comment, like a site request's keys |
 | `sites` | each site the deployment declares: its name, ssh host, port and user, enough for `deployment recover --from` to reach it |
 
-It is signed with the inviter's SSH key through their ssh-agent, the key
-`.paisans/signing-key` records, as an SSH signature (`ssh-keygen -Y sign`
+It is signed with the inviter's SSH key through their ssh-agent, the signing
+key the deployment's system copy records, as an SSH signature (`ssh-keygen -Y sign`
 format) under the namespace `paisans-operator-invite`. The signature covers
 the exact bytes of the YAML above it.
 
@@ -92,8 +92,9 @@ It refuses:
 * a key another operator lists, or one `operator add` would refuse;
 * a workstation with no recorded signing key, or an agent that does not hold
   it, naming `operator register`;
-* a workstation that does not know its root (no `.paisans/config-root` and no
-  single root among the versions it has gathered), naming `deployment pull`.
+* a workstation that does not know its root (no root pinned in the system copy
+  and no single root among the versions it has gathered), naming
+  `deployment pull`.
 
 The root is taken from what this workstation trusts, never from what a site
 serves when the invite is written.

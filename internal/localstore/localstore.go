@@ -1,20 +1,19 @@
-// Package localstore is the workstation's own copy of every deployment it has
-// applied or fetched: the three files of the version last saved, with the
-// configuration store's state beside them, one directory per deployment id
-// under the operator's data directory.
+// Package localstore holds the workstation's system copies: one per
+// deployment, under deployments/<id>/ of the operator's data directory, the
+// only copy of a deployment Paisans trusts on this workstation
+// (docs/specs/2026-10-24-system-copy.md). A folder the operator edits in is
+// a draft of one, and holds nothing else.
 //
-// A deployment's files usually sit in a directory the operator chose, often a
-// git repository, and that directory is easy to lose or to forget the path
-// of. Every deploy (deployment apply --execute, deployment publish
-// --execute) makes the version it published the copy here, and
-// paisans deployment fetch fills it from a host, so an operator can always
-// find each deployment they run without remembering where its files were.
-//
-// Each deployment's directory is a configstore workstation in its own right
-// (paisans-stack.yaml, secrets.enc.yaml, .sops.yaml and .paisans/), so a
-// fetch judges what a host serves by the same trust rules as deployment pull,
-// anchored on the key that signed the version apply saved, and every
-// paisans command that takes --config works on a saved copy as it is.
+// Each system copy is a configstore workstation: paisans-stack.yaml,
+// secrets.enc.yaml and .sops.yaml of the version last deployed or synced,
+// and beside them .paisans/ with the store of signed versions and the trust
+// state. A deploy (deployment apply --execute, deployment publish
+// --execute) makes the version it published the system copy's; a recovery,
+// a join and operator register --root make one from the sites; and
+// paisans deployment fetch fills one from a host, judging what it serves by
+// the same trust rules as deployment pull. A lock under locks/ is held while
+// a command writes a copy, and a copy a recovery replaces is kept under
+// replaced/.
 package localstore
 
 import (
@@ -156,6 +155,31 @@ func isCopy(l configstore.Local) (bool, error) {
 	}
 	head, err := l.Head()
 	return head != "", err
+}
+
+// Staging is a directory of its own under the data directory and outside
+// deployments/, named from prefix, opened as a workstation: where a run
+// that makes a system copy works, so nothing it gathers is a copy until the
+// run puts the directory in place. The caller removes it.
+func (s Store) Staging(prefix string) (configstore.Local, error) {
+	if err := os.MkdirAll(s.Base, 0o700); err != nil {
+		return configstore.Local{}, err
+	}
+	dir, err := os.MkdirTemp(s.Base, prefix)
+	if err != nil {
+		return configstore.Local{}, err
+	}
+	return configstore.Local{Dir: dir}, nil
+}
+
+// Scratch is a temporary directory opened as a workstation, for a gather
+// that has no system copy to record into. The caller removes it.
+func Scratch(prefix string) (configstore.Local, error) {
+	dir, err := os.MkdirTemp("", prefix)
+	if err != nil {
+		return configstore.Local{}, err
+	}
+	return configstore.Local{Dir: dir}, nil
 }
 
 // locksDir holds one lock file per deployment, outside deployments/, so

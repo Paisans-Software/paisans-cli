@@ -69,11 +69,11 @@ func gatherDeploy(r ui.Reporter, d draft.Draft, cfg *config.Config, sites map[st
 		return t, err
 	}
 	if !held {
-		dir, err := os.MkdirTemp("", "paisans-gather-")
+		scratch, err := localstore.Scratch("paisans-gather-")
 		if err != nil {
 			return t, err
 		}
-		sys, t.done = configstore.Local{Dir: dir}, func() { os.RemoveAll(dir) }
+		sys, t.done = scratch, func() { os.RemoveAll(scratch.Dir) }
 	}
 	t.sys, t.held = sys, held
 	if t.head, err = sys.Head(); err != nil {

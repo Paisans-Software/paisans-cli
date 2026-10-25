@@ -95,9 +95,9 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) (err 
 	// register joins: the invite names the root and the key. --key or --root
 	// without --id is a plain register, which a pending invite does not
 	// take over.
-	if l := (configstore.Local{Dir: d.Dir}); l.HasFiles() && *id != "" {
-		return &ui.Problem{Hint: "--id selects a pending invite to join, and " + ui.ShortPath(l.Dir) + " holds the files", Explain: "A join writes the files into a directory without them. Here register registers, and reads the deployment from " + config.FileName + "; run it without --id."}
-	} else if !l.HasFiles() && (*id != "" || (*keyPath == "" && *root == "")) {
+	if has := d.HasAny(); has && *id != "" {
+		return &ui.Problem{Hint: "--id selects a pending invite to join, and " + ui.ShortPath(d.Dir) + " holds the files", Explain: "A join writes the files into a directory without them. Here register registers, and reads the deployment from " + config.FileName + "; run it without --id."}
+	} else if !has && (*id != "" || (*keyPath == "" && *root == "")) {
 		invite, ok, err := selectPending(*id)
 		if err != nil {
 			return err
@@ -211,12 +211,12 @@ func registerSystem(r ui.Reporter, configPath, id string, d draft.Draft, root st
 // runErr, naming the system copy where it named the directory, or why the
 // system copy is not in place.
 func stageSystem(r ui.Reporter, st localstore.Store, command, id, why string, keep []string, release func(), placed func(sys configstore.Local) error) (configstore.Local, func(runErr error) error, error) {
-	staging, err := os.MkdirTemp(st.Base, command+"-"+id+"-")
+	sys, err := st.Staging(command + "-" + id + "-")
 	if err != nil {
 		release()
 		return configstore.Local{}, nil, err
 	}
-	sys := configstore.Local{Dir: staging}
+	staging := sys.Dir
 	dest := filepath.Join(st.Base, "deployments", id)
 	return sys, func(runErr error) error {
 		defer release()
@@ -236,7 +236,11 @@ func stageSystem(r ui.Reporter, st localstore.Store, command, id, why string, ke
 				return p
 			}
 			if placed != nil {
-				after = placed(configstore.Local{Dir: dest})
+				if l, err := st.Local(id); err != nil {
+					after = err
+				} else {
+					after = placed(l)
+				}
 			}
 		}
 		if err := os.RemoveAll(staging); err != nil {
@@ -388,8 +392,8 @@ func attest(r ui.Reporter, l configstore.Local, cfg *config.Config, key, pin str
 			return err
 		}
 		return &ui.Problem{
-			Hint:    "the local files differ from the sites' newest version",
-			Explain: fmt.Sprintf("The sites hold %s. An attestation says you hold that version's files, so it signs only a version equal to yours. Bring your files to it, Eg: with %s deployment pull, or check the difference above with the operator who signed it, then run this again. Nothing was written.", describe(g, de.Head), progname.Cmd()),
+			Hint:    "the system copy's files differ from the sites' newest version",
+			Explain: fmt.Sprintf("The sites hold %s. An attestation says this workstation holds that version's files, so it signs only a version equal to the system copy's. Bring the system copy to it with %s deployment pull, or check the difference above with the operator who signed it, then run this again. Nothing was written.", describe(g, de.Head), progname.Cmd()),
 		}
 	case err != nil:
 		return err

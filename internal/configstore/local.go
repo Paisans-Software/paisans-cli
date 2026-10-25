@@ -18,10 +18,12 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
-// Local is an operator's workstation: the directory holding paisans-stack.yaml,
-// secrets.enc.yaml and .sops.yaml, and beside them .paisans/ with what the
-// workstation remembers about the store (docs/specs/2026-10-12-config-store.md,
-// *Commands*).
+// Local is a deployment's system copy on an operator's workstation
+// (docs/specs/2026-10-24-system-copy.md): a directory in the data directory
+// holding paisans-stack.yaml, secrets.enc.yaml and .sops.yaml, and beside
+// them .paisans/ with what the workstation remembers about the store
+// (docs/specs/2026-10-12-config-store.md, *Commands*). A folder the operator
+// edits in is a draft and is never a Local.
 type Local struct{ Dir string }
 
 const (
@@ -39,15 +41,15 @@ const (
 
 func (l Local) state(name string) string { return filepath.Join(l.Dir, stateDir, name) }
 
-// ensureState creates .paisans/ and its .gitignore, which keeps this
-// operator's own state out of the repository the operators share: the cache,
-// this workstation's memory of every version it has seen; the incoming
-// files, a pull's scratch; the signing key, since a workstation that
-// checked out another operator's would anchor its trust on their signature;
-// and the head and the seen revision, which describe this workstation's
-// files and gathers. config-root is left out, so the operators can commit the
-// pin and share it. A .gitignore already there is the operator's, and is
-// left as it is.
+// ensureState creates the system copy's .paisans/ and its .gitignore, which
+// keeps this workstation's own state out of any repository the system
+// copy's directory is committed to: the cache, this workstation's memory of
+// every version it has seen; the incoming files, a pull's scratch; the
+// signing key, since a workstation that took another operator's would
+// anchor its trust on their signature; and the head, the seen revision and
+// the arrivals, which describe this workstation's files and gathers.
+// config-root is left out, since the pin is the same for every operator. A
+// .gitignore already there is left as it is.
 func (l Local) ensureState() error {
 	if err := os.MkdirAll(filepath.Join(l.Dir, stateDir), 0o755); err != nil {
 		return err
@@ -125,10 +127,10 @@ func (l Local) Root() (string, error) { return l.readSHA(rootFile) }
 // SetRoot pins sha as the root.
 func (l Local) SetRoot(sha string) error { return l.writeSHA(rootFile, sha) }
 
-// Head is the version the local files started from, "" when none did.
+// Head is the version the system copy's files are, "" when none is.
 func (l Local) Head() (string, error) { return l.readSHA(headFile) }
 
-// SetHead records sha as the version the local files started from.
+// SetHead records sha as the version the system copy's files are.
 func (l Local) SetHead(sha string) error { return l.writeSHA(headFile, sha) }
 
 // Seen is the highest revision of a trusted head any gather here has seen,
@@ -337,7 +339,7 @@ func (l Local) Anchor() (Anchor, error) {
 	return a, err
 }
 
-// Cache is the workstation's own store, .paisans/store.git, which holds every
+// Cache is the system copy's own store, .paisans/store.git, which holds every
 // version any gather has seen. Nothing is ever removed from it, so a site
 // that drops a version cannot make the workstation forget it.
 func (l Local) Cache() (Repo, error) {
@@ -1183,7 +1185,7 @@ func UnreachedError(g Gathered) error {
 	return errors.Join(errs...)
 }
 
-// DiffersError is local files that are not the sites' newest version. An
+// DiffersError is a system copy's files that are not the sites' newest version. An
 // attestation says the operator holds that version's files, which they have
 // checked; files that differ are not that check.
 type DiffersError struct {
@@ -1192,15 +1194,15 @@ type DiffersError struct {
 }
 
 func (e *DiffersError) Error() string {
-	return fmt.Sprintf("the local files differ from the sites' newest version %s, and only a version equal to the files you hold is attested", e.Head)
+	return fmt.Sprintf("the system copy's files differ from the sites' newest version %s, and only a version equal to the files this workstation holds is attested", e.Head)
 }
 
 // AttestTarget is the version an attestation signs: the single head of g,
-// which must equal the local files byte for byte, since those are the copy
-// the operator already trusts. With no local files at all it is the head the
+// which must equal the system copy l's files byte for byte, since those are
+// the copy the operator already trusts. With no files in l at all it is the head the
 // pinned root pin leads to, and write is true: the attestation writes the
 // head's files, as a recovery does. It refuses a fork, no head, files that
-// differ (a *DiffersError) and, with no local files, no pin.
+// differ (a *DiffersError) and, with no files, no pin.
 func AttestTarget(l Local, g Gathered, pin string) (head string, write bool, err error) {
 	heads := g.Verdict.Heads
 	switch {
@@ -1212,13 +1214,13 @@ func AttestTarget(l Local, g Gathered, pin string) (head string, write bool, err
 	head = heads[0]
 	if !l.HasFiles() {
 		if pin == "" || !slices.Contains(g.Roots(head), pin) {
-			return "", false, errors.New("there are no local files to compare the sites' newest version with, and no pinned root it descends from; pin the first version you trust with --root <sha>")
+			return "", false, errors.New("the system copy holds no files to compare the sites' newest version with, and no pinned root it descends from; pin the first version you trust with --root <sha>")
 		}
 		return head, true, nil
 	}
 	local, err := l.Files()
 	if err != nil {
-		return "", false, fmt.Errorf("read the local files: %w", err)
+		return "", false, fmt.Errorf("read the system copy's files: %w", err)
 	}
 	cache, err := l.Cache()
 	if err != nil {
