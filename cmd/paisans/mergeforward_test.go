@@ -384,6 +384,35 @@ func TestApplyGoesOnFromAnAttestation(t *testing.T) {
 	wantMerged(t, f.cfgPath, 3, head, "name: Bob Draft")
 }
 
+// publish, like apply, deploys a draft marked with the attested version on
+// the attestation, not refusing it as behind the sites.
+func TestPublishGoesOnFromAnAttestation(t *testing.T) {
+	f := newApplyStore(t, 1)
+	f.based(t)
+	att := f.sitesHold(t, f.files[0], f.shas[0], 2)
+	if err := f.write(replaced(t, f.files[0], bobName, "name: Bob Draft")); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	captureStdout(t, func() {
+		if err := runDeployment([]string{"publish", "--config", f.cfgPath, "--execute"}, noTerminalStdin(), &out); err != nil {
+			t.Fatal(problemText(err))
+		}
+	})
+	head, _ := f.sys.Head()
+	cache, _ := f.sys.Cache()
+	if head == att || cache.Revision(head) != 3 || !f.pushed() {
+		t.Fatalf("the draft was not published on the attestation: head %s\n%s", head, out.String())
+	}
+	vs := must(cache.Versions(os.DevNull))
+	for _, v := range vs {
+		if v.SHA == head && (len(v.Parents) != 1 || v.Parents[0] != att) {
+			t.Errorf("published on %v, want %s", v.Parents, att)
+		}
+	}
+	wantMerged(t, f.cfgPath, 3, head, "name: Bob Draft")
+}
+
 // pull of a draft marked with the attested version rewrites only its line,
 // to the attestation, and says the draft is up to date; a dry run writes
 // nothing.

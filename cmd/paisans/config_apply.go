@@ -316,7 +316,7 @@ func (v *gathered) next(r ui.Reporter, prev *appliedVersion, files configstore.F
 // returned.
 func (v *gathered) deployed(r ui.Reporter, s ui.Step, files configstore.Files, revision int, push func(sys configstore.Local) (string, []string, error)) (*appliedVersion, error) {
 	var a *appliedVersion
-	err := v.deploy(r, s, files, func(sys configstore.Local) (string, int, error) {
+	err := v.deploy(r, s, files, func(sys configstore.Local, r ui.Reporter, s ui.Step) (string, int, error) {
 		sha, pushed, err := push(sys)
 		if a, err = published(r, s, sha, pushed, err, revision, files); err != nil {
 			return sha, 0, err

@@ -606,7 +606,9 @@ paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # o
   `secrets.enc.yaml`, or an encrypted one with no recipient in `.sops.yaml`,
   before it reaches a site, and when the version the draft was drafted from is
   not the sites' newest, naming `deployment pull`, when the sites hold a fork
-  and `--merge` is not given, and when no site answers.
+  and `--merge` is not given, and when no site answers. Versions after the
+  draft's base that only sign its files again, as an attestation does, are not
+  newer: the draft is published on the sites' newest.
 * **`pull`:** moves the system copy to the sites' newest version and merges it
   into the draft by a three-way merge, from the version the draft's "drafted
   from" line names, or, without a usable line, the system copy's version

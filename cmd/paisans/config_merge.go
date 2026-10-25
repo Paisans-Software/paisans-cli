@@ -257,7 +257,7 @@ func writeMergedDraft(d draft.Draft, m merged) error {
 }
 
 // moveSystemCopy moves the system copy to head, the sites' newest version,
-// under its lock, records with record what the gather saw, and records the
+// its files written as head's, under its lock, records with record what the gather saw, and records the
 // head it is at (recordHead), source naming the command. It is refused
 // when the system copy moved from gathered, its head at the gather, since
 // then another command wrote it.
@@ -282,10 +282,10 @@ func moveSystemCopy(r ui.Reporter, sys configstore.Local, id, gathered, head, so
 	if cur != gathered {
 		return &ui.Problem{Hint: "another command moved the system copy", Explain: fmt.Sprintf("The system copy of %s moved from %s to %s since this command gathered the sites' versions. The merged draft is written; its \"drafted from\" line names the version merged. Run this again.", id, headName(gathered), headName(cur))}
 	}
-	if cur != head {
-		if err := sys.Checkout(head); err != nil {
-			return err
-		}
+	// Checked out even when it is at head already, so files edited in the
+	// data directory are put back to its version.
+	if err := sys.Checkout(head); err != nil {
+		return err
 	}
 	if err := record(sys); err != nil {
 		return err

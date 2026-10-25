@@ -132,8 +132,10 @@ func draftBase(r ui.Reporter, sys configstore.Local, g configstore.Gathered, pai
 // first deploy of a new deployment makes the system copy (stageSystem),
 // and one that fails leaves none, and leaves what the system copy's place
 // held as it was. A deploy records the version in the system copy's
-// saved.json, which deployment list shows.
-func (p *deployer) deploy(r ui.Reporter, s ui.Step, files configstore.Files, publish func(sys configstore.Local) (sha string, rev int, err error)) error {
+// saved.json, which deployment list shows. publish reports through the
+// reporter and the step it is given, which name the system copy's place
+// where a first deploy's output would name the directory it works in.
+func (p *deployer) deploy(r ui.Reporter, s ui.Step, files configstore.Files, publish func(sys configstore.Local, r ui.Reporter, s ui.Step) (sha string, rev int, err error)) error {
 	st, err := openStore()
 	if err != nil {
 		s.Fail(err)
@@ -164,7 +166,7 @@ func (p *deployer) deploy(r ui.Reporter, s ui.Step, files configstore.Files, pub
 		return &ui.Problem{Hint: "another deploy overtook this one", Explain: fmt.Sprintf("The system copy of %s moved from %s to %s since this command gathered the sites' versions, so what it would sign no longer builds on the newest. Nothing was published. Run %s %s again, which gathers again.", p.id, headName(p.head), headName(head), progname.Cmd(), p.again), Cause: moved}
 	}
 	if held {
-		sha, _, err := deployDraft(r, sys, p.d, files, func() (string, int, error) { return publish(sys) })
+		sha, _, err := deployDraft(r, sys, p.d, files, func() (string, int, error) { return publish(sys, r, s) })
 		if err != nil {
 			return err
 		}
@@ -180,7 +182,7 @@ func (p *deployer) deploy(r ui.Reporter, s ui.Step, files configstore.Files, pub
 		s.Fail(err)
 		return err
 	}
-	sha, _, err := deployDraft(staged, sys, p.d, files, func() (string, int, error) { return publish(sys) })
+	sha, _, err := deployDraft(staged, sys, p.d, files, func() (string, int, error) { return publish(sys, staged, stagedStep(staged, s)) })
 	if err == nil {
 		recordHead(staged, sys, p.source)
 	}

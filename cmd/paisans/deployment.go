@@ -475,6 +475,12 @@ func runDeploymentPublish(args []string, stdin io.Reader, stdout io.Writer) erro
 	}
 	g := t.g
 	t.again, t.source = "deployment publish --execute", "published from "+d.Dir
+	if heads := g.Verdict.Heads; !*merge && len(heads) == 1 && t.base != "" && heads[0] != t.base && unchangedSince(t.sys, g, t.base, heads[0]) {
+		// Versions that only sign the base's files again, as an
+		// attestation does, leave nothing to merge: the draft goes on
+		// from the sites' newest, and its publish rewrites the line.
+		t.base = heads[0]
+	}
 	parents, err := configstore.Parents(g, t.base, *merge)
 	if err != nil {
 		if g.Verdict.Fork && !*merge {
@@ -515,7 +521,7 @@ func runDeploymentPublish(args []string, stdin io.Reader, stdout io.Writer) erro
 		revision = max(revision, g.Versions[p].Revision+1)
 	}
 	var sha string
-	err = t.deploy(r, s, files, func(sys configstore.Local) (string, int, error) {
+	err = t.deploy(r, s, files, func(sys configstore.Local, r ui.Reporter, s ui.Step) (string, int, error) {
 		var pushed []string
 		var err error
 		sha, pushed, err = configstore.PublishOn(sys, g, t.base, files, sites, key, configSignWith(key), *merge, configNow())

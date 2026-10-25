@@ -4794,9 +4794,9 @@ sites' newest.
   merge key (`<<`) is refused, since a merge cannot place one; write out the
   values they share by hand.
 * Versions after the base that only sign its files again, as an attestation by
-  `operator register` does, leave nothing to merge: `apply` deploys the draft
-  on the sites' newest, and `pull` rewrites only the draft's "drafted from"
-  line and says the draft is up to date.
+  `operator register` does, leave nothing to merge: `apply` and `deployment
+  publish` deploy the draft on the sites' newest, and `pull` rewrites only the
+  draft's "drafted from" line and says the draft is up to date.
 * The secrets merge key by key after decryption, as *Secrets are merged key by
   key* describes.
 * A path both sides changed differently is a conflict: the draft keeps its own

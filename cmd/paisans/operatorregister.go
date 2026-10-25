@@ -415,6 +415,15 @@ func (r renamingReporter) Result(format string, args ...any) {
 	r.Reporter.Result("%s", r.n(fmt.Sprintf(format, args...)))
 }
 
+// stagedStep is s reporting through r: renaming as r does when r is a
+// renamingReporter, as stageSystem's staged is, else s itself.
+func stagedStep(r ui.Reporter, s ui.Step) ui.Step {
+	if rr, ok := r.(renamingReporter); ok {
+		return renamingStep{s, rr}
+	}
+	return s
+}
+
 type renamingStep struct {
 	ui.Step
 	r renamingReporter

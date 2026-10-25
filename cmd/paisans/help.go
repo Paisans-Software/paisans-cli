@@ -355,7 +355,7 @@ var helpCommands = []helpCommand{
 		summary: "Sign the draft and push it to every site.",
 		usage:   []string{"paisans deployment publish [--config " + config.FileName + "] [--merge] [--execute] [--yes]"},
 		detail: "Sign the draft's " + config.FileName + ", secrets.enc.yaml and .sops.yaml as a version on the one it was drafted from and push it to every site; --merge builds on every head of a fork. " +
-			"A draft drafted from an older version than the sites' newest is refused, naming deployment pull, which merges it forward. With --execute the published files become the system copy, and the draft's \"drafted from\" line names the new version." +
+			"A draft drafted from an older version than the sites' newest is refused, naming deployment pull, which merges it forward, unless the versions after it only sign its files again, as an attestation does. With --execute the published files become the system copy, and the draft's \"drafted from\" line names the new version." +
 			configTrust,
 	},
 	{

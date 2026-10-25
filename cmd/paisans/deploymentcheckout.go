@@ -65,11 +65,11 @@ func runDeploymentCheckout(args []string) error {
 	var m draft.Marker
 	var files configstore.Files
 	if *head == "" {
-		saved, err := verifiedRecord(sys, deploymentID)
+		saved, err := verifiedRecord(sys, deploymentID, path)
 		if err != nil {
 			return err
 		}
-		if _, err := judgeSaved(sys, saved); err != nil {
+		if _, err := judgeSaved(sys, saved, path); err != nil {
 			return err
 		}
 		if m, files, err = systemHead(sys); err != nil {
@@ -104,18 +104,20 @@ func runDeploymentCheckout(args []string) error {
 
 // verifiedRecord is the record of deployment id's system copy, refused
 // unless it says the copy holds a verified version: an unverified or forked
-// copy has no one trusted version to draft from.
-func verifiedRecord(sys configstore.Local, id string) (localstore.Saved, error) {
+// copy has no one trusted version to draft from. path is the draft's
+// paisans-stack.yaml, which the refusals name.
+func verifiedRecord(sys configstore.Local, id, path string) (localstore.Saved, error) {
+	again := pullAgain(id, path)
 	st, err := openStore()
 	if err != nil {
 		return localstore.Saved{}, err
 	}
 	rec, ok, err := st.Load(id)
 	if err != nil {
-		return rec, &ui.Problem{Hint: "the system copy of " + id + " cannot be read", Explain: errLine(err) + ", in " + sys.Dir + ". deployment fetch --ssh <user@host> saves it again from a host that holds it.", Cause: err}
+		return rec, &ui.Problem{Hint: "the system copy of " + id + " cannot be read", Explain: errLine(err) + ", in " + sys.Dir + ". " + again, Cause: err}
 	}
 	if !ok {
-		return rec, &ui.Problem{Hint: "the system copy of " + id + " has no record", Explain: "Nothing in " + sys.Dir + " says which version it holds. deployment fetch --ssh <user@host> saves it again from a host that holds it."}
+		return rec, &ui.Problem{Hint: "the system copy of " + id + " has no record", Explain: "Nothing in " + sys.Dir + " says which version it holds. " + again}
 	}
 	recoverLine := progname.Cmd() + " deployment recover --from <user@host> --id " + id + " --root <sha> --config <empty directory>/" + config.FileName + " --execute"
 	switch rec.Status {
@@ -126,7 +128,13 @@ func verifiedRecord(sys configstore.Local, id string) (localstore.Saved, error) 
 	case localstore.Fork:
 		return rec, &ui.Problem{Hint: "the system copy of " + id + " is a fork", Explain: fmt.Sprintf("Two trusted versions build on one parent, so there is no one version to check out. Check out each head with --head <sha>, as deployment log lists them, or recover the deployment instead: %s.", recoverLine)}
 	}
-	return rec, &ui.Problem{Hint: fmt.Sprintf("the system copy of %s has status %q", id, rec.Status), Explain: "Only a verified copy is checked out. deployment fetch --ssh <user@host> saves it again."}
+	return rec, &ui.Problem{Hint: fmt.Sprintf("the system copy of %s has status %q", id, rec.Status), Explain: "Only a verified copy is checked out. " + again}
+}
+
+// pullAgain is the pull that records deployment id's system copy again, at
+// the sites' newest version, and starts the draft at path from it.
+func pullAgain(id, path string) string {
+	return progname.Cmd() + " deployment pull --id " + id + " --config " + path + " --execute moves it to the sites' newest version, records it, and starts the draft here."
 }
 
 // trustedHead is version sha of the system copy's store when its own anchor
@@ -173,9 +181,10 @@ type savedTrust struct {
 // judgeSaved judges the system copy src as deployment log would, from its own
 // anchor and reaching no site, and refuses one whose head is not a trusted
 // version at the revision its record says, or whose files are not that
-// version's.
-func judgeSaved(src configstore.Local, rec localstore.Saved) (savedTrust, error) {
-	again := "deployment fetch --ssh <user@host> saves it again from a host that holds it."
+// version's. path is the draft's paisans-stack.yaml, which the refusals
+// name.
+func judgeSaved(src configstore.Local, rec localstore.Saved, path string) (savedTrust, error) {
+	again := pullAgain(rec.ID, path)
 	if _, err := os.Stat(filepath.Join(src.Dir, ".paisans", "store.git", "HEAD")); err != nil {
 		return savedTrust{}, &ui.Problem{Hint: "the system copy of " + rec.ID + " has no store", Explain: "Nothing in " + filepath.Join(src.Dir, ".paisans", "store.git") + " to check the version against. " + again, Cause: err}
 	}

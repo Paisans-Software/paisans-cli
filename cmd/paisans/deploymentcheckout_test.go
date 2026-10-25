@@ -314,11 +314,46 @@ func TestCheckoutRefusesEditedSavedFiles(t *testing.T) {
 	}
 	dir := t.TempDir()
 	err := checkout(dir, "--execute")
-	if text := problemText(err); err == nil || !strings.Contains(text, "deployment fetch") {
+	if text := problemText(err); err == nil || !strings.Contains(text, "deployment pull --id "+fixtureID(t)) {
 		t.Fatalf("got %v\n%s", err, text)
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 		t.Errorf("wrote %v", entries)
+	}
+}
+
+// The pull a refused checkout names puts back the files of a system copy
+// already at the sites' newest version, and starts the draft from it.
+func TestCheckoutRefusalPullRestoresSavedFiles(t *testing.T) {
+	c := newSavedCopy(t)
+	if err := c.l.Checkout(c.shas[1]); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.st.Record(localstore.Saved{ID: fixtureID(t), Domain: "example.org", SHA: c.shas[1], Revision: 2, Status: localstore.Verified, Source: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	edited := c.files[1]
+	edited.Paisans = append(append([]byte{}, edited.Paisans...), "# local\n"...)
+	if err := c.l.WriteFiles(edited); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, config.FileName)
+	if err := checkout(dir, "--execute"); err == nil {
+		t.Fatal("checkout of edited system files was not refused")
+	}
+	if err := runDeployment([]string{"pull", "--id", fixtureID(t), "--config", path, "--execute"}, noTerminalStdin(), &bytes.Buffer{}); err != nil {
+		t.Fatalf("pull: %v\n%s", err, problemText(err))
+	}
+	files, err := readCheckoutFiles(c.l.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(files.Paisans, c.files[1].Paisans) {
+		t.Errorf("system copy's paisans-stack.yaml is\n%s\nwant\n%s", files.Paisans, c.files[1].Paisans)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("no draft started: %v", err)
 	}
 }
 

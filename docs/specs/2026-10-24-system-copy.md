@@ -209,7 +209,8 @@ undo flags and the stale-draft warning cover a draft whatever its base.
    and moves no files, and says what an `--execute` run would merge.
 
 `deployment publish` deploys a draft whose base is the sites' newest version
-as apply does, and refuses one whose base is older, naming `deployment pull`,
+as apply does, an attestation's versions after the base included as step 3
+takes them, and refuses one whose base is older, naming `deployment pull`,
 which merges it forward as step 4 does.
 
 A deployed draft's files become the system copy, and the draft's "drafted

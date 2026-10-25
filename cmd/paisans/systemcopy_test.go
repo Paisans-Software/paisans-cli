@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/draft"
 	"github.com/paisans-software/paisans-cli/internal/localstore"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // withDataDir points the workstation's data directory at a directory of the
@@ -362,4 +364,45 @@ func wantDraftOf(t *testing.T, dir string, sys configstore.Local) {
 		t.Error("the draft's files are not the system copy's head's")
 	}
 	noFolderState(t, dir)
+}
+
+// A first deploy that fails reports through output that names the system
+// copy's place, never the directory the run worked in, which it removes.
+func TestFirstDeployFailureNamesSystemCopy(t *testing.T) {
+	withDataDir(t)
+	st, err := openStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := fixtureID(t)
+	dir := t.TempDir()
+	d, err := draftAt(filepath.Join(dir, config.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b bytes.Buffer
+	r := ui.NewPlain(&b, true)
+	p := &deployer{id: id, d: d, again: "deployment apply --execute", source: "test"}
+	var worked string
+	err = p.deploy(r, r.Step("sign and push the version"), configstore.Files{Paisans: []byte("id: " + id + "\n")}, func(sys configstore.Local, r ui.Reporter, s ui.Step) (string, int, error) {
+		worked = sys.Dir
+		failed := fmt.Errorf("cannot write %s", filepath.Join(sys.Dir, ".paisans", "store.git"))
+		r.Warn("the push stopped", "in "+sys.Dir)
+		s.Fail(failed)
+		return "", 0, failed
+	})
+	if err == nil {
+		t.Fatal("the failed publish was not returned")
+	}
+	place := filepath.Join(st.Base, "deployments", id)
+	out := b.String() + problemText(err)
+	if worked == "" || strings.Contains(out, worked) {
+		t.Errorf("output names the directory the run worked in, %s:\n%s", worked, out)
+	}
+	if !strings.Contains(out, place) {
+		t.Errorf("output does not name the system copy's place, %s:\n%s", place, out)
+	}
+	if _, err := os.Stat(worked); !os.IsNotExist(err) {
+		t.Errorf("the directory the run worked in is left: %v", err)
+	}
 }
