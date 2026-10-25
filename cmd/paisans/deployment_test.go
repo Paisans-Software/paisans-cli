@@ -17,6 +17,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
+	"github.com/paisans-software/paisans-cli/internal/draft"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/version"
 )
@@ -232,6 +233,7 @@ func must[T any](v T, err error) T {
 // A recovery that reaches one of the fixture's four sites directly writes
 // the files at no terminal, with nothing asked.
 func TestConfigRecoverFromOneSiteAsksNothing(t *testing.T) {
+	withDataDir(t)
 	sha, answer, f := storedVersion(t)
 	recoverHosts(t, answer)
 	dir := t.TempDir()
@@ -244,7 +246,7 @@ func TestConfigRecoverFromOneSiteAsksNothing(t *testing.T) {
 	if strings.Contains(out.String(), "partial") {
 		t.Fatalf("output names partial: %q", out.String())
 	}
-	l := configstore.Local{Dir: dir}
+	l := heldCopy(t)
 	got, err := l.Files()
 	if err != nil || !got.Equal(f) {
 		t.Fatalf("files %v", err)
@@ -259,6 +261,7 @@ func TestConfigRecoverFromOneSiteAsksNothing(t *testing.T) {
 
 // Without --execute a recovery writes nothing.
 func TestConfigRecoverDryRunWritesNothing(t *testing.T) {
+	withDataDir(t)
 	sha, answer, _ := storedVersion(t)
 	recoverHosts(t, answer)
 	dir := t.TempDir()
@@ -270,11 +273,13 @@ func TestConfigRecoverDryRunWritesNothing(t *testing.T) {
 	if (configstore.Local{Dir: dir}).HasFiles() {
 		t.Fatal("files written")
 	}
+	noSystemCopy(t)
 }
 
 // A recovery names the directory it writes into as a full path, even when
 // --config is relative: "recover into ." does not say where the files went.
 func TestConfigRecoverPrintsTheDirectoryInFull(t *testing.T) {
+	withDataDir(t)
 	sha, answer, _ := storedVersion(t)
 	recoverHosts(t, answer)
 	t.Chdir(t.TempDir())
@@ -293,6 +298,7 @@ func TestConfigRecoverPrintsTheDirectoryInFull(t *testing.T) {
 
 // Recovery is onto a workstation with nothing, and needs an anchor.
 func TestConfigRecoverRefusals(t *testing.T) {
+	withDataDir(t)
 	sha, answer, _ := storedVersion(t)
 	recoverHosts(t, answer)
 	dir := t.TempDir()
@@ -311,80 +317,106 @@ func TestConfigRecoverRefusals(t *testing.T) {
 	}
 }
 
-// pullWorkstation is a workstation holding files, based on base, with the
-// root pinned, and every site of the fixture answering.
-func pullWorkstation(t *testing.T, answer, root, base string, f configstore.Files) configstore.Local {
+// pullCase is a system copy, embedded, and a draft of it in a folder of
+// its own, for a pull.
+type pullCase struct {
+	configstore.Local
+	// dir is the draft's folder, and cfg its paisans-stack.yaml.
+	dir, cfg string
+}
+
+// draft is the draft's files as a version holds them: its "drafted from"
+// line stripped and its blueprints snapshotted.
+func (p pullCase) draft(t *testing.T) configstore.Files {
+	t.Helper()
+	f, err := draft.Draft{Dir: p.dir}.Files()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Paisans = draft.StripMarker(f.Paisans)
+	return snapshotted(f)
+}
+
+// pullWorkstation is the fixture deployment's system copy at base, holding
+// files, with the root pinned, and a draft of files with no "drafted from"
+// line, so the system copy's version is its base, with every site of the
+// fixture answering.
+func pullWorkstation(t *testing.T, answer, root, base string, f configstore.Files) pullCase {
 	t.Helper()
 	recoverHosts(t, answer)
 	configSiteTransport = func(name string, _ config.Site) apply.Transport {
 		return &storeHost{name: name, answer: answer}
 	}
-	l := configstore.Local{Dir: t.TempDir()}
+	l := withSystemCopy(t, fixtureDeploymentID)
 	if err := l.WriteFiles(f); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.SetRoot(root); err != nil {
-		t.Fatal(err)
+	if root != "" {
+		if err := l.SetRoot(root); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := l.SetHead(base); err != nil {
 		t.Fatal(err)
 	}
-	return l
+	dir := t.TempDir()
+	if err := configstore.WriteFilesTo(dir, f); err != nil {
+		t.Fatal(err)
+	}
+	return pullCase{Local: l, dir: dir, cfg: filepath.Join(dir, config.FileName)}
 }
 
-// With no local edits, pull moves the files to the sites' head; a dry run
-// does not.
+// With no draft edits, pull moves the draft and the system copy to the
+// sites' head; a dry run does not.
 func TestConfigPullMovesUneditedFiles(t *testing.T) {
 	shas, answer, files := storedHistory(t, 2, 0)
 	l := pullWorkstation(t, answer, shas[0], shas[0], files[0])
-	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
 	var out bytes.Buffer
-	if err := runDeployment([]string{"pull", "--config", cfgPath}, noTerminalStdin(), &out); err != nil {
-		t.Fatal(err)
+	if err := runDeployment([]string{"pull", "--config", l.cfg}, noTerminalStdin(), &out); err != nil {
+		t.Fatal(problemText(err))
 	}
-	if h, _ := l.Head(); h != shas[0] {
-		t.Fatalf("a dry run moved the head to %s", h)
+	if h, _ := l.Head(); h != shas[0] || !l.draft(t).Equal(files[0]) {
+		t.Fatalf("a dry run moved the head to %s, or wrote the draft", h)
 	}
-	if err := runDeployment([]string{"pull", "--config", cfgPath, "--execute"}, noTerminalStdin(), &out); err != nil {
-		t.Fatal(err)
+	if err := runDeployment([]string{"pull", "--config", l.cfg, "--execute"}, noTerminalStdin(), &out); err != nil {
+		t.Fatal(problemText(err))
 	}
 	got, _ := l.Files()
-	if h, _ := l.Head(); h != shas[1] || !got.Equal(files[1]) {
-		t.Fatalf("head %s, files moved %v", h, got.Equal(files[1]))
+	if h, _ := l.Head(); h != shas[1] || !got.Equal(files[1]) || !l.draft(t).Equal(files[1]) {
+		t.Fatalf("head %s, files moved %v, draft moved %v", h, got.Equal(files[1]), l.draft(t).Equal(files[1]))
 	}
 }
 
-// Over local edits, pull refuses, shows the difference, and with --execute
-// leaves the head's files in .paisans/incoming/ and the local ones alone.
-func TestConfigPullOverEditsRefusesAndShowsTheDifference(t *testing.T) {
+// Over draft edits, pull merges, shows the merged draft against the head,
+// the secrets by key name only, and never writes a .paisans/ or an
+// incoming/ in the folder.
+func TestConfigPullOverEditsShowsTheDifference(t *testing.T) {
 	shas, answer, files := storedHistory(t, 2, 0)
 	edited := files[0]
-	edited.Paisans = append(append([]byte{}, edited.Paisans...), "# mine\n"...)
+	edited.Paisans = []byte(strings.Replace(string(edited.Paisans), "name: Bob Example", "name: Bob Mine", 1))
 	edited.Secrets = []byte("a: 1\nb: 2\n")
 	l := pullWorkstation(t, answer, shas[0], shas[0], edited)
+	rep := plainReporter(t)
 	var out bytes.Buffer
-	err := runDeployment([]string{"pull", "--config", filepath.Join(l.Dir, "paisans-stack.yaml"), "--execute"}, noTerminalStdin(), &out)
-	if err == nil || !strings.Contains(problemText(err), "--merge") {
-		t.Fatalf("pull over edits: %v", err)
+	if err := runDeployment([]string{"pull", "--config", l.cfg, "--execute"}, noTerminalStdin(), &out); err != nil {
+		t.Fatal(problemText(err))
 	}
-	for _, want := range []string{"-# mine", "+# edited", "secrets.enc.yaml differs"} {
-		if !strings.Contains(out.String(), want) {
-			t.Errorf("output lacks %q:\n%s", want, out.String())
+	shown := rep.String() + out.String()
+	for _, want := range []string{"-    name: Bob Example", "+    name: Bob Mine", "secrets.enc.yaml differs"} {
+		if !strings.Contains(shown, want) {
+			t.Errorf("output lacks %q:\n%s", want, shown)
 		}
 	}
-	if strings.Contains(out.String(), "a: 1") {
+	if strings.Contains(shown, "a: 1") {
 		t.Error("a secret value was printed")
 	}
-	in := configstore.Local{Dir: l.Incoming()}
-	if got, err := in.Files(); err != nil || !got.Equal(files[1]) {
-		t.Fatalf("incoming %v", err)
+	if got := string(must(os.ReadFile(l.cfg))); !strings.Contains(got, "name: Bob Mine") {
+		t.Errorf("the draft is not the merge:\n%s", got)
 	}
-	if got, _ := l.Files(); !got.Equal(edited) {
-		t.Fatal("the local files were overwritten")
+	if h, _ := l.Head(); h != shas[1] {
+		t.Fatalf("head %s", h)
 	}
-	if h, _ := l.Head(); h != shas[0] {
-		t.Fatalf("head moved to %s", h)
-	}
+	noFolderState(t, l.dir)
 }
 
 func TestSecretsKeyChangesNamesKeysOnly(t *testing.T) {
@@ -552,7 +584,7 @@ func TestConfigDryRunsDoNotSync(t *testing.T) {
 	l := pullWorkstation(t, answer, shas[0], shas[0], files[0])
 	var runs []string
 	allSitesUp(answer, &runs)
-	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
+	cfgPath := l.cfg
 	var out bytes.Buffer
 	for _, sub := range []string{"pull", "log"} {
 		if err := runDeployment([]string{sub, "--config", cfgPath}, noTerminalStdin(), &out); err != nil {
@@ -594,7 +626,7 @@ func TestDryRunGatherNotesTheSkippedSyncOnlyWithPeers(t *testing.T) {
 			sites[n] = &storeHost{name: n, answer: answer}
 		}
 		var b bytes.Buffer
-		if _, err := gatherAt(ui.NewPlain(&b, false), l, sites, id.ID, a, gatherMode{}, noTerminalStdin(), io.Discard); err != nil {
+		if _, err := gatherAt(ui.NewPlain(&b, false), l.Local, sites, id.ID, a, gatherMode{}, noTerminalStdin(), io.Discard); err != nil {
 			t.Fatalf("%d sites: %v", len(sites), problemText(err))
 		}
 		if got := strings.Contains(b.String(), note); got != tc.want {
@@ -613,14 +645,14 @@ func TestConfigPullAsksRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	err := runDeployment([]string{"pull", "--config", filepath.Join(l.Dir, "paisans-stack.yaml"), "--execute"}, noTerminalStdin(), &out)
+	err := runDeployment([]string{"pull", "--config", l.cfg, "--execute"}, noTerminalStdin(), &out)
 	if err == nil || !strings.Contains(err.Error(), "rollback") {
 		t.Fatalf("got %v", err)
 	}
-	if got, _ := l.Files(); !got.Equal(files[0]) {
+	if got, _ := l.Files(); !got.Equal(files[0]) || !l.draft(t).Equal(files[0]) {
 		t.Fatal("files written")
 	}
-	if err := runDeployment([]string{"pull", "--config", filepath.Join(l.Dir, "paisans-stack.yaml"), "--execute"}, answering(t, "rollback\n"), &out); err != nil {
+	if err := runDeployment([]string{"pull", "--config", l.cfg, "--execute"}, answering(t, "rollback\n"), &out); err != nil {
 		t.Fatal(err)
 	}
 	if h, _ := l.Head(); h != shas[1] {
@@ -638,7 +670,7 @@ func TestConfigPublishAfterAnAcceptedRollback(t *testing.T) {
 	l := pullWorkstation(t, answer, shas[0], shas[0], files[0])
 	seenPath := filepath.Join(l.Dir, ".paisans", "config-seen")
 	os.WriteFile(seenPath, []byte("9 "+strings.Repeat("b", 40)+"\n"), 0o644)
-	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
+	cfgPath := l.cfg
 	var out bytes.Buffer
 	if err := runDeployment([]string{"pull", "--config", cfgPath, "--execute"}, answering(t, "rollback\n"), &out); err != nil {
 		t.Fatal(err)
@@ -649,14 +681,15 @@ func TestConfigPublishAfterAnAcceptedRollback(t *testing.T) {
 	t.Cleanup(func() { agentKeys, configSignWith = savedKeys, savedSign })
 	edited := files[1]
 	edited.Paisans = append(append([]byte{}, edited.Paisans...), "# next\n"...)
-	if err := l.WriteFiles(edited); err != nil {
+	if err := configstore.WriteFilesTo(l.dir, edited); err != nil {
 		t.Fatal(err)
 	}
+	sys := l.Local
 	if err := runDeployment([]string{"publish", "--config", cfgPath, "--execute"}, noTerminalStdin(), &out); err != nil {
 		t.Fatal(err)
 	}
-	head, _ := l.Head()
-	b, _ := os.ReadFile(seenPath)
+	head, _ := sys.Head()
+	b, _ := os.ReadFile(filepath.Join(sys.Dir, ".paisans", "config-seen"))
 	if head == shas[1] || string(b) != "3 "+head+"\n" {
 		t.Fatalf("head %s, seen %q", head, b)
 	}
@@ -669,7 +702,7 @@ func TestConfigRollbackIsReportedWithoutAsking(t *testing.T) {
 	l := pullWorkstation(t, answer, shas[0], shas[1], files[1])
 	seen := "9 " + strings.Repeat("b", 40)
 	os.WriteFile(filepath.Join(l.Dir, ".paisans", "config-seen"), []byte(seen+"\n"), 0o644)
-	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
+	cfgPath := l.cfg
 	var rep, out bytes.Buffer
 	reporterOverride = ui.NewPlain(&rep, false)
 	if err := runDeployment([]string{"log", "--config", cfgPath}, noTerminalStdin(), &out); err != nil {
@@ -702,12 +735,8 @@ func TestConfigRollbackIsReportedWithoutAsking(t *testing.T) {
 // behind.
 func TestConfigATriedRootRaisesNothing(t *testing.T) {
 	shas, answer, files := storedHistory(t, 2, 0)
-	recoverHosts(t, answer)
-	allSitesUp(answer, nil)
-	l := configstore.Local{Dir: t.TempDir()}
-	l.WriteFiles(files[0])
-	l.SetHead(shas[0])
-	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
+	l := pullWorkstation(t, answer, "", shas[0], files[0])
+	cfgPath := l.cfg
 	var out bytes.Buffer
 	for _, sub := range []string{"log", "pull"} {
 		if err := runDeployment([]string{sub, "--root", shas[0], "--config", cfgPath}, noTerminalStdin(), &out); err != nil {
@@ -728,59 +757,67 @@ func TestConfigATriedRootRaisesNothing(t *testing.T) {
 // A site holding mallory's versions, longer than the real history, moves
 // nothing: pull keeps the files, and recover writes the real head's.
 func TestConfigForgedVersionsChangeNoFiles(t *testing.T) {
+	withDataDir(t)
 	shas, answer, files := storedHistory(t, 2, 3)
 	l := pullWorkstation(t, answer, shas[0], shas[1], files[1])
 	var out bytes.Buffer
-	if err := runDeployment([]string{"pull", "--config", filepath.Join(l.Dir, "paisans-stack.yaml"), "--execute"}, noTerminalStdin(), &out); err != nil {
-		t.Fatal(err)
+	if err := runDeployment([]string{"pull", "--config", l.cfg, "--execute"}, noTerminalStdin(), &out); err != nil {
+		t.Fatal(problemText(err))
 	}
-	if got, _ := l.Files(); !got.Equal(files[1]) {
+	if got, _ := l.Files(); !got.Equal(files[1]) || !l.draft(t).Equal(files[1]) {
 		t.Fatal("pull changed the files")
 	}
 	if h, _ := l.Head(); h != shas[1] {
 		t.Fatalf("head %s", h)
 	}
+	// The recovery is onto a workstation with no system copy.
+	withDataDir(t)
 	dir := t.TempDir()
 	err := runDeployment([]string{"recover", "--from", "ubuntu@203.0.113.9", "--root", shas[0], "--config", filepath.Join(dir, "paisans-stack.yaml"), "--execute"}, noTerminalStdin(), &out)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := configstore.Local{Dir: dir}
+	r := heldCopy(t)
 	if got, _ := r.Files(); !got.Equal(files[1]) {
 		t.Fatalf("recover wrote %q", got.Paisans[len(got.Paisans)-20:])
 	}
 }
 
-// A recovery that finds a fork writes each head's files to incoming/<sha>
-// with --execute and chooses neither.
-func TestConfigRecoverOnAForkWritesEachHead(t *testing.T) {
+// A recovery that finds a fork refuses, choosing neither head, and names the
+// merge an operator who holds the files makes: it makes no system
+// copy, writes nothing in the folder, and leaves no directory it worked in.
+func TestRecoverForkRefuses(t *testing.T) {
+	withDataDir(t)
 	key, pub := testKey(t)
 	s := newStore(t)
 	yaml := fixtureAs(t, pub)
 	root, _ := s.commit(t, yaml, "", nil, 1, key)
-	a, fa := s.commit(t, yaml, "# a\n", []string{root}, 2, key)
-	b, fb := s.commit(t, yaml, "# b\n", []string{root}, 2, key)
+	s.commit(t, yaml, "# a\n", []string{root}, 2, key)
+	s.commit(t, yaml, "# b\n", []string{root}, 2, key)
 	answer := s.answer(t)
 	recoverHosts(t, answer)
 	allSitesUp(answer, nil)
-	dir := t.TempDir()
-	var out bytes.Buffer
-	err := runDeployment([]string{"recover", "--from", "ubuntu@203.0.113.9", "--root", root, "--config", filepath.Join(dir, "paisans-stack.yaml"), "--execute"}, noTerminalStdin(), &out)
-	if err == nil || !strings.Contains(problemText(err), "publish --merge") {
-		t.Fatalf("got %v", err)
-	}
-	l := configstore.Local{Dir: dir}
-	if l.HasFiles() {
-		t.Fatal("a fork's recovery wrote the files")
-	}
-	for sha, want := range map[string]configstore.Files{a: fa, b: fb} {
-		got, err := (configstore.Local{Dir: l.IncomingFor(sha)}).Files()
-		if err != nil || !got.Equal(want) {
-			t.Fatalf("incoming %s: %v", sha[:12], err)
+	for _, execute := range []bool{false, true} {
+		dir := t.TempDir()
+		args := []string{"recover", "--from", "ubuntu@203.0.113.9", "--root", root, "--config", filepath.Join(dir, "paisans-stack.yaml")}
+		if execute {
+			args = append(args, "--execute")
 		}
-		if fi, err := os.Stat(filepath.Join(l.IncomingFor(sha), "secrets.enc.yaml")); err != nil || fi.Mode().Perm() != 0o600 {
-			t.Fatalf("secrets mode %v %v", fi.Mode(), err)
+		err := runDeployment(args, noTerminalStdin(), &bytes.Buffer{})
+		text := problemText(err)
+		for _, want := range []string{"the sites hold a fork", "deployment publish --merge", "run this recovery again"} {
+			if err == nil || !strings.Contains(text, want) {
+				t.Errorf("execute %v: lacks %q: %v", execute, want, text)
+			}
 		}
+		if strings.Contains(text, "checkout") {
+			t.Errorf("execute %v: names a checkout with no system copy to check out from: %v", execute, text)
+		}
+		entries, _ := os.ReadDir(dir)
+		if len(entries) != 0 {
+			t.Errorf("execute %v: the folder holds %d entries", execute, len(entries))
+		}
+		noSystemCopy(t)
 	}
 }
 
@@ -797,15 +834,15 @@ func TestConfigPublishDryRunChecksTheSigner(t *testing.T) {
 	agentKeys = func() []string { return []string{other} }
 	t.Cleanup(func() { agentKeys = saved })
 	var out bytes.Buffer
-	err := runDeployment([]string{"publish", "--config", filepath.Join(l.Dir, "paisans-stack.yaml")}, noTerminalStdin(), &out)
+	err := runDeployment([]string{"publish", "--config", l.cfg}, noTerminalStdin(), &out)
 	if err == nil || !strings.Contains(err.Error(), "belongs to no operator") {
 		t.Fatalf("got %v", err)
 	}
 }
 
 // Typing rollback lowers the seen record only once the command commits: a
-// pull that is given the word and then stops at local edits leaves it as it
-// was.
+// pull that is given the word and then stops, another command holding the
+// system copy's lock, leaves it as it was.
 func TestConfigRollbackThenRefusedPullLeavesSeen(t *testing.T) {
 	shas, answer, files := storedHistory(t, 2, 0)
 	edited := files[0]
@@ -816,9 +853,11 @@ func TestConfigRollbackThenRefusedPullLeavesSeen(t *testing.T) {
 	if err := os.WriteFile(seenPath, []byte(seen), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	unlock := must(must(openStore()).Lock(fixtureDeploymentID))
+	defer unlock()
 	var out bytes.Buffer
-	err := runDeployment([]string{"pull", "--config", filepath.Join(l.Dir, "paisans-stack.yaml"), "--execute"}, answering(t, "rollback\n"), &out)
-	if err == nil || !strings.Contains(problemText(err), "edits") || !strings.Contains(out.String(), "Type 'rollback'") {
+	err := runDeployment([]string{"pull", "--config", l.cfg, "--execute"}, answering(t, "rollback\n"), &out)
+	if err == nil || !strings.Contains(problemText(err), "another command is writing the system copy") || !strings.Contains(out.String(), "Type 'rollback'") {
 		t.Fatalf("got %v\n%s", problemText(err), out.String())
 	}
 	if b, _ := os.ReadFile(seenPath); string(b) != seen {
@@ -833,15 +872,14 @@ func TestConfigRollbackThenRefusedPullLeavesSeen(t *testing.T) {
 // revision seen.
 func TestConfigRefusedPullWithRootRecordsNothing(t *testing.T) {
 	shas, answer, files := storedHistory(t, 2, 0)
-	recoverHosts(t, answer)
-	l := configstore.Local{Dir: t.TempDir()}
 	edited := files[0]
 	edited.Paisans = append(append([]byte{}, edited.Paisans...), "# local edit\n"...)
-	l.WriteFiles(edited)
-	l.SetHead(shas[0])
+	l := pullWorkstation(t, answer, "", shas[0], edited)
+	unlock := must(must(openStore()).Lock(fixtureDeploymentID))
+	defer unlock()
 	var out bytes.Buffer
-	err := runDeployment([]string{"pull", "--root", shas[0], "--config", filepath.Join(l.Dir, "paisans-stack.yaml"), "--execute"}, noTerminalStdin(), &out)
-	if err == nil || !strings.Contains(problemText(err), "edits") {
+	err := runDeployment([]string{"pull", "--root", shas[0], "--config", l.cfg, "--execute"}, noTerminalStdin(), &out)
+	if err == nil || !strings.Contains(problemText(err), "another command is writing the system copy") {
 		t.Fatalf("got %v", problemText(err))
 	}
 	if rev, _, _ := l.Seen(); rev != 0 {
@@ -859,10 +897,9 @@ func TestConfigDryRunsRecordNothingSeen(t *testing.T) {
 	saved := agentKeys
 	agentKeys = func() []string { return []string{pub} }
 	t.Cleanup(func() { agentKeys = saved })
-	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
 	var out bytes.Buffer
 	for _, sub := range []string{"pull", "log", "publish"} {
-		if err := runDeployment([]string{sub, "--config", cfgPath}, noTerminalStdin(), &out); err != nil {
+		if err := runDeployment([]string{sub, "--config", l.cfg}, noTerminalStdin(), &out); err != nil {
 			t.Fatalf("%s: %v", sub, err)
 		}
 		if rev, _, _ := l.Seen(); rev != 0 {
@@ -872,7 +909,8 @@ func TestConfigDryRunsRecordNothingSeen(t *testing.T) {
 }
 
 // A first version published from one site of four that answered, holding
-// nothing, is signed and pushed at no terminal, with nothing asked.
+// nothing, is signed and pushed at no terminal, with nothing asked, and
+// makes the deployment's system copy.
 func TestPublishFirstVersionFromOneSiteAsksNothing(t *testing.T) {
 	key, pub := testKey(t)
 	recoverHosts(t, "__PAISANS_EMPTY__\n") // home-a alone answers, holding nothing
@@ -884,6 +922,7 @@ func TestPublishFirstVersionFromOneSiteAsksNothing(t *testing.T) {
 	agentKeys = func() []string { return []string{pub} }
 	configSignWith = func(string) string { return key }
 	t.Cleanup(func() { agentKeys, configSignWith = saved, savedSign })
+	withDataDir(t)
 	l := configstore.Local{Dir: t.TempDir()}
 	f := snapshotted(configstore.Files{Paisans: []byte(fixtureAs(t, pub)), Secrets: []byte("secrets\n"), SOPS: []byte("creation_rules: []\n")})
 	if err := l.WriteFiles(f); err != nil {
@@ -901,9 +940,14 @@ func TestPublishFirstVersionFromOneSiteAsksNothing(t *testing.T) {
 	if err := runDeployment([]string{"publish", "--config", cfgPath, "--execute"}, noTerminalStdin(), &out); err != nil {
 		t.Fatal(problemText(err))
 	}
-	if h, _ := l.Head(); h == "" {
+	sys, ok, err := must(openStore()).Held(fixtureDeploymentID)
+	if err != nil || !ok {
+		t.Fatalf("no system copy after publishing: %v", err)
+	}
+	if h, _ := sys.Head(); h == "" {
 		t.Fatal("no head after publishing")
 	}
+	noFolderState(t, l.Dir)
 	took := false
 	for _, r := range runs {
 		if strings.HasPrefix(r, "home-a: ") && strings.Contains(r, "bundle verify") {
@@ -912,5 +956,157 @@ func TestPublishFirstVersionFromOneSiteAsksNothing(t *testing.T) {
 	}
 	if !took {
 		t.Fatalf("the version did not reach home-a: %q", runs)
+	}
+}
+
+// log gathers from the sites the system copy names, never a draft's: a
+// draft that names other sites changes nothing it reaches.
+func TestLogGathersFromTheSystemCopysSites(t *testing.T) {
+	shas, answer, files := storedHistory(t, 2, 0)
+	recoverHosts(t, answer)
+	var runs []string
+	allSitesUp(answer, &runs)
+	w := newWorkstation(t, files[0])
+	if err := w.sys.SetRoot(shas[0]); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.sys.SetHead(shas[0]); err != nil {
+		t.Fatal(err)
+	}
+	other := strings.ReplaceAll(string(files[0].Paisans), "home-a", "elsewhere")
+	if err := os.WriteFile(w.config(), []byte(other), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runDeployment([]string{"log", "--config", w.config()}, noTerminalStdin(), &bytes.Buffer{}); err != nil {
+		t.Fatal(problemText(err))
+	}
+	reached := strings.Join(runs, "\n")
+	if !strings.Contains(reached, "home-a: ") || strings.Contains(reached, "elsewhere: ") {
+		t.Fatalf("log reached the draft's sites:\n%s", reached)
+	}
+}
+
+// log judges from the system copy's pinned root and gathers into its store,
+// whatever the folder holds, and writes nothing into the folder or the
+// system copy's files and head. With no draft it reads the sites from the
+// system copy's files.
+func TestLogReadsSystemCopy(t *testing.T) {
+	shas, answer, files := storedHistory(t, 2, 0)
+	recoverHosts(t, answer)
+	allSitesUp(answer, nil)
+	w := newWorkstation(t, files[0])
+	if err := w.sys.SetRoot(shas[0]); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.sys.SetHead(shas[0]); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := runDeployment([]string{"log", "--config", w.config()}, noTerminalStdin(), &out); err != nil {
+		t.Fatal(problemText(err), err)
+	}
+	if !strings.Contains(out.String(), "root "+shas[0]) || !strings.Contains(out.String(), shas[1][:12]+"  ") {
+		t.Fatalf("log:\n%s", out.String())
+	}
+	noFolderState(t, w.dir)
+	cache, ok, err := w.sys.HeldStore()
+	if _, ferr := cache.Files(shas[1]); err != nil || !ok || ferr != nil {
+		t.Fatalf("the system copy's store does not hold %s: %v", shas[1], err)
+	}
+	if h, _ := w.sys.Head(); h != shas[0] {
+		t.Fatalf("log moved the head to %s", h)
+	}
+	if got, _ := w.sys.Files(); !got.Equal(files[0]) {
+		t.Fatal("log changed the system copy's files")
+	}
+	if rev, _, _ := w.sys.Seen(); rev != 0 {
+		t.Fatalf("log raised seen to %d", rev)
+	}
+
+	empty := t.TempDir()
+	out.Reset()
+	if err := runDeployment([]string{"log", "--config", filepath.Join(empty, "paisans-stack.yaml")}, noTerminalStdin(), &out); err != nil {
+		t.Fatal(problemText(err), err)
+	}
+	if !strings.Contains(out.String(), "root "+shas[0]) {
+		t.Fatalf("log with no draft:\n%s", out.String())
+	}
+	if entries, _ := os.ReadDir(empty); len(entries) != 0 {
+		t.Fatalf("the empty folder holds %v", entries)
+	}
+}
+
+// deployment publish --execute deploys the draft as apply does: its files
+// become the system copy's, the version holds them without the "drafted
+// from" line, the line names the version published, and the record names
+// the folder. A dry run changes none of it.
+func TestPublishDeploysDraft(t *testing.T) {
+	f := newApplyStore(t, 1)
+	f.based(t)
+	edited := f.editDraft(t, "# next\n")
+	before := rawFiles(t, f.dir)
+	var out bytes.Buffer
+	captureStdout(t, func() {
+		if err := runDeployment([]string{"publish", "--config", f.cfgPath}, noTerminalStdin(), &out); err != nil {
+			t.Fatal(problemText(err))
+		}
+	})
+	if h, _ := f.sys.Head(); h != f.shas[0] || f.pushed() || !maps.Equal(rawFiles(t, f.dir), before) {
+		t.Fatalf("a dry run moved the head to %s, pushed %v", h, f.pushed())
+	}
+	captureStdout(t, func() {
+		if err := runDeployment([]string{"publish", "--config", f.cfgPath, "--execute"}, noTerminalStdin(), &out); err != nil {
+			t.Fatal(problemText(err))
+		}
+	})
+	head, _ := f.sys.Head()
+	cache, _ := f.sys.Cache()
+	if head == f.shas[0] || cache.Revision(head) != 2 || !f.pushed() {
+		t.Fatalf("head %s, pushed %v", head, f.pushed())
+	}
+	v, err := cache.Files(head)
+	got, _ := f.sys.Files()
+	if err != nil || !bytes.Equal(v.Paisans, edited.Paisans) || !bytes.Equal(got.Paisans, edited.Paisans) || !bytes.Equal(got.Secrets, edited.Secrets) {
+		t.Errorf("the version or the system copy is not the draft: %v", err)
+	}
+	if m, ok := draft.ReadMarker(f.draftBody(t)); !ok || m.SHA != head || m.Revision != 2 {
+		t.Errorf("marker %+v %v", m, ok)
+	}
+	saved, ok, err := must(openStore()).Load(fixtureDeploymentID)
+	if err != nil || !ok || saved.SHA != head || saved.Source != "published from "+f.dir {
+		t.Errorf("record %+v, %v", saved, err)
+	}
+	noFolderState(t, f.dir)
+}
+
+// What fails once a site took the version publish pushed is a warning and
+// takes nothing back: a record that cannot be written leaves the system
+// copy holding the version, its head, seen and files, and the draft's line
+// naming it.
+func TestPublishAfterThePushWarnsAndKeepsTheVersion(t *testing.T) {
+	f := newApplyStore(t, 1)
+	f.based(t)
+	edited := f.editDraft(t, "# next\n")
+	// saved.json cannot be replaced by a directory of that name.
+	if err := os.MkdirAll(filepath.Join(f.sys.Dir, "saved.json", "x"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var rep, out bytes.Buffer
+	saved := reporterOverride
+	reporterOverride = ui.NewPlain(&rep, false)
+	t.Cleanup(func() { reporterOverride = saved })
+	if err := runDeployment([]string{"publish", "--config", f.cfgPath, "--execute"}, noTerminalStdin(), &out); err != nil {
+		t.Fatal(problemText(err))
+	}
+	if !strings.Contains(rep.String(), "the system copy's record was not written") {
+		t.Errorf("no warning:\n%s", rep.String())
+	}
+	head, _ := f.sys.Head()
+	rev, seen, _ := f.sys.Seen()
+	cache, _ := f.sys.Cache()
+	got, _ := f.sys.Files()
+	m, ok := draft.ReadMarker(f.draftBody(t))
+	if head == f.shas[0] || rev != 2 || seen != head || cache.Revision(head) != 2 || !bytes.Equal(got.Paisans, edited.Paisans) || !ok || m.SHA != head || !f.pushed() {
+		t.Errorf("head %s, seen %d %s, marker %+v %v, pushed %v\n%s", head, rev, seen, m, ok, f.pushed(), rep.String())
 	}
 }

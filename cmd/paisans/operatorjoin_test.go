@@ -16,7 +16,9 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
+	"github.com/paisans-software/paisans-cli/internal/draft"
 	"github.com/paisans-software/paisans-cli/internal/keystore"
+	"github.com/paisans-software/paisans-cli/internal/localstore"
 	"github.com/paisans-software/paisans-cli/internal/operatorinvite"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -104,10 +106,10 @@ func newJoinFixture(t *testing.T, listed, opens bool) joinFixture {
 
 	// alice's workstation writes the invite.
 	alice := registerWorkstation(t, answer, f1, nil, alicePub)
-	if err := alice.SetSigningKey(alicePub); err != nil {
+	if err := alice.sys.SetSigningKey(alicePub); err != nil {
 		t.Fatal(err)
 	}
-	if err := alice.SetRoot(v1); err != nil {
+	if err := alice.sys.SetRoot(v1); err != nil {
 		t.Fatal(err)
 	}
 	signFromFile(t, alicePriv)
@@ -116,8 +118,9 @@ func newJoinFixture(t *testing.T, listed, opens bool) joinFixture {
 		t.Fatal(problemText(err))
 	}
 
-	// carol's workstation holds what her answer recorded, and an empty
-	// folder.
+	// carol's workstation, a data directory of its own, holds what her
+	// answer recorded, and an empty folder.
+	withDataDir(t)
 	dir := t.TempDir()
 	if err := recordAgeBinding(fixtureDeploymentID, ageKey{Recipient: carol.Recipient().String(), Source: joinAgeSource}); err != nil {
 		t.Fatal(err)
@@ -169,6 +172,8 @@ func (f joinFixture) wroteNothing(t *testing.T) {
 	if pushed(*f.runs) {
 		t.Errorf("pushed to a site: %q", *f.runs)
 	}
+	noFolderState(t, f.dir)
+	noSystemCopy(t)
 }
 
 func wantAskInviter(t *testing.T, err error) {
@@ -211,16 +216,17 @@ func TestJoinEverySiteRefusedTheLogin(t *testing.T) {
 	f.wroteNothing(t)
 }
 
-// With the head listing carol, --execute writes the three files, records
-// the invite's root and carol's key, and pushes an attestation; the secrets
-// open with her age key, so no remedy is named.
-func TestJoinRecoversAndAttests(t *testing.T) {
+// With the head listing carol, --execute makes the system copy from the
+// sites, records the invite's root and carol's key there, pushes an
+// attestation, and starts a draft of it in the folder; the secrets open
+// with her age key, so no remedy is named.
+func TestJoinCreatesSystemCopyAndDraft(t *testing.T) {
 	f := newJoinFixture(t, true, true)
 	out, err := f.register(t, "--execute")
 	if err != nil {
 		t.Fatal(problemText(err), err)
 	}
-	l := configstore.Local{Dir: f.dir}
+	l := heldCopy(t)
 	got, err := l.Files()
 	if err != nil || !got.Equal(f.head2) {
 		t.Fatalf("files %v", err)
@@ -233,6 +239,10 @@ func TestJoinRecoversAndAttests(t *testing.T) {
 	}
 	if h, _ := l.Head(); h == "" || h == f.head {
 		t.Fatalf("head %q: no attestation recorded", h)
+	}
+	wantDraftOf(t, f.dir, l)
+	if rec, ok, _ := must(openStore()).Load(fixtureDeploymentID); !ok || rec.Status != localstore.Verified || rec.Source != "joined into "+f.dir {
+		t.Errorf("record %+v", rec)
 	}
 	if !pushed(*f.runs) {
 		t.Fatalf("no attestation pushed: %q", *f.runs)
@@ -275,7 +285,7 @@ func TestJoinSaysWhenSecretsDoNotOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(problemText(err), err)
 	}
-	if !(configstore.Local{Dir: f.dir}).HasFiles() || !pushed(*f.runs) {
+	if !(configstore.Local{Dir: f.dir}).HasFiles() || !heldCopy(t).HasFiles() || !pushed(*f.runs) {
 		t.Fatal("the join did not complete")
 	}
 	if !strings.Contains(out, "operator add --request") || !strings.Contains(out, "deployment pull") {
@@ -297,7 +307,7 @@ func TestJoinSaysWhenYourKeyIsNotReached(t *testing.T) {
 	if err != nil {
 		t.Fatal(problemText(err), err)
 	}
-	if !(configstore.Local{Dir: f.dir}).HasFiles() || !pushed(*f.runs) {
+	if !(configstore.Local{Dir: f.dir}).HasFiles() || !heldCopy(t).HasFiles() || !pushed(*f.runs) {
 		t.Fatal("the join did not complete")
 	}
 	recipient, _, _, err := readAgeBinding(fixtureDeploymentID)
@@ -398,9 +408,9 @@ func TestJoinRerunAfterFailedPush(t *testing.T) {
 	if _, err := f.register(t, "--execute"); err == nil {
 		t.Fatal("the push did not fail")
 	}
-	l := configstore.Local{Dir: f.dir}
-	if !l.HasFiles() {
-		t.Fatal("the files were not written before the push")
+	l := heldCopy(t)
+	if !(configstore.Local{Dir: f.dir}).HasFiles() || !l.HasFiles() {
+		t.Fatal("the system copy and the draft were not made before the push")
 	}
 	*f.runs = nil
 	allSitesUp(answer, f.runs)
@@ -470,16 +480,23 @@ func TestInviteAnswerAcceptJoin(t *testing.T) {
 		t.Fatal(err)
 	}
 	alice := registerWorkstation(t, s.answer(t), f1, nil, alicePub)
-	if err := alice.SetSigningKey(alicePub); err != nil {
+	if err := alice.sys.SetSigningKey(alicePub); err != nil {
 		t.Fatal(err)
 	}
-	if err := alice.SetRoot(v1); err != nil {
+	if err := alice.sys.SetRoot(v1); err != nil {
 		t.Fatal(err)
 	}
+	// Each workstation has a data directory of its own.
+	aliceData, carolData := os.Getenv(localstore.DirVariable), t.TempDir()
 	realSecrets(t)
 	saved, savedSign := agentKeys, configSignWith
 	t.Cleanup(func() { agentKeys, configSignWith = saved, savedSign })
 	as := func(keys *keystore.Memory, priv, pub string) {
+		data := carolData
+		if keys == aliceKeys {
+			data = aliceData
+		}
+		t.Setenv(localstore.DirVariable, data)
 		config.AgeKeystore = keys
 		agentKeys = func() []string { return []string{pub} }
 		configSignWith = func(string) string { return priv }
@@ -515,13 +532,13 @@ func TestInviteAnswerAcceptJoin(t *testing.T) {
 
 	// 3. alice accepts it.
 	as(aliceKeys, alicePriv, alicePub)
-	if err := runOperatorAdd([]string{"--request", requestFile, "--config", filepath.Join(alice.Dir, config.FileName), "--all-sites"}, notATerminal(t), &bytes.Buffer{}); err != nil {
+	if err := runOperatorAdd([]string{"--request", requestFile, "--config", alice.config(), "--all-sites"}, notATerminal(t), &bytes.Buffer{}); err != nil {
 		t.Fatal(problemText(err))
 	}
 
 	// 4. alice's files become the sites' newest version, as apply publishes
 	// them.
-	accepted, err := alice.Files()
+	accepted, err := draft.Draft{Dir: alice.dir}.Files()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -541,7 +558,8 @@ func TestInviteAnswerAcceptJoin(t *testing.T) {
 	if err := runOperator([]string{"register", "--config", carolConfig, "--execute"}, noTerminalStdin(), &bytes.Buffer{}); err != nil {
 		t.Fatalf("%s\n%s", problemText(err), report.String())
 	}
-	l := configstore.Local{Dir: dir}
+	l := heldCopy(t)
+	wantDraftOf(t, dir, l)
 	if k, _ := l.SigningKey(); k != bare(carolPub) {
 		t.Fatalf("signing key %q, want carol's", k)
 	}
@@ -616,25 +634,46 @@ func TestRegisterRefusesIDBesideFiles(t *testing.T) {
 	}
 }
 
-// --key or --root without --id registers plainly, whatever is pending: a
-// pinned root in an empty folder reads the sites from this workstation's
-// store, which holds nothing here.
+// --key or --root without --id registers plainly, whatever is pending: in
+// an empty folder it registers the workstation's system copy, and there is
+// none here.
 func TestRegisterWithRootSkipsPendingInvites(t *testing.T) {
 	f := newJoinFixture(t, true, true)
 	plain := func(t *testing.T) {
 		t.Helper()
 		_, err := f.register(t, "--root", f.root)
 		text := problemText(err)
-		if err == nil || !strings.Contains(text, "pinned root is not in this workstation's store") || strings.Contains(text, "join") || strings.Contains(text, "pending") {
+		if err == nil || !strings.Contains(text, "this workstation holds no deployment") || strings.Contains(text, "pending") {
 			t.Fatalf("got %s", text)
 		}
 	}
+	pending := filepath.Join(dataDir(t), "invites", fixtureDeploymentID)
+	before := tree(t, pending)
 	plain(t)
 	if err := recordPending("11111111-2222-4333-8444-555555555555", []byte("an invite\n"), f.carolPub); err != nil {
 		t.Fatal(err)
 	}
 	plain(t)
 	f.wroteNothing(t)
+	// No join ran: the pending invite is as the answer left it.
+	after := tree(t, pending)
+	if len(after) != len(before) {
+		t.Fatalf("the pending invite changed: %v", after)
+	}
+	for p, v := range before {
+		if after[p] != v {
+			t.Fatalf("%s changed", p)
+		}
+	}
+	if ok, err := pendingFor(fixtureDeploymentID); err != nil || !ok {
+		t.Fatalf("the pending invite is gone: %v", err)
+	}
+}
+
+// pendingFor reports whether an invite to deployment id is pending.
+func pendingFor(id string) (bool, error) {
+	_, _, ok, err := readPending(id)
+	return ok, err
 }
 
 // A pending invite is used only for the deployment whose directory holds

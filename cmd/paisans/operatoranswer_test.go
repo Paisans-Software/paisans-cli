@@ -46,6 +46,8 @@ func newAnswerFixture(t *testing.T) answerFixture {
 	if err := runOperatorInvite(inviteArgs(l, "carol", "--key", carolPub), &out); err != nil {
 		t.Fatal(err)
 	}
+	// carol answers on a workstation of her own.
+	withDataDir(t)
 	signFromFile(t, carolPriv)
 	saved := agentKeys
 	agentKeys = func() []string { return []string{carolPub} }
@@ -369,13 +371,6 @@ func TestAnswerSaysWhatComesNext(t *testing.T) {
 			t.Errorf("lacks %q:\n%s", want, report)
 		}
 	}
-}
-
-// withDataDir points the workstation's data directory at a directory of the
-// test's own.
-func withDataDir(t *testing.T) {
-	t.Helper()
-	t.Setenv(localstore.DirVariable, t.TempDir())
 }
 
 // dataDir is the workstation's data directory.

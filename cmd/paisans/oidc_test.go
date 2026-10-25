@@ -218,7 +218,7 @@ func TestOIDCClientCreateDryRunWritesNothing(t *testing.T) {
 	path := tempSecrets(t)
 	before, _ := os.ReadFile(path)
 	rec := withRecorder(t, true)
-	err := runOIDCClientCreate([]string{"--config", fixtureConfig(), "--secrets", path, "--app", "talk"})
+	err := runOIDCClientCreate([]string{"--config", fixtureDraft(t, fixtureDeploymentID), "--secrets", path, "--app", "talk"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +250,7 @@ func TestOIDCClientCreateExecuteRecordsTheSecretWithoutPrintingIt(t *testing.T) 
 	fake := withIDPFake(t)
 	path := tempSecrets(t)
 	rec := withRecorder(t, true)
-	err := runOIDCClientCreate([]string{"--config", fixtureConfig(), "--secrets", path, "--app", "talk", "--execute"})
+	err := runOIDCClientCreate([]string{"--config", fixtureDraft(t, fixtureDeploymentID), "--secrets", path, "--app", "talk", "--execute"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +283,7 @@ func TestOIDCClientCreateRefusesABlueprintItDoesNotKnow(t *testing.T) {
 	fake := withIDPFake(t)
 	// web is an Element client, which authenticates at the homeserver and
 	// holds no client of its own.
-	err := runOIDCClientCreate([]string{"--config", fixtureConfig(), "--secrets", tempSecrets(t), "--app", "web"})
+	err := runOIDCClientCreate([]string{"--config", fixtureDraft(t, fixtureDeploymentID), "--secrets", tempSecrets(t), "--app", "web"})
 	if err == nil || !strings.Contains(err.Error(), "Blueprints with one: account, mbin, oauth2-proxy, synapse, uptime, wikijs, writefreely") {
 		t.Fatalf("got %v", err)
 	}

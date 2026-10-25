@@ -19,8 +19,10 @@ import (
 
 // What follows is `paisans operator invite` (docs/specs/2026-10-24-operator-invite.md,
 // *The invite*): an operator the deployment lists writes a signed invite for
-// a new operator, who answers it with operator register --invite. It runs
-// beside the deployment's files and reaches no host.
+// a new operator, who answers it with operator register --invite. It reads
+// the deployment from the draft, or the system copy where the folder holds
+// none, takes the root and the signing key from the system copy, and
+// reaches no host.
 
 func runOperatorInvite(args []string, stdout io.Writer) error {
 	fs := newFlagSet("operator invite", flag.ExitOnError)
@@ -45,7 +47,11 @@ func runOperatorInvite(args []string, stdout io.Writer) error {
 	if len(lines) != 1 {
 		return &ui.Problem{Hint: "--key must give one key", Explain: fmt.Sprintf("Got %d. An invite is for one key.", len(lines))}
 	}
-	cfg, err := config.Load(*configPath)
+	sys, d, _, err := systemFor(*configPath, "")
+	if err != nil {
+		return err
+	}
+	cfg, _, err := readConfig(sys, d)
 	if err != nil {
 		return err
 	}
@@ -66,15 +72,11 @@ func runOperatorInvite(args []string, stdout io.Writer) error {
 	fields := strings.Fields(lines[0])
 	key := fields[0] + " " + fields[1]
 
-	l, err := workstationOf(*configPath)
+	signing, inviter, err := inviterOf(sys)
 	if err != nil {
 		return err
 	}
-	signing, inviter, err := inviterOf(l, cfg)
-	if err != nil {
-		return err
-	}
-	root, err := trustedRoot(l, cfg.ID)
+	root, err := trustedRoot(sys, cfg.ID)
 	if err != nil {
 		return err
 	}
@@ -104,18 +106,24 @@ func runOperatorInvite(args []string, stdout io.Writer) error {
 	return err
 }
 
-// inviterOf is the key the invite is signed with, the one .paisans/signing-key
-// records and the agent holds, and the operator cfg lists it under.
-func inviterOf(l configstore.Local, cfg *config.Config) (string, operatorinvite.Inviter, error) {
+// inviterOf is the key the invite is signed with, the one the system copy
+// sys records and the agent holds, and the operator the system copy's
+// paisans-stack.yaml lists it under: who the inviter is is a trust answer,
+// so a draft's edit of operators does not change it.
+func inviterOf(sys configstore.Local) (string, operatorinvite.Inviter, error) {
 	noKey := &ui.Problem{Hint: "this workstation records no signing key", Explain: "An invite is signed with the key of an operator the deployment lists, which " + progname.Cmd() + " operator register records. Run it first."}
-	recorded, err := l.SigningKey()
+	recorded, err := sys.SigningKey()
 	if err != nil {
 		return "", operatorinvite.Inviter{}, err
 	}
 	if recorded == "" {
 		return "", operatorinvite.Inviter{}, noKey
 	}
-	line, err := recordedKey(l, agentKeys(), "")
+	line, err := recordedKey(sys, agentKeys(), "")
+	if err != nil {
+		return "", operatorinvite.Inviter{}, err
+	}
+	cfg, err := systemConfig(sys)
 	if err != nil {
 		return "", operatorinvite.Inviter{}, err
 	}
@@ -127,14 +135,13 @@ func inviterOf(l configstore.Local, cfg *config.Config) (string, operatorinvite.
 			}
 		}
 	}
-	return "", operatorinvite.Inviter{}, &ui.Problem{Hint: "no operator lists the signing key", Explain: fmt.Sprintf("%s is recorded in .paisans/signing-key but %s lists it under no operator. Run %s operator register with a key an operator lists.", k.Fingerprint, config.FileName, progname.Cmd())}
+	return "", operatorinvite.Inviter{}, &ui.Problem{Hint: "no operator lists the signing key", Explain: fmt.Sprintf("%s is the signing key the system copy in %s records, but its %s lists it under no operator. Run %s operator register with a key an operator lists.", k.Fingerprint, sys.Dir, config.FileName, progname.Cmd())}
 }
 
-// trustedRoot is the root this workstation trusts: the pin in
-// .paisans/config-root, else the one root of the newest trusted version
-// among those it has gathered. It reads no site and writes nothing: the
-// store is opened as it is on disk, and a workstation without one knows no
-// root.
+// trustedRoot is the root this workstation trusts: the system copy's pin,
+// else the one root of the newest trusted version among those its store
+// holds. It reads no site and writes nothing: the store is opened as it is
+// on disk, and a system copy without one knows no root.
 func trustedRoot(l configstore.Local, id string) (string, error) {
 	a, err := l.Anchor()
 	if err != nil {
@@ -169,7 +176,7 @@ func trustedRoot(l configstore.Local, id string) (string, error) {
 func unknownRoot(cause error) error {
 	return &ui.Problem{
 		Hint:    "this workstation does not know the deployment's root",
-		Explain: "The invite names the root of the history this workstation trusts, and there is no .paisans/config-root and no single root among the versions it has gathered. Run " + progname.Cmd() + " deployment pull, which gathers them and records the root.",
+		Explain: "The invite names the root of the history this workstation trusts, and its system copy pins no root and holds no single root among the versions it has gathered. Run " + progname.Cmd() + " deployment pull, which gathers them and records the root.",
 		Cause:   cause,
 	}
 }

@@ -19,11 +19,12 @@ import (
 // same way on both takes it; a key changed differently on the two sides is a
 // conflict. A removal counts as a change, so a key removed on one side and
 // unchanged on the other is removed, and one removed on one side and changed
-// on the other is a conflict. The merge is theirs with ours' changes applied,
-// so the file's version and id are theirs.
+// on the other is a conflict, and merged keeps ours' value there, or ours'
+// removal. The merge is theirs with ours' changes applied, so the file's
+// version and id are theirs.
 //
 // conflicts holds paths only, sorted. A value is never put in one, so a
-// conflict is safe to print, and merged is nil when there is any.
+// conflict is safe to print.
 //
 // The merge refuses while either side has a `paisans mesh rekey` or a
 // `paisans secrets rotate` under way (underway).
@@ -46,13 +47,12 @@ func MergeSecrets(base, ours, theirs *config.Secrets) (merged *config.Secrets, c
 		case same(t, b, p):
 			take = append(take, p)
 		default:
+			// A conflict keeps ours.
 			conflicts = append(conflicts, p)
+			take = append(take, p)
 		}
 	}
-	if len(conflicts) > 0 {
-		sort.Strings(conflicts)
-		return nil, conflicts, nil
-	}
+	sort.Strings(conflicts)
 	sort.Strings(take)
 	merged = clone(theirs)
 	for _, p := range take {
@@ -65,7 +65,7 @@ func MergeSecrets(base, ours, theirs *config.Secrets) (merged *config.Secrets, c
 			return nil, nil, err
 		}
 	}
-	return merged, nil, nil
+	return merged, conflicts, nil
 }
 
 // underway refuses when either side holds the state of a run that a merge

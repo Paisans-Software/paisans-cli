@@ -1,29 +1,33 @@
-// Package localstore is the workstation's own copy of every deployment it has
-// applied or fetched: the three files of the version last saved, with the
-// configuration store's state beside them, one directory per deployment id
-// under the operator's data directory.
+// Package localstore holds the workstation's system copies: one per
+// deployment, under deployments/<id>/ of the operator's data directory, the
+// only copy of a deployment Paisans trusts on this workstation
+// (docs/specs/2026-10-24-system-copy.md). A folder the operator edits in is
+// a draft of one, and holds nothing else.
 //
-// A deployment's files usually sit in a directory the operator chose, often a
-// git repository, and that directory is easy to lose or to forget the path
-// of. Every deployment apply --execute saves the version it published here as well, and
-// paisans deployment fetch fills it from a host, so an operator can always
-// find each deployment they run without remembering where its files were.
-//
-// Each deployment's directory is a configstore workstation in its own right
-// (paisans-stack.yaml, secrets.enc.yaml, .sops.yaml and .paisans/), so a
-// fetch judges what a host serves by the same trust rules as deployment pull,
-// anchored on the key that signed the version apply saved, and every
-// paisans command that takes --config works on a saved copy as it is.
+// Each system copy is a configstore workstation: paisans-stack.yaml,
+// secrets.enc.yaml and .sops.yaml of the version last deployed or synced,
+// and beside them .paisans/ with the store of signed versions and the trust
+// state. A deploy (deployment apply --execute, deployment publish
+// --execute) makes the version it published the system copy's; a recovery,
+// a join and operator register --root make one from the sites; and
+// paisans deployment fetch records what a host serves into one, judged by
+// the same trust rules as deployment pull, and fills one with no head. A lock under locks/ is held while
+// a command writes a copy, and a copy a recovery replaces is kept under
+// replaced/.
 package localstore
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/configstore"
@@ -34,9 +38,9 @@ import (
 // directory, for an operator who keeps their data elsewhere and for tests.
 const DirVariable = "PAISANS_DATA_DIR"
 
-// savedFile is the record beside a deployment's files that says what they
+// SavedFile is the record beside a deployment's files that says what they
 // are, for deployment list.
-const savedFile = "saved.json"
+const SavedFile = "saved.json"
 
 // Status is how far a saved copy is trusted.
 type Status string
@@ -116,59 +120,132 @@ func (s Store) Local(id string) (configstore.Local, error) {
 	return configstore.Local{Dir: dir}, nil
 }
 
-// Save makes the copy of deployment id the version sha that src's cache
-// holds: every version src has gathered is copied into the copy's cache, so
-// later fetches judge from the same history, the version's files are
-// written, and signingKey, the key the version was signed with, is recorded
-// as the copy's anchor. A root pinned in src is pinned in the copy too
-// unless the copy pins one already.
-func (s Store) Save(src configstore.Local, sha string, revision int, signingKey string, rec Saved) error {
-	dst, err := s.Local(rec.ID)
+// Held is deployment id's copy when the store holds one, opened without
+// creating anything, and false when it holds none. A copy is a directory
+// with a store or a head: what a recovery, a join, a fetch or a deploy
+// wrote. An empty directory, or one holding only a record, is none, so
+// nothing but those writers ever makes a copy that trust is read from.
+func (s Store) Held(id string) (configstore.Local, bool, error) {
+	if !deployment.ValidID(id) {
+		return configstore.Local{}, false, fmt.Errorf("%q is not a deployment id", id)
+	}
+	dir := filepath.Join(s.root(), id)
+	info, err := os.Stat(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return configstore.Local{}, false, nil
+	}
 	if err != nil {
-		return err
+		return configstore.Local{}, false, err
 	}
-	from, err := src.Cache()
+	if !info.IsDir() {
+		return configstore.Local{}, false, fmt.Errorf("%s is not a directory", dir)
+	}
+	l := configstore.Local{Dir: dir}
+	ok, err := isCopy(l)
+	if err != nil || !ok {
+		return configstore.Local{}, false, err
+	}
+	return l, true, nil
+}
+
+// isCopy reports whether l holds a store or a head.
+func isCopy(l configstore.Local) (bool, error) {
+	if _, ok, err := l.HeldStore(); err != nil || ok {
+		return ok, err
+	}
+	head, err := l.Head()
+	return head != "", err
+}
+
+// Staging is a directory of its own under the data directory and outside
+// deployments/, named from prefix, opened as a workstation: where a run
+// that makes a system copy works, so nothing it gathers is a copy until the
+// run puts the directory in place. The caller removes it.
+func (s Store) Staging(prefix string) (configstore.Local, error) {
+	if err := os.MkdirAll(s.Base, 0o700); err != nil {
+		return configstore.Local{}, err
+	}
+	dir, err := os.MkdirTemp(s.Base, prefix)
 	if err != nil {
-		return err
+		return configstore.Local{}, err
 	}
-	bundle, err := from.Bundle()
+	return configstore.Local{Dir: dir}, nil
+}
+
+// Scratch is a temporary directory opened as a workstation, for a gather
+// that has no system copy to record into. The caller removes it.
+func Scratch(prefix string) (configstore.Local, error) {
+	dir, err := os.MkdirTemp("", prefix)
 	if err != nil {
-		return err
+		return configstore.Local{}, err
 	}
-	if bundle == nil {
-		return fmt.Errorf("%s holds no version to save", src.Dir)
+	return configstore.Local{Dir: dir}, nil
+}
+
+// locksDir holds one lock file per deployment, outside deployments/, so
+// taking a lock never makes a directory that reads as a copy.
+func (s Store) locksDir() string { return filepath.Join(s.Base, "locks") }
+
+// LockedError is a lock another writer holds.
+type LockedError struct {
+	ID string
+	// Holder is what the lock file says: the holder's pid and command line.
+	Holder string
+}
+
+func (e *LockedError) Error() string {
+	holder := e.Holder
+	if holder == "" {
+		holder = "another process"
+	} else if pid, cmd, ok := strings.Cut(holder, " "); ok {
+		holder = "pid " + pid + " (" + cmd + ")"
+	} else {
+		holder = "pid " + holder
 	}
-	to, err := dst.Cache()
+	return "the system copy of " + e.ID + " is being written by " + holder
+}
+
+// Lock takes the lock on deployment id's copy, <Base>/locks/<id>.lock,
+// which every command that writes the copy holds while it does, so two
+// writers never interleave. It does not wait: a lock another process holds
+// is a *LockedError naming it. The lock is the operating system's, released
+// when its holder exits, so a lock file a process left behind when it died
+// does not block the next. It is taken before a copy exists as well, by a
+// recovery, and creates nothing under deployments/. The returned func
+// releases the lock and leaves the file.
+func (s Store) Lock(id string) (unlock func(), err error) {
+	if !deployment.ValidID(id) {
+		return nil, fmt.Errorf("%q is not a deployment id", id)
+	}
+	if err := os.MkdirAll(s.locksDir(), 0o700); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(filepath.Join(s.locksDir(), id+".lock"), os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if err := to.FetchBundle(bundle); err != nil {
-		return err
-	}
-	if err := dst.Checkout(sha); err != nil {
-		return err
-	}
-	if signingKey != "" {
-		if err := dst.SetSigningKey(signingKey); err != nil {
-			return err
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		holder, _ := io.ReadAll(io.LimitReader(f, 4096))
+		f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, &LockedError{ID: id, Holder: strings.TrimSpace(string(holder))}
 		}
+		return nil, fmt.Errorf("locking %s: %w", f.Name(), err)
 	}
-	if root, err := src.Root(); err != nil {
-		return err
-	} else if root != "" {
-		if have, err := dst.Root(); err != nil {
-			return err
-		} else if have == "" {
-			if err := dst.SetRoot(root); err != nil {
-				return err
-			}
-		}
+	unlock = func() {
+		syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		f.Close()
 	}
-	if err := dst.Remember(revision, sha); err != nil {
-		return err
+	line := strconv.Itoa(os.Getpid()) + " " + strings.Join(os.Args, " ") + "\n"
+	if err := f.Truncate(0); err != nil {
+		unlock()
+		return nil, err
 	}
-	rec.SHA, rec.Revision, rec.Status = sha, revision, Verified
-	return s.Record(rec)
+	if _, err := f.WriteAt([]byte(line), 0); err != nil {
+		unlock()
+		return nil, err
+	}
+	return unlock, nil
 }
 
 // Record writes rec as deployment rec.ID's saved.json.
@@ -177,11 +254,18 @@ func (s Store) Record(rec Saved) error {
 	if err != nil {
 		return err
 	}
+	return RecordIn(l.Dir, rec)
+}
+
+// RecordIn writes rec as the saved.json of the copy in dir: a system copy
+// in its place, or one a run is making in a directory of its own, which
+// keeps the record when it is put in place.
+func RecordIn(dir string, rec Saved) error {
 	data, err := json.MarshalIndent(rec, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(l.Dir, ".saved-*")
+	tmp, err := os.CreateTemp(dir, ".saved-*")
 	if err != nil {
 		return err
 	}
@@ -193,7 +277,7 @@ func (s Store) Record(rec Saved) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), filepath.Join(l.Dir, savedFile))
+	return os.Rename(tmp.Name(), filepath.Join(dir, SavedFile))
 }
 
 // Load is deployment id's saved.json, and false when it has none.
@@ -201,7 +285,7 @@ func (s Store) Load(id string) (Saved, bool, error) {
 	if !deployment.ValidID(id) {
 		return Saved{}, false, fmt.Errorf("%q is not a deployment id", id)
 	}
-	data, err := os.ReadFile(filepath.Join(s.root(), id, savedFile))
+	data, err := os.ReadFile(filepath.Join(s.root(), id, SavedFile))
 	if errors.Is(err, os.ErrNotExist) {
 		return Saved{}, false, nil
 	}
@@ -210,7 +294,7 @@ func (s Store) Load(id string) (Saved, bool, error) {
 	}
 	var rec Saved
 	if err := json.Unmarshal(data, &rec); err != nil {
-		return Saved{}, false, fmt.Errorf("%s: %w", filepath.Join(s.root(), id, savedFile), err)
+		return Saved{}, false, fmt.Errorf("%s: %w", filepath.Join(s.root(), id, SavedFile), err)
 	}
 	return rec, true, nil
 }
@@ -223,9 +307,10 @@ type Listed struct {
 	Err error
 }
 
-// List is every deployment in the store, by id. A directory whose record is
-// missing or unreadable is listed with Err, not left out, since it still
-// holds whatever was written into it.
+// List is every copy in the store, by id. A copy whose record is missing or
+// unreadable is listed with Err, not left out, since it still holds whatever
+// was written into it. A directory that is no copy, holding no store and no
+// head, is left out: there is nothing in it to list.
 func (s Store) List() ([]Listed, error) {
 	entries, err := os.ReadDir(s.root())
 	if errors.Is(err, os.ErrNotExist) {
@@ -240,12 +325,19 @@ func (s Store) List() ([]Listed, error) {
 			continue
 		}
 		l := Listed{Dir: filepath.Join(s.root(), e.Name())}
+		if ok, err := isCopy(configstore.Local{Dir: l.Dir}); err == nil && !ok {
+			continue
+		} else if err != nil {
+			l.ID, l.Err = e.Name(), err
+			out = append(out, l)
+			continue
+		}
 		rec, ok, err := s.Load(e.Name())
 		switch {
 		case err != nil:
 			l.Err = err
 		case !ok:
-			l.Err = fmt.Errorf("no %s", savedFile)
+			l.Err = fmt.Errorf("no %s", SavedFile)
 		}
 		if ok && err == nil {
 			l.Saved = rec

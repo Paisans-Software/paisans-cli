@@ -70,6 +70,7 @@ func runSecretsPrune(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("secrets prune", flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
+	id := idFlag(fs)
 	secretsPath := fs.String("secrets", "", "path to the secrets file (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually remove them and write the file")
 	withoutRecord := fs.Bool("without-record", false, "trust "+config.FileName+" alone, when no gateway's deployment record can be read; asks for the word prune at a terminal")
@@ -79,6 +80,9 @@ func runSecretsPrune(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	ans, err := answers()
 	if err != nil {
+		return err
+	}
+	if _, err := ensureDraft(*configPath, *id); err != nil {
 		return err
 	}
 	r := reporter()
@@ -174,6 +178,7 @@ func runSecretsSet(args []string, stdin io.Reader) error {
 	fs := newFlagSet("secrets set", flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
+	id := idFlag(fs)
 	secretsPath := fs.String("secrets", "", "path to the secrets file (default: secrets.enc.yaml beside the config)")
 	if len(args) > 0 && isHelpWord(args[0]) {
 		return fs.Parse(args[:1])
@@ -183,6 +188,9 @@ func runSecretsSet(args []string, stdin io.Reader) error {
 		key, args = args[0], args[1:]
 	}
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if _, err := ensureDraft(*configPath, *id); err != nil {
 		return err
 	}
 	r := reporter()

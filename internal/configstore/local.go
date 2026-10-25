@@ -18,10 +18,12 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
-// Local is an operator's workstation: the directory holding paisans-stack.yaml,
-// secrets.enc.yaml and .sops.yaml, and beside them .paisans/ with what the
-// workstation remembers about the store (docs/specs/2026-10-12-config-store.md,
-// *Commands*).
+// Local is a deployment's system copy on an operator's workstation
+// (docs/specs/2026-10-24-system-copy.md): a directory in the data directory
+// holding paisans-stack.yaml, secrets.enc.yaml and .sops.yaml, and beside
+// them .paisans/ with what the workstation remembers about the store
+// (docs/specs/2026-10-12-config-store.md, *Commands*). A folder the operator
+// edits in is a draft and is never a Local.
 type Local struct{ Dir string }
 
 const (
@@ -29,24 +31,25 @@ const (
 	rootFile      = "config-root"
 	headFile      = "config-head"
 	seenFile      = "config-seen"
+	arrivalsFile  = "arrivals"
 	signingFile   = "signing-key"
 	cacheDir      = "store.git"
 	incomingDir   = "incoming"
-	stateIgnore   = "store.git/\nincoming/\n" + signingFile + "\n" + headFile + "\n" + seenFile + "\n"
+	stateIgnore   = "store.git/\nincoming/\n" + signingFile + "\n" + headFile + "\n" + seenFile + "\n" + arrivalsFile + "\n"
 	stateFileMode = 0o644
 )
 
 func (l Local) state(name string) string { return filepath.Join(l.Dir, stateDir, name) }
 
-// ensureState creates .paisans/ and its .gitignore, which keeps this
-// operator's own state out of the repository the operators share: the cache,
-// this workstation's memory of every version it has seen; the incoming
-// files, a pull's scratch; the signing key, since a workstation that
-// checked out another operator's would anchor its trust on their signature;
-// and the head and the seen revision, which describe this workstation's
-// files and gathers. config-root is left out, so the operators can commit the
-// pin and share it. A .gitignore already there is the operator's, and is
-// left as it is.
+// ensureState creates the system copy's .paisans/ and its .gitignore, which
+// keeps this workstation's own state out of any repository the system
+// copy's directory is committed to: the cache, this workstation's memory of
+// every version it has seen; the incoming files, a pull's scratch; the
+// signing key, since a workstation that took another operator's would
+// anchor its trust on their signature; and the head, the seen revision and
+// the arrivals, which describe this workstation's files and gathers.
+// config-root is left out, since the pin is the same for every operator. A
+// .gitignore already there is left as it is.
 func (l Local) ensureState() error {
 	if err := os.MkdirAll(filepath.Join(l.Dir, stateDir), 0o755); err != nil {
 		return err
@@ -124,10 +127,10 @@ func (l Local) Root() (string, error) { return l.readSHA(rootFile) }
 // SetRoot pins sha as the root.
 func (l Local) SetRoot(sha string) error { return l.writeSHA(rootFile, sha) }
 
-// Head is the version the local files started from, "" when none did.
+// Head is the version the system copy's files are, "" when none is.
 func (l Local) Head() (string, error) { return l.readSHA(headFile) }
 
-// SetHead records sha as the version the local files started from.
+// SetHead records sha as the version the system copy's files are.
 func (l Local) SetHead(sha string) error { return l.writeSHA(headFile, sha) }
 
 // Seen is the highest revision of a trusted head any gather here has seen,
@@ -198,6 +201,83 @@ func (l Local) RecordSeen(g Gathered) error {
 	return l.raiseSeen(g.Seen.Revision, g.Seen.SHA)
 }
 
+// now is the clock a gather records arrivals by.
+var now = time.Now
+
+// RecordArrival records, for each trusted version of g not yet recorded, when
+// it first reached this workstation: one "<sha> <RFC3339 UTC>" line each in
+// .paisans/arrivals. Lines are only ever appended, one short write each, so
+// two gathers racing lose none; a version they both record has two lines, and
+// ArrivedAt reads the first. A gather calls it for whatever Local it gathers
+// into, a dry run included; the scratch directory of a deployment with no
+// system copy gets a record that is discarded with it. The first gather on a
+// copy stamps its whole trusted history with that time, since nothing says
+// when each version really arrived.
+func (l Local) RecordArrival(g Gathered, at time.Time) error {
+	have, err := l.arrivals()
+	if err != nil {
+		return err
+	}
+	var add []string
+	for _, sha := range slices.Sorted(maps.Keys(g.Verdict.Trusted)) {
+		if _, ok := have[sha]; !ok && g.Verdict.Trusted[sha] {
+			add = append(add, sha+" "+at.UTC().Format(time.RFC3339)+"\n")
+		}
+	}
+	if len(add) == 0 {
+		return nil
+	}
+	if err := l.ensureState(); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(l.state(arrivalsFile), os.O_APPEND|os.O_CREATE|os.O_WRONLY, stateFileMode)
+	if err != nil {
+		return err
+	}
+	for _, line := range add {
+		if _, err := f.WriteString(line); err != nil {
+			f.Close()
+			return err
+		}
+	}
+	return f.Close()
+}
+
+// ArrivedAt is when sha first reached this workstation, and false when no
+// record says, as for a version gathered before arrivals were recorded.
+func (l Local) ArrivedAt(sha string) (time.Time, bool) {
+	have, err := l.arrivals()
+	if err != nil {
+		return time.Time{}, false
+	}
+	t, ok := have[sha]
+	return t, ok
+}
+
+func (l Local) arrivals() (map[string]time.Time, error) {
+	data, err := os.ReadFile(l.state(arrivalsFile))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	have := map[string]time.Time{}
+	for _, line := range strings.Split(string(data), "\n") {
+		f := strings.Fields(line)
+		if len(f) != 2 {
+			continue
+		}
+		if _, seen := have[f[0]]; seen {
+			continue
+		}
+		if t, err := time.Parse(time.RFC3339, f[1]); err == nil {
+			have[f[0]] = t
+		}
+	}
+	return have, nil
+}
+
 // AcceptRollback makes g carry the older head rb names as the record's new
 // value, once the operator has typed rollback for it.
 func (g *Gathered) AcceptRollback(rb *RollbackError) {
@@ -259,7 +339,7 @@ func (l Local) Anchor() (Anchor, error) {
 	return a, err
 }
 
-// Cache is the workstation's own store, .paisans/store.git, which holds every
+// Cache is the system copy's own store, .paisans/store.git, which holds every
 // version any gather has seen. Nothing is ever removed from it, so a site
 // that drops a version cannot make the workstation forget it.
 func (l Local) Cache() (Repo, error) {
@@ -269,27 +349,20 @@ func (l Local) Cache() (Repo, error) {
 	return InitRepo(l.state(cacheDir))
 }
 
-// Current is the version the files beside paisans-stack.yaml are, as this
-// workstation alone knows it: its head and the head's revision, when the
-// files on disk are that version's. It reaches no site, so a run can name
-// what it applies before it asks for anything. An empty sha is files that
-// are no version this workstation holds: none published yet, or edited
-// since the last.
-func (l Local) Current() (sha string, revision int, err error) {
+// HeadIs is this workstation's head and the head's revision when f are that
+// version's files, and an empty sha when they are not, or there is no head.
+// It reaches no site and creates nothing.
+func (l Local) HeadIs(f Files) (sha string, revision int, err error) {
 	head, err := l.Head()
 	if err != nil || head == "" {
 		return "", 0, err
 	}
-	files, err := l.Files()
-	if err != nil {
-		return "", 0, err
-	}
-	cache, err := l.Cache()
-	if err != nil {
+	cache, ok, err := l.HeldStore()
+	if err != nil || !ok {
 		return "", 0, err
 	}
 	held, err := cache.Files(head)
-	if err != nil || !held.Equal(files) {
+	if err != nil || !held.Equal(f) {
 		return "", 0, err
 	}
 	return head, cache.revision(head), nil
@@ -393,6 +466,16 @@ func (l Local) HasFiles() bool {
 // The secrets file stays readable only by its owner, as init writes it.
 func (l Local) WriteFiles(f Files) error { return writeFiles(l.Dir, f) }
 
+// WriteFilesTo writes the three files into dir as WriteFiles does, for a
+// folder that is not a Local.
+func WriteFilesTo(dir string, f Files) error { return writeFiles(dir, f) }
+
+// The three files' names in a folder.
+const (
+	FileSecrets = nameSecrets
+	FileSOPS    = nameSOPS
+)
+
 func writeFiles(dir string, f Files) error {
 	// A version's secrets reach disk only encrypted, whoever published it:
 	// refused before any of the three files is written.
@@ -434,21 +517,9 @@ func (l Local) Checkout(sha string) error {
 	return l.SetHead(sha)
 }
 
-// Incoming is where a pull that meets local edits puts the head's files.
+// Incoming is where a fetch puts the files of versions it does not take as
+// the system copy's own, each head under IncomingFor.
 func (l Local) Incoming() string { return l.state(incomingDir) }
-
-// WriteIncoming writes the version sha's three files to Incoming.
-func (l Local) WriteIncoming(sha string) error {
-	cache, err := l.Cache()
-	if err != nil {
-		return err
-	}
-	f, err := cache.Files(sha)
-	if err != nil {
-		return err
-	}
-	return writeFiles(l.Incoming(), f)
-}
 
 // IncomingFor is where one head of a fork's files go: incoming/<sha>.
 func (l Local) IncomingFor(sha string) string { return filepath.Join(l.Incoming(), sha) }
@@ -505,6 +576,9 @@ type Gathered struct {
 	// Seen is the change to the seen record this gather leads to, nil for
 	// none; Local.RecordSeen writes it.
 	Seen *SeenChange
+	// ArrivalErr is why the arrival record could not be written, nil when it
+	// was. It never fails a gather; the command says so.
+	ArrivalErr error
 }
 
 // Direct is the sites reached directly, in name order.
@@ -599,7 +673,11 @@ func gather(l Local, sites map[string]apply.Transport, id string, a Anchor, o Ga
 		}
 		g.Reached = append(g.Reached, r)
 	}
-	return judgeHeld(l, cache, g, id, a)
+	g, err = judgeHeld(l, cache, g, id, a)
+	if len(g.Verdict.Trusted) > 0 {
+		g.ArrivalErr = l.RecordArrival(g, now())
+	}
+	return g, err
 }
 
 // HeldStore is the workstation's store as it is on disk, opened without
@@ -824,6 +902,9 @@ type publishOpts struct {
 	signWith string // what git's user.signingKey is given
 	merge    bool
 	now      time.Time
+	// base, when set, is the version the files build on, in place of the
+	// head.
+	base *string
 }
 
 // PublishFrom commits the three local files as a version whose parent is
@@ -850,6 +931,13 @@ func PublishFiles(l Local, g Gathered, f Files, sites map[string]apply.Transport
 	return publishFiles(l, g, f, sites, publishOpts{keyLine: keyLine, signWith: signWith, merge: merge, now: now}, Push)
 }
 
+// PublishOn is PublishFiles on base, the version f builds on, in place of
+// l's head: a draft names the version it was drafted from, which need not
+// be the one l's files are. "" is no base, a deployment's first version.
+func PublishOn(l Local, g Gathered, base string, f Files, sites map[string]apply.Transport, keyLine, signWith string, merge bool, now time.Time) (string, []string, error) {
+	return publishFiles(l, g, f, sites, publishOpts{keyLine: keyLine, signWith: signWith, merge: merge, now: now, base: &base}, Push)
+}
+
 func publishFrom(l Local, g Gathered, sites map[string]apply.Transport, o publishOpts, push PushFunc) (string, []string, error) {
 	f, err := l.Files()
 	if err != nil {
@@ -873,6 +961,9 @@ func publishFiles(l Local, g Gathered, f Files, sites map[string]apply.Transport
 	head, err := l.Head()
 	if err != nil {
 		return "", nil, err
+	}
+	if o.base != nil {
+		head = *o.base
 	}
 	if len(g.Direct()) == 0 {
 		return "", nil, fmt.Errorf("no site answered, so nothing was published: %w", UnreachedError(g))
@@ -906,23 +997,25 @@ func publishFiles(l Local, g Gathered, f Files, sites map[string]apply.Transport
 		if sha, err = cache.Commit(f, parents, rev, o.signWith, o.now); err != nil {
 			return "", nil, fmt.Errorf("sign the version: %w", err)
 		}
+		// From here a failure returns the version committed with it, so
+		// the caller can take it back (Local.Mark).
 		if err := l.raiseSeen(rev, sha); err != nil {
-			return "", nil, err
+			return sha, nil, err
 		}
 	}
 	if err := l.SetHead(sha); err != nil {
-		return "", nil, err
+		return sha, nil, err
 	}
 	if len(parents) == 0 {
 		if err := l.SetRoot(sha); err != nil {
-			return "", nil, err
+			return sha, nil, err
 		}
 	}
 	if own, err := l.SigningKey(); err != nil {
-		return "", nil, err
+		return sha, nil, err
 	} else if own == "" {
 		if err := l.SetSigningKey(o.keyLine); err != nil {
-			return "", nil, err
+			return sha, nil, err
 		}
 	}
 
@@ -973,11 +1066,13 @@ func publishNext(l Local, g Gathered, parent string, revision int, f Files, site
 		if sha, err = cache.Commit(f, []string{parent}, rev, o.signWith, o.now); err != nil {
 			return "", nil, fmt.Errorf("sign the version: %w", err)
 		}
+		// From here a failure returns the version committed with it, so
+		// the caller can take it back (Local.Mark).
 		if err := l.raiseSeen(rev, sha); err != nil {
-			return "", nil, err
+			return sha, nil, err
 		}
 		if err := l.SetHead(sha); err != nil {
-			return "", nil, err
+			return sha, nil, err
 		}
 	}
 	pushed, err := pushVersion(cache, g, sites, local.ID, sha, push)
@@ -1054,7 +1149,7 @@ func Parents(g Gathered, head string, merge bool) ([]string, error) {
 	heads := g.Verdict.Heads
 	switch {
 	case len(heads) == 0 && head != "":
-		return nil, fmt.Errorf("your base %s is held by no site that answered and is not in the local store; run %s deployment pull", head, progname.Cmd())
+		return nil, fmt.Errorf("your base %s is held by no site that answered and is not in the system copy's store; run %s deployment pull", head, progname.Cmd())
 	case len(heads) == 0 && merge:
 		return nil, errors.New("there is nothing to merge: no site holds a version")
 	case len(heads) == 0:
@@ -1090,7 +1185,7 @@ func UnreachedError(g Gathered) error {
 	return errors.Join(errs...)
 }
 
-// DiffersError is local files that are not the sites' newest version. An
+// DiffersError is a system copy's files that are not the sites' newest version. An
 // attestation says the operator holds that version's files, which they have
 // checked; files that differ are not that check.
 type DiffersError struct {
@@ -1099,15 +1194,15 @@ type DiffersError struct {
 }
 
 func (e *DiffersError) Error() string {
-	return fmt.Sprintf("the local files differ from the sites' newest version %s, and only a version equal to the files you hold is attested", e.Head)
+	return fmt.Sprintf("the system copy's files differ from the sites' newest version %s, and only a version equal to the files this workstation holds is attested", e.Head)
 }
 
 // AttestTarget is the version an attestation signs: the single head of g,
-// which must equal the local files byte for byte, since those are the copy
-// the operator already trusts. With no local files at all it is the head the
+// which must equal the system copy l's files byte for byte, since those are
+// the copy the operator already trusts. With no files in l at all it is the head the
 // pinned root pin leads to, and write is true: the attestation writes the
 // head's files, as a recovery does. It refuses a fork, no head, files that
-// differ (a *DiffersError) and, with no local files, no pin.
+// differ (a *DiffersError) and, with no files, no pin.
 func AttestTarget(l Local, g Gathered, pin string) (head string, write bool, err error) {
 	heads := g.Verdict.Heads
 	switch {
@@ -1119,13 +1214,13 @@ func AttestTarget(l Local, g Gathered, pin string) (head string, write bool, err
 	head = heads[0]
 	if !l.HasFiles() {
 		if pin == "" || !slices.Contains(g.Roots(head), pin) {
-			return "", false, errors.New("there are no local files to compare the sites' newest version with, and no pinned root it descends from; pin the first version you trust with --root <sha>")
+			return "", false, errors.New("the system copy holds no files to compare the sites' newest version with, and no pinned root it descends from; pin the first version you trust with --root <sha>")
 		}
 		return head, true, nil
 	}
 	local, err := l.Files()
 	if err != nil {
-		return "", false, fmt.Errorf("read the local files: %w", err)
+		return "", false, fmt.Errorf("read the system copy's files: %w", err)
 	}
 	cache, err := l.Cache()
 	if err != nil {
@@ -1151,7 +1246,9 @@ func AttestTarget(l Local, g Gathered, pin string) (head string, write bool, err
 // a site but its store. signWith is what git's user.signingKey is given,
 // "key::" and the key line for the agent. A head the key signed already is
 // pushed again rather than attested twice, so running it again resumes a
-// push some sites missed.
+// push some sites missed. Once it signed the attestation it returns it
+// with any error, so the caller can take back one no site took
+// (Local.Mark).
 func AttestFrom(l Local, g Gathered, sites map[string]apply.Transport, pin, keyLine, signWith string, now time.Time) (string, []string, error) {
 	return attestFrom(l, g, sites, pin, keyLine, signWith, now, Push)
 }
@@ -1199,22 +1296,22 @@ func attestFrom(l Local, g Gathered, sites map[string]apply.Transport, pin, keyL
 			return "", nil, fmt.Errorf("sign the attestation: %w", err)
 		}
 		if err := l.raiseSeen(rev, sha); err != nil {
-			return "", nil, err
+			return sha, nil, err
 		}
 	}
 	if write {
 		if err := l.WriteFiles(theirs); err != nil {
-			return "", nil, err
+			return sha, nil, err
 		}
 	}
 	if err := l.SetSigningKey(key.Line); err != nil {
-		return "", nil, err
+		return sha, nil, err
 	}
 	if err := l.SetHead(sha); err != nil {
-		return "", nil, err
+		return sha, nil, err
 	}
 	if recorded, err := l.Root(); err != nil {
-		return "", nil, err
+		return sha, nil, err
 	} else if recorded == "" {
 		root := pin
 		if roots := g.Roots(head); root == "" && len(roots) == 1 {
@@ -1222,7 +1319,7 @@ func attestFrom(l Local, g Gathered, sites map[string]apply.Transport, pin, keyL
 		}
 		if root != "" {
 			if err := l.SetRoot(root); err != nil {
-				return "", nil, err
+				return sha, nil, err
 			}
 		}
 	}
@@ -1234,3 +1331,96 @@ func attestFrom(l Local, g Gathered, sites map[string]apply.Transport, pin, keyL
 // sha, for a copy made from a version another workstation directory already
 // judged: the copy then refuses an older head as that directory would.
 func (l Local) Remember(rev int, sha string) error { return l.raiseSeen(rev, sha) }
+
+// Mark records what a publish writes to l, its trust records and the
+// versions its store names, and returns what puts them back: a publish no
+// site took is taken back whole, so the store names no version only this
+// workstation holds and the records name nothing the sites lack. undo is
+// given the version the publish committed, "" for none, and drops it from
+// the store unless the store named it at the mark; a version another
+// gather brought in meanwhile is left. The objects a dropped version left
+// in the store are unnamed, and no version. Given "" while the store
+// gained a version since the mark, undo drops nothing and says so in its
+// error. A push whose error is
+// ambiguous, a site having taken the bytes and the answer lost, drops the
+// version here too; the next gather brings it back from that site.
+func (l Local) Mark() (undo func(committed string) error, err error) {
+	type record struct {
+		data []byte
+		held bool
+	}
+	saved := map[string]record{}
+	for _, name := range []string{rootFile, headFile, seenFile, signingFile} {
+		data, err := os.ReadFile(l.state(name))
+		switch {
+		case err == nil:
+			saved[name] = record{data: data, held: true}
+		case errors.Is(err, os.ErrNotExist):
+			saved[name] = record{}
+		default:
+			return nil, err
+		}
+	}
+	var named []string
+	if cache, ok, err := l.HeldStore(); err != nil {
+		return nil, err
+	} else if ok {
+		if named, err = cache.versionRefs(); err != nil {
+			return nil, err
+		}
+	}
+	return func(committed string) error {
+		var errs []error
+		for _, name := range slices.Sorted(maps.Keys(saved)) {
+			r := saved[name]
+			if r.held {
+				errs = append(errs, writeAtomic(l.state(name), r.data, stateFileMode))
+			} else if err := os.Remove(l.state(name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+				errs = append(errs, err)
+			}
+		}
+		if committed == "" {
+			// Nothing to drop, and a version the store gained since the
+			// mark is not known to be this publish's: it is said, not
+			// guessed at.
+			if added := addedSince(l, named); len(added) > 0 {
+				errs = append(errs, fmt.Errorf("the store names %s, added since the publish began and not known to be its version, so it was left; if this workstation signed it and no site holds it, the next publish pushes it beside its own", strings.Join(added, ", ")))
+			}
+			return errors.Join(errs...)
+		}
+		if slices.Contains(named, committed) {
+			return errors.Join(errs...)
+		}
+		if checkSHA(committed) != nil {
+			return errors.Join(append(errs, fmt.Errorf("%q is not a version", committed))...)
+		}
+		cache, ok, err := l.HeldStore()
+		if err != nil || !ok {
+			return errors.Join(append(errs, err)...)
+		}
+		if _, err := cache.git(nil, nil, "update-ref", "-d", "refs/versions/"+committed); err != nil {
+			errs = append(errs, err)
+		}
+		return errors.Join(errs...)
+	}, nil
+}
+
+// addedSince is each version l's store names that named, what it named
+// before, lacks.
+func addedSince(l Local, named []string) []string {
+	cache, ok, err := l.HeldStore()
+	if err != nil || !ok {
+		return nil
+	}
+	now, err := cache.versionRefs()
+	if err != nil {
+		return nil
+	}
+	var added []string
+	for _, sha := range now {
+		if !slices.Contains(named, sha) {
+			added = append(added, sha)
+		}
+	}
+	return added
+}

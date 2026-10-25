@@ -44,6 +44,7 @@ func runOIDCClientCreate(args []string) error {
 	fs := newFlagSet("oidc client create", flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
+	id := idFlag(fs)
 	secretsPath := fs.String("secrets", "", "path to the secrets file (default: secrets.enc.yaml beside the config)")
 	appName := fs.String("app", "", "the app the client is for, by the name it has in the configuration")
 	rotate := fs.Bool("rotate-secret", false, "add a new secret even when the recorded one is live; the old one stays valid until deleted")
@@ -61,6 +62,9 @@ func runOIDCClientCreate(args []string) error {
 		return fmt.Errorf("oidc client create: --app is required")
 	}
 
+	if _, err := ensureDraft(*configPath, *id); err != nil {
+		return err
+	}
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		return err

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
+	"github.com/paisans-software/paisans-cli/internal/draft"
 	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -24,14 +26,16 @@ import (
 // so a site serving an old version cannot put it on a host that has had a
 // newer one without the operator noticing.
 //
-// The order is the point. Before the review: gather, and refuse a fork or
-// local files that are not based on the sites' newest version, since
-// applying them would undo whatever the newer version changed. After the
-// approval and before the first change: check each host's record, which
+// The order is the point. Before the review: gather into the system copy's
+// store, refuse a fork, and merge into the draft a newer version than the
+// one it was drafted from, stopping there, since applying the draft as it
+// is would undo whatever the newer version changed (config_merge.go).
+// After the approval and before the first change: check each host's record, which
 // only reads. Then publish: deployment apply --site before its first change, apply
 // without --site once its site prepare steps have made every site's store
 // and before any other step changes a host (see runConverge). What is
-// published is the bytes apply loaded and applies, never a second read.
+// published is the bytes apply loaded and applies, never a second read, and
+// publishing deploys them into the system copy (deploydraft.go).
 
 // appliedVersion is the version of the configuration an apply puts on its
 // hosts, as each host's grant record holds it.
@@ -66,10 +70,9 @@ type storeVersion interface {
 var applyStore = gatherForApply
 
 // gathered is a gather an apply goes on from: the version it will publish
-// builds on parents, or is same when the local files are that version's
-// already.
+// builds on parents, or is same when the draft is that version's already.
 type gathered struct {
-	l        configstore.Local
+	deployer
 	g        configstore.Gathered
 	sites    map[string]apply.Transport
 	key      string
@@ -83,71 +86,87 @@ type gathered struct {
 }
 
 // gatherForApply gathers as deployment publish does, without the side effects
-// in a dry run: no site syncs. The seen record is written only when the
-// version is published, after the review's approval (configstore.PublishFiles).
-// loaded is the paisans-stack.yaml and secrets.enc.yaml the caller loaded and
-// applies, which are what is published; nil reads them here, for apply
-// without --site, whose steps each check that they load the same.
+// in a dry run: no site syncs, and the system copy's store records the
+// versions gathered and nothing else. The seen record is written only when
+// the version is published, after the review's approval
+// (configstore.PublishOn). loaded is the paisans-stack.yaml and
+// secrets.enc.yaml the caller loaded and applies, which are what is
+// published, its "drafted from" line stripped; nil reads them here, for
+// apply without --site, whose steps each check that they load the same.
 // It refuses, before the review, what --execute could not publish: files
-// that are not the three of a version, a fork, a base that is not the
-// sites' newest version, a key no operator lists, and, with --execute, a run
-// that reaches no site. No base at all is a deployment's first version.
+// that are not the three of a version, a fork, a key no operator lists,
+// and, with --execute, a run that reaches no site. A draft whose base is
+// older than the sites' newest version is merged forward, and the apply
+// stops (mergeNewer). No base at all is a deployment's first version.
 func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *configstore.Files, cfg *config.Config, execute bool, ans answerer, stdin io.Reader, stdout io.Writer) (storeVersion, error) {
-	l, err := workstationOf(configPath)
+	d, err := draftAt(configPath)
 	if err != nil {
 		return nil, err
 	}
-	beside := filepath.Join(l.Dir, "secrets.enc.yaml")
+	beside := filepath.Join(d.Dir, configstore.FileSecrets)
 	if secretsPath != "" && !samePath(secretsPath, beside) {
-		return nil, &ui.Problem{Hint: "--secrets names a file other than secrets.enc.yaml beside " + config.FileName, Explain: "apply publishes the version it applies, and a version holds the secrets.enc.yaml beside " + config.FileName + ". Applying " + secretsPath + " would put on the hosts secrets the store does not hold. Drop --secrets, or move the file beside " + config.FileName + "."}
+		return nil, &ui.Problem{Hint: "--secrets names a file other than secrets.enc.yaml beside " + config.FileName, Explain: "apply publishes the version it applies, and a version holds the draft's secrets.enc.yaml, beside its " + config.FileName + ". Applying " + secretsPath + " would put on the hosts secrets the store does not hold. Drop --secrets, or move the file beside " + config.FileName + "."}
 	}
-	files, err := l.Files()
+	raw, err := d.Files()
 	if err == nil && loaded != nil {
-		files.Paisans, files.Secrets = loaded.Paisans, loaded.Secrets
+		raw.Paisans, raw.Secrets = loaded.Paisans, loaded.Secrets
 	}
 	if err != nil {
-		return nil, &ui.Problem{Hint: "the files of a version cannot be read", Explain: "apply publishes " + config.FileName + ", secrets.enc.yaml and .sops.yaml from " + l.Dir + " as the version it applies. " + errLine(err) + ".", Cause: err}
+		return nil, &ui.Problem{Hint: "the files of a version cannot be read", Explain: "apply publishes the draft's " + config.FileName + ", secrets.enc.yaml and .sops.yaml from " + d.Dir + " as the version it applies. " + errLine(err) + ".", Cause: err}
+	}
+	files, err := asVersion(raw)
+	if err != nil {
+		return nil, err
 	}
 	// A version holds the secrets encrypted, and only encrypted.
 	if err := config.CheckSecretsBytes(beside, files.Secrets); err != nil {
 		return nil, err
 	}
-	a, err := l.Anchor()
-	if err != nil {
-		return nil, err
-	}
 	r.Section("configuration store")
 	sites := configTransports(cfg)
-	g, err := gatherAt(r, l, sites, cfg.ID, a, gatherMode{execute: execute, answers: ans}, stdin, stdout)
+	t, err := gatherDeploy(r, d, cfg, sites, raw.Paisans, gatherMode{execute: execute, answers: ans}, stdin, stdout)
+	// Nothing after the gather reads the scratch directory of a deployment
+	// with no system copy: its deploy makes the system copy.
+	defer t.done()
 	if err != nil {
 		return nil, err
 	}
+	g := t.g
+	t.again, t.source = "deployment apply --execute", "applied from "+d.Dir
 	if g.Verdict.Fork {
 		return nil, forkProblem(g, "Nothing was applied.")
 	}
-	head, err := l.Head()
+	if heads := g.Verdict.Heads; len(heads) == 1 && t.base != "" && heads[0] != t.base {
+		// Versions that only sign the base's files again, as an
+		// attestation does, leave nothing to merge: the draft goes on
+		// from the sites' newest, and its deploy rewrites the line.
+		if !unchangedSince(t.sys, g, t.base, heads[0]) {
+			return nil, mergeNewer(r, t.deployer, g, execute)
+		}
+		t.base = heads[0]
+	}
+	parents, err := configstore.Parents(g, t.base, false)
+	if err != nil {
+		return nil, &ui.Problem{Hint: "the draft is not based on the sites' newest version", Explain: err.Error() + ". Applying it would undo whatever that version changed. Nothing was applied.", Cause: err}
+	}
+	// After the gather, which brings the base into the system copy's
+	// store: the key is checked against the operators the base lists.
+	key, err := signingKeyFor(t.sys, cfg)
 	if err != nil {
 		return nil, err
 	}
-	parents, err := configstore.Parents(g, head, false)
-	if err != nil {
-		return nil, &ui.Problem{Hint: "the local files are not based on the sites' newest version", Explain: err.Error() + ". Applying them would undo whatever that version changed. Nothing was applied.", Cause: err}
-	}
-	// After the gather, which brings the base into the local store: the
-	// key is checked against the operators the base lists.
-	key, err := signingKeyFor(l, cfg)
-	if err != nil {
-		return nil, err
-	}
-	if err := configstore.CheckSigner(l, parents, cfg, key); err != nil {
+	if err := configstore.CheckSigner(t.sys, parents, cfg, key); err != nil {
 		return nil, err
 	}
 	if len(g.Direct()) == 0 && execute {
 		return nil, &ui.Problem{Hint: "no site answered", Explain: "apply publishes the version it applies before the first change, and no site can take it. Nothing was applied.", Cause: configstore.UnreachedError(g)}
 	}
-	v := &gathered{l: l, g: g, sites: sites, key: key, files: files, parents: parents, revision: 1, answers: ans}
-	if v.same, err = showChange(r, l, g, parents, files); err != nil {
+	v := &gathered{deployer: t.deployer, g: g, sites: sites, key: key, files: files, parents: parents, revision: 1, answers: ans}
+	if v.same, err = showChange(r, t.sys, g, parents, files); err != nil {
 		return nil, err
+	}
+	if w := staleDraftWarning(t.sys, g, d, raw.Paisans); w != "" {
+		r.Warn(w, "")
 	}
 	for _, p := range parents {
 		v.revision = max(v.revision, g.Versions[p].Revision+1)
@@ -158,26 +177,58 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *confi
 	return v, nil
 }
 
-// showChange shows, before the review, how the local files differ from the
-// sites' newest version, which the gather brought into the local store:
-// paisans-stack.yaml as a diff from that version, the secrets by key name
-// only, never a value. It returns that version when the files are it
-// already, "" otherwise. A first version has nothing to differ from.
-func showChange(r ui.Reporter, l configstore.Local, g configstore.Gathered, parents []string, files configstore.Files) (string, error) {
+// mergeNewer merges the sites' newest version, newer than the draft's
+// base, into the draft of p, and stops the apply, which deploys nothing:
+// the merged draft is reviewed and applied again. The system copy moves
+// to that version, and records the gather's seen record. A dry run says
+// what --execute merges and writes nothing.
+func mergeNewer(r ui.Reporter, p deployer, g configstore.Gathered, execute bool) error {
+	head := g.Verdict.Heads[0]
+	m, err := mergeForward(r, p.sys, g, p.d, p.id, p.base, head, p.head, "merged forward by deployment apply", execute, func(l configstore.Local) error { return l.RecordSeen(g) })
+	if err != nil {
+		return err
+	}
+	rev := m.marker.Revision
+	if !execute {
+		explain := fmt.Sprintf("The draft was drafted from %s, and the sites hold %s, which applying the draft would undo. --execute merges revision %d into this draft and stops, so the merged draft is reviewed before it is deployed.", shortSHA(p.base), describe(g, head), rev)
+		if len(m.conflicts) > 0 {
+			explain += "\n" + conflictsExplain(m)
+		}
+		return &ui.Problem{Hint: "the draft is behind the sites' newest version", Explain: explain + "\nNothing was written."}
+	}
+	explain := "Review the merged draft, then run " + progname.Cmd() + " deployment apply --execute again."
+	if len(m.conflicts) > 0 {
+		explain = conflictsExplain(m)
+	}
+	return &ui.Problem{Hint: fmt.Sprintf("merged revision %d into this draft; review it and run apply again", rev), Explain: explain + "\nNothing was deployed."}
+}
+
+// showChange shows, before the review, how the draft differs from the
+// sites' newest version, the one it builds on, which the gather brought
+// into the system copy's store. That version is the draft's base, and is
+// the baseline whatever the system copy's own files are, since it is what
+// the deploy changes on the sites: paisans-stack.yaml as a diff from that
+// version, the secrets by key name only, never a value. files are the
+// draft's as a version holds them, its "drafted from" line stripped. It
+// returns that version when the draft is it already, "" otherwise. Under the
+// difference it flags each change that puts back a value an older version
+// had before a later revision changed it (undoFlags). A first version has
+// nothing to differ from.
+func showChange(r ui.Reporter, sys configstore.Local, g configstore.Gathered, parents []string, files configstore.Files) (string, error) {
 	s := r.Step("what changes in the configuration")
 	if len(parents) == 0 {
 		s.End(ui.OK, "the first version, nothing to compare it with")
 		return "", nil
 	}
 	head := parents[0]
-	cache, err := l.Cache()
+	cache, err := sys.Cache()
 	if err != nil {
 		s.Fail(err)
 		return "", err
 	}
 	theirs, err := cache.Files(head)
 	if err != nil {
-		s.End(ui.Warned, describe(g, head)+" is not in the local store to compare with")
+		s.End(ui.Warned, describe(g, head)+" is not in the system copy's store to compare with")
 		return "", nil
 	}
 	if theirs.Equal(files) {
@@ -185,17 +236,27 @@ func showChange(r ui.Reporter, l configstore.Local, g configstore.Gathered, pare
 		return head, nil
 	}
 	rev := g.Versions[head].Revision
-	lines, err := difference(theirs, files, sides{dirA: fmt.Sprintf("revision-%d/", rev), dirB: "local/", inA: fmt.Sprintf("revision %d", rev), inB: "the local files"})
+	lines, err := difference(theirs, files, sides{dirA: fmt.Sprintf("revision-%d/", rev), dirB: "draft/", inA: fmt.Sprintf("revision %d", rev), inB: "the draft"})
 	if err != nil {
 		s.Fail(err)
 		return "", err
 	}
-	s.End(ui.OK, "the local files against "+describe(g, head))
+	s.End(ui.OK, "the draft against "+describe(g, head))
 	if len(lines) == 0 {
 		// Equal keys and values, stored differently: sops's metadata.
 		lines = []string{"secrets.enc.yaml differs only in sops's metadata"}
 	}
 	r.Verbatim(lines)
+	// The history is only advice: a version that cannot be read for it does
+	// not stop the apply.
+	flags, err := undoFlags(sys, g, head, files)
+	if err != nil {
+		r.Warn("the draft could not be checked against the history", errLine(err)+". The difference above is complete.")
+		return "", nil
+	}
+	if len(flags) > 0 {
+		r.Verbatim(flags)
+	}
 	return "", nil
 }
 
@@ -237,27 +298,35 @@ func (v *gathered) publish(r ui.Reporter, execute bool) (*appliedVersion, error)
 		return nil, nil
 	}
 	s := r.Step("publish " + v.what())
-	sha, pushed, err := configstore.PublishFiles(v.l, v.g, v.files, v.sites, v.key, configSignWith(v.key), false, configNow())
-	return v.saved(r)(published(r, s, sha, pushed, err, v.revision, v.files))
+	return v.deployed(r, s, v.files, v.revision, func(sys configstore.Local) (string, []string, error) {
+		return configstore.PublishOn(sys, v.g, v.base, v.files, v.sites, v.key, configSignWith(v.key), false, configNow())
+	})
 }
 
 func (v *gathered) next(r ui.Reporter, prev *appliedVersion, files configstore.Files) (*appliedVersion, error) {
 	s := r.Step(fmt.Sprintf("publish revision %d", prev.revision+1))
 	s.Detail("what this run recorded in secrets.enc.yaml, on %s", prev.sha[:12])
-	sha, pushed, err := configstore.PublishNext(v.l, v.g, prev.sha, prev.revision, files, v.sites, v.key, configSignWith(v.key), configNow())
-	return v.saved(r)(published(r, s, sha, pushed, err, prev.revision+1, files))
+	return v.deployed(r, s, files, prev.revision+1, func(sys configstore.Local) (string, []string, error) {
+		return configstore.PublishNext(sys, v.g, prev.sha, prev.revision, files, v.sites, v.key, configSignWith(v.key), configNow())
+	})
 }
 
-// saved saves a version the run published to this workstation's deployments,
-// so every deployment applied from here is found again by deployment list
-// wherever its files were.
-func (v *gathered) saved(r ui.Reporter) func(*appliedVersion, error) (*appliedVersion, error) {
-	return func(a *appliedVersion, err error) (*appliedVersion, error) {
-		if err == nil && a != nil {
-			saveVersion(r, v.l, a.sha, a.revision, a.files, v.key, "applied from "+v.l.Dir)
+// deployed deploys files as revision, which push signs and pushes on the
+// system copy, ending s, the step that publishes them, from what push
+// returned.
+func (v *gathered) deployed(r ui.Reporter, s ui.Step, files configstore.Files, revision int, push func(sys configstore.Local) (string, []string, error)) (*appliedVersion, error) {
+	var a *appliedVersion
+	err := v.deploy(r, s, files, func(sys configstore.Local, r ui.Reporter, s ui.Step) (string, int, error) {
+		sha, pushed, err := push(sys)
+		if a, err = published(r, s, sha, pushed, err, revision, files); err != nil {
+			return sha, 0, err
 		}
-		return a, err
+		return a.sha, a.revision, nil
+	})
+	if err != nil {
+		return nil, err
 	}
+	return a, nil
 }
 
 // published ends s, the step that published files as revision, from what
@@ -381,4 +450,38 @@ func (s *siteReview) publishWritten(r ui.Reporter, written []byte, store storeVe
 		identity.applied(v.sha, v.revision)
 	}
 	return nil
+}
+
+// staleDraftWarning is the sentence to print when the draft's base is the
+// system copy's fallback, the draft's paisans-stack.yaml (paisans) having no
+// usable "drafted from" line, and any of its files was last saved before the
+// trusted version that brought the newest files reached this workstation:
+// the sites' newest, or the oldest of the versions before it that hold its
+// files (filesRun). It is "" otherwise, and
+// when no arrival is recorded for that version. A draft whose line names a
+// trusted version is never warned about: a deploy rewrites only that line,
+// so its other files keep older times.
+func staleDraftWarning(sys configstore.Local, g configstore.Gathered, d draft.Draft, paisans []byte) string {
+	if m, ok := draft.ReadMarker(paisans); ok && g.Verdict.Trusted[m.SHA] {
+		return ""
+	}
+	if len(g.Verdict.Heads) == 0 {
+		return ""
+	}
+	// The version that brought the newest files: an attestation after it
+	// signs them again and changes nothing a draft could be missing.
+	run := filesRun(sys, g, g.Verdict.Heads[0])
+	brought := run[len(run)-1]
+	arrived, ok := sys.ArrivedAt(brought)
+	if !ok {
+		return ""
+	}
+	for _, name := range []string{config.FileName, configstore.FileSecrets, configstore.FileSOPS} {
+		fi, err := os.Stat(filepath.Join(d.Dir, name))
+		if err == nil && fi.ModTime().Before(arrived) {
+			rev := g.Versions[brought].Revision
+			return fmt.Sprintf("This draft was last saved before revision %d reached this workstation; it may not include revision %d's changes.", rev, rev)
+		}
+	}
+	return ""
 }

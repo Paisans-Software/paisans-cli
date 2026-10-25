@@ -26,7 +26,7 @@ func TestMeshRekeyRefusesBeforeReachingAHost(t *testing.T) {
 		"nowhere":       "declares no site nowhere",
 		"home-a nobody": "declares no site nobody",
 	} {
-		err := runMeshRekey(append(strings.Fields(args), "--config", fixtureConfig()))
+		err := runMeshRekey(append(strings.Fields(args), "--config", fixtureDraft(t, fixtureDeploymentID)))
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: err = %v, want %q", args, err, want)
 		}
