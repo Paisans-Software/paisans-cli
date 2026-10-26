@@ -10,6 +10,8 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+## [0.3.0-rc.11] - 2026-10-26
+
 ### Added
 
 - `deployment apply --execute` writes a timed log of each run under `runs/` in the data directory: every step, and every command sent to a host with its site, duration and sender.
@@ -317,7 +319,8 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.
 - The gateway refuses any request to Pocket ID that carries an `X-API-Key` header with 403, so Pocket ID's API keys work only on the mesh.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.10...develop
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.11...develop
+[0.3.0-rc.11]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.10...v0.3.0-rc.11
 [0.3.0-rc.10]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.9...v0.3.0-rc.10
 [0.3.0-rc.9]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.8...v0.3.0-rc.9
 [0.3.0-rc.8]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.7...v0.3.0-rc.8
