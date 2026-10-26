@@ -16,7 +16,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Changed
 
-- `deployment apply` reaches its sites faster: it classifies them, gathers their versions and tries their mail logins at once, batches each host's read only probes into one ssh round trip, and resolves images and DNS records concurrently.
+- `deployment apply` is faster: it classifies sites, gathers versions and tries mail logins at once, batches each host's read only probes into one ssh round trip, and checks images and DNS concurrently.
 
 ## [0.3.0-rc.10] - 2026-10-25
 
