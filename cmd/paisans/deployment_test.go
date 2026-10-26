@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -36,9 +37,15 @@ type storeHost struct {
 	runs                *[]string
 }
 
+// storeRunsMu guards a runs log hosts share: a gather pulls every site at
+// once.
+var storeRunsMu sync.Mutex
+
 func (h *storeHost) Run(c string) (string, error) {
 	if h.runs != nil {
+		storeRunsMu.Lock()
 		*h.runs = append(*h.runs, h.name+": "+c)
+		storeRunsMu.Unlock()
 	}
 	if h.down {
 		return "", errors.New("ssh: connect to host " + h.name + " port 22: Connection refused")

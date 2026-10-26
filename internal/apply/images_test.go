@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -45,10 +46,15 @@ type registry struct {
 	// platformsAsked counts Platforms calls, each a manifest GET on a real
 	// registry.
 	platformsAsked int
+	// mu guards asked and platformsAsked: CheckPlatforms asks about images
+	// at once.
+	mu sync.Mutex
 }
 
 func (r *registry) Digest(ref string) (string, error) {
+	r.mu.Lock()
 	r.asked = append(r.asked, ref)
+	r.mu.Unlock()
 	if err := r.fail[ref]; err != nil {
 		return "", err
 	}
@@ -730,7 +736,9 @@ func TestABareTagBesideItsPinnedBuildIsNotADisagreement(t *testing.T) {
 // (before @) is a key is published for those platforms, and any other for
 // amd64 and arm64.
 func (r *registry) Platforms(ref string) ([]string, error) {
+	r.mu.Lock()
 	r.platformsAsked++
+	r.mu.Unlock()
 	if r.platformErr != nil {
 		return nil, r.platformErr
 	}

@@ -10,6 +10,14 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Added
+
+- `deployment apply --execute` writes a timed log of each run under `runs/` in the data directory: every step, and every command sent to a host with its site, duration and sender.
+
+### Changed
+
+- `deployment apply` is faster: it classifies sites, gathers versions and tries mail logins at once, batches each host's read only probes into one ssh round trip, and checks images and DNS concurrently.
+
 ## [0.3.0-rc.10] - 2026-10-25
 
 ### Fixed

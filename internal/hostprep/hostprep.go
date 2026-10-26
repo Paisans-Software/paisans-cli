@@ -28,6 +28,7 @@ import (
 	"text/template"
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
+	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/progname"
@@ -278,6 +279,18 @@ func UnsupportedMessage(host OSRelease) string {
 // keys, and last the keys no longer listed. Nothing here is installed or
 // written as root: site admit did that, and a difference is the owner's to
 // fix by admitting again.
+// planReads is every file Build reads once it knows the login user's home,
+// in the order it reads them: the authorized keys and the record of the ones
+// Paisans owns, Docker's daemon.json, and the configuration store's.
+func planReads(d deployment.Deployment, home string) []string {
+	units := UserUnitDir(home) + "/" + d.Prefix()
+	return []string{
+		home + "/.ssh/authorized_keys", OwnedKeysPath(d), home + "/.config/docker/daemon.json",
+		ConfigRepo(d) + "/HEAD", ConfigPeers(d), ConfigScriptDir(d) + "/config-sync.sh",
+		units + "-config-daemon.service", units + "-config-sync.service", units + "-config-sync.timer",
+	}
+}
+
 func Build(site string, cfg *config.Config, t Transport, rec admission.Record) (*Plan, error) {
 	declared, ok := cfg.Sites[site]
 	if !ok {
@@ -316,6 +329,11 @@ func Build(site string, cfg *config.Config, t Transport, rec admission.Record) (
 	home, err := Home(t)
 	if err != nil {
 		return nil, err
+	}
+	// The files the rest of the plan reads are read at once, in one round
+	// trip over ssh (see apply.Prefetch).
+	if at, ok := t.(apply.Transport); ok {
+		t = apply.Prefetch(at, nil, planReads(d, home))
 	}
 	keys, keyRemovals, err := planAuthorizedKeys(t, d, home, declared.SSH)
 	if err != nil {

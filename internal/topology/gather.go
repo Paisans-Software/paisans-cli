@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
@@ -23,24 +24,37 @@ import (
 // for etcd's voters, and Patroni's, for the cluster's sites that are no
 // voter, when none that answered could be read and one of them has run it.
 // A login is tried once (apply.Reach): a site that does not answer is not
-// asked again, here or later in the run.
+// asked again, here or later in the run. Every site is logged in to and read
+// at once, so a run waits on its slowest site rather than on them all in
+// turn.
 func Gather(cfg *config.Config, transports map[string]apply.Transport) Evidence {
 	d := cfg.Deployment()
 	ev := Evidence{Login: map[string]error{}, Records: map[string]RecordRead{}, Joined: map[string][]string{}}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
 	for _, name := range cfg.SiteNames() {
 		t, ok := transports[name]
 		if !ok {
 			ev.Login[name] = fmt.Errorf("no way to reach it")
 			continue
 		}
-		if err := apply.Reach(t); err != nil {
-			ev.Login[name] = err
-			continue
-		}
-		ev.Login[name] = nil
-		rec, err := admission.Read(t, d.Token())
-		ev.Records[name] = RecordRead{Record: rec, Err: err}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := apply.Reach(t); err != nil {
+				mu.Lock()
+				ev.Login[name] = err
+				mu.Unlock()
+				return
+			}
+			rec, err := admission.Read(t, d.Token())
+			mu.Lock()
+			ev.Login[name] = nil
+			ev.Records[name] = RecordRead{Record: rec, Err: err}
+			mu.Unlock()
+		}()
 	}
+	wg.Wait()
 	answered := func(sites []string) []string {
 		var out []string
 		for _, s := range sites {

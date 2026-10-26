@@ -26,6 +26,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -386,6 +387,11 @@ func ProbeWith(h Host, docker string) (Probed, error) {
 // Taken refuses it rather than reading it as no networks.
 func ProbeUser(h Host) (Probed, error) {
 	var p Probed
+	// Every probe only reads, so over ssh they are asked at once, in one
+	// round trip (see apply.Prefetch).
+	if t, ok := h.(apply.Transport); ok {
+		h = apply.Prefetch(t, []string{RouteCommand, AddrCommand, NetworksCommand, UserDaemonCommand}, nil)
+	}
 	for _, step := range []struct {
 		name, command string
 		into          *string

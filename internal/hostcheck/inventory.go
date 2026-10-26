@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/version"
@@ -209,6 +210,15 @@ func ReadCommands(d deployment.Deployment) []string {
 // read.
 func Inspect(t Transport, d deployment.Deployment) (*Inventory, error) {
 	inv := &Inventory{Host: t.Describe(), ManifestPath: d.Manifest()}
+	// Every probe only reads, so over ssh they are all asked at once, in one
+	// round trip, rather than one round trip each.
+	if at, ok := t.(apply.Transport); ok {
+		var probes []string
+		for _, p := range []string{SelfProbe, dockerProbe, packageProbe, containerProbe, volumeProbe, networkProbe, socketProbe, linkProbe, routeProbe, hostSitesProbe(d)} {
+			probes = append(probes, cLocale+p)
+		}
+		t = apply.Prefetch(at, probes, []string{inv.ManifestPath})
+	}
 	fail := func(what string, err error) error {
 		return fmt.Errorf("host check on %s: %s: %w", inv.Host, what, err)
 	}
