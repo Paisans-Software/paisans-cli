@@ -12,7 +12,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Added
 
-- `deployment apply` writes a timed log of each run under `runs/` in the data directory: every step, and every command sent to a host with its site, duration and sender.
+- `deployment apply --execute` writes a timed log of each run under `runs/` in the data directory: every step, and every command sent to a host with its site, duration and sender.
 
 ### Changed
 

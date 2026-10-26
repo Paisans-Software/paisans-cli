@@ -11,12 +11,14 @@ import (
 )
 
 // openRunLog starts the run log of command, args its arguments, under the
-// data directory, and returns what ends it. The log is a convenience: one
-// that cannot be opened is not written, and the command runs the same.
+// data directory, and returns what ends it. Only a run that executes is
+// logged: a dry run writes nothing, its log included. The log is a
+// convenience: one that cannot be opened is not written, and the command
+// runs the same.
 // While one is open, every step and every command sent to a host is told to
 // it (see internal/runlog).
 func openRunLog(command string, args []string) (closeLog func()) {
-	if runlog.Current() != nil {
+	if runlog.Current() != nil || !writesRecords(args) {
 		return func() {}
 	}
 	base, err := localstore.Base()
