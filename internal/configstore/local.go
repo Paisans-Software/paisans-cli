@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
@@ -643,15 +644,34 @@ func GatherAnchored(l Local, sites map[string]apply.Transport, id string, a Anch
 }
 
 func gather(l Local, sites map[string]apply.Transport, id string, a Anchor, o GatherOptions, pull PullFunc) (Gathered, error) {
-	sync := o.Sync
+	syncFirst := o.Sync
 	cache, err := l.Cache()
 	if err != nil {
 		return Gathered{}, err
 	}
 	d := deployment.Deployment{ID: id}
-	g := Gathered{Holders: map[string][]string{}, Signers: map[string]string{}, Synced: sync}
-	for _, name := range slices.Sorted(maps.Keys(sites)) {
-		bundle, report, err := pull(sites[name], d, sync)
+	g := Gathered{Holders: map[string][]string{}, Signers: map[string]string{}, Synced: syncFirst}
+	// Every site is pulled at once; their bundles go into the store one at a
+	// time, in the sites' order.
+	names := slices.Sorted(maps.Keys(sites))
+	type pulled struct {
+		bundle []byte
+		report *SyncReport
+		err    error
+	}
+	pulls := make([]pulled, len(names))
+	var wg sync.WaitGroup
+	for i, name := range names {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p := &pulls[i]
+			p.bundle, p.report, p.err = pull(sites[name], d, syncFirst)
+		}()
+	}
+	wg.Wait()
+	for i, name := range names {
+		bundle, report, err := pulls[i].bundle, pulls[i].report, pulls[i].err
 		if err == nil && bundle != nil {
 			var heads []string
 			if heads, err = cache.bundleVersions(bundle); err == nil {
