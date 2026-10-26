@@ -1602,9 +1602,8 @@ images it superseded* in `README.md`).
 * **Run log:** every `deployment apply --execute`, with or without `--site`,
   writes `runs/<UTC time>-deployment-apply.log` in the data directory: each
   step and each command sent to a host, timed, with a summary by site and by
-  sender; a dry run writes none
-  (see *This workstation keeps one system copy of each deployment* in
-  `README.md`).
+  sender (see *This workstation keeps one system copy of each deployment* in
+  `README.md`). A dry run writes none.
 * **Sites missing:** the run first classifies every declared site, once, as
   ready, pending or down (see *A deployment with sites missing* in
   `README.md`). A pending site, whose host has not admitted the deployment or
