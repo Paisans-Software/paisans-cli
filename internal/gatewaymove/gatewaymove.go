@@ -354,6 +354,7 @@ func inspectCommand(d deployment.Deployment) string {
 // inspect reads what a site's host holds of a gateway.
 func inspect(t apply.Transport, d deployment.Deployment) (Evidence, error) {
 	var ev Evidence
+	t = apply.Prefetch(t, []string{inspectCommand(d)}, []string{deployrecord.Path(d), MarkerPath(d)})
 	out, err := t.Run(inspectCommand(d))
 	if err != nil {
 		return ev, fmt.Errorf("%s: asking for this deployment's gateway Caddy: %w", t.Describe(), err)
