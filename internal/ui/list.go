@@ -235,7 +235,7 @@ func (l *liveList) Start(i int, title string, details ...string) Step {
 		l.stop = make(chan struct{})
 		go l.spin(row, l.stop)
 	}
-	return &listStep{l: l, row: row}
+	return &listStep{l: l, row: row, log: logStep(title)}
 }
 
 func (l *liveList) spin(row *liveRow, stop chan struct{}) {
@@ -397,6 +397,8 @@ func (l *liveList) resumedLocked() {
 type listStep struct {
 	l   *liveList
 	row *liveRow
+	// log tells the run log the row ended (see StepLog).
+	log func(Mark, string)
 }
 
 func (s *listStep) Detail(format string, args ...any) {
@@ -437,6 +439,7 @@ func (s *listStep) timed(result string) string {
 }
 
 func (s *listStep) End(m Mark, result string) {
+	s.log(m, result)
 	l, row := s.l, s.row
 	r := l.r
 	r.mu.Lock()

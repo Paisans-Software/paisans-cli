@@ -4855,6 +4855,13 @@ paisans deployment checkout --id <id> --execute      # the same, with several sy
 * **Ids from a host are checked before they become a path.** The registry is a
   file anyone with root on the host can write, and an id names a directory
   here.
+* **`runs/` beside the system copies keeps a log of each `deployment apply`,**
+  `<UTC time>-deployment-apply.log`, the newest 20: every step as it opened and
+  ended, and every command sent to a host with its site, how long it took and
+  what in Paisans sent it, then the commands' time by site and by sender. A
+  slow apply is read from it rather than retraced. A command line carries no
+  secret, and each is cut to its first line and redacted besides; the file is
+  `0600`.
 
 ### A folder holds a draft
 

@@ -75,6 +75,8 @@ type step struct {
 	// drawn after the elapsed time; the writer's mutex guards it too.
 	nested string
 	ended  bool
+	// log tells the run log the step ended (see StepLog).
+	log func(Mark, string)
 	// stop closes when this step's spinner must stop. It lives on the step,
 	// not the writer, so ending one step cannot stop another step's spinner.
 	stop chan struct{}
@@ -130,7 +132,7 @@ func (r *writer) Step(title string) Step {
 		close(prev.stop)
 		prev.stop = nil
 	}
-	s := &step{r: r, title: title, started: r.now()}
+	s := &step{r: r, title: title, started: r.now(), log: logStep(title)}
 	r.open = s
 	if r.terminal {
 		r.frame_ = 0
@@ -278,6 +280,7 @@ func (s *step) timed(result string) string {
 }
 
 func (s *step) End(m Mark, result string) {
+	s.log(m, result)
 	r := s.r
 	r.mu.Lock()
 	if s.ended {

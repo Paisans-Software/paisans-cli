@@ -56,6 +56,7 @@ func runDeployment(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	switch args[0] {
 	case "apply":
+		defer openRunLog("deployment apply", args[1:])()
 		return runApply(args[1:], stdin, stdout)
 	case "list":
 		return runDeploymentList(args[1:], stdout)

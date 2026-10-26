@@ -246,6 +246,9 @@ type line struct {
 	r     *writer
 	g     *lineGroup
 	title string
+	// log tells the run log the line ended, from its first visit (see
+	// StepLog).
+	log func(Mark, string)
 	// visiting is whether a visit runs, since visit; spent is what the
 	// visits before it took. A line of an unordered group is one visit.
 	visiting bool
@@ -475,6 +478,9 @@ func (l *line) Start() {
 	r := l.r
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if l.log == nil {
+		l.log = logStep(l.title)
+	}
 	if l.ended || l.visiting {
 		return
 	}
@@ -553,6 +559,10 @@ func (l *line) End(m Mark, result string) {
 	if l.ended || g.closed {
 		return
 	}
+	if l.log == nil {
+		l.log = logStep(l.title)
+	}
+	l.log(m, result)
 	l.ended, l.mark, l.result = true, m, result
 	var ready []*line
 	if g.ordered {

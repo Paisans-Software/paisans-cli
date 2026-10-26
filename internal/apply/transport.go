@@ -351,7 +351,8 @@ func writeKeyFiles(dir string, keys []string) ([]string, error) {
 // callers quote to the operator, and a host can print what it was sent.
 // The output itself is returned as the host printed it, since it is data a
 // caller parses; what is shown of it is redacted where it is shown.
-func (t SSHTransport) Run(command string) (string, error) {
+func (t SSHTransport) Run(command string) (out string, err error) {
+	defer t.logged(command, time.Now(), &err)
 	if err := t.refuseSudoDocker(); err != nil {
 		return "", err
 	}
@@ -359,11 +360,28 @@ func (t SSHTransport) Run(command string) (string, error) {
 	if err != nil {
 		return "", ui.RedactError(err)
 	}
-	out, err := t.run(wrapped, stdin)
+	out, err = t.run(wrapped, stdin)
 	if err != nil {
 		return out, ui.RedactError(fmt.Errorf("%s: %s: %w\n%s", t.Describe(), t.named(command), err, strings.TrimRight(out, "\n")))
 	}
 	return out, nil
+}
+
+// SSHLog, when set, is told of each command a transport sends: the site, the
+// command as its caller gave it, how long it took, and its error. A run log
+// sets it (see internal/runlog).
+var SSHLog func(site, command string, took time.Duration, err error)
+
+// logged tells SSHLog of command, started at start, ending with *err.
+func (t SSHTransport) logged(command string, start time.Time, err *error) {
+	if SSHLog == nil {
+		return
+	}
+	site := t.Site
+	if site == "" {
+		site = t.Describe()
+	}
+	SSHLog(site, command, time.Since(start), *err)
 }
 
 // named is how an error names command: its first line, after sudo when it
@@ -946,14 +964,11 @@ func attempts(n int) string {
 }
 
 func (t SSHTransport) ReadFile(path string) (string, bool, error) {
-	out, err := t.Run(fmt.Sprintf("if [ -f %s ]; then cat %s; else echo __PAISANS_ABSENT__; fi", shellQuote(path), shellQuote(path)))
+	out, err := t.Run(readFileCommand(path))
 	if err != nil {
 		return "", false, err
 	}
-	if strings.TrimSpace(out) == "__PAISANS_ABSENT__" {
-		return "", false, nil
-	}
-	return out, true, nil
+	return parseReadFile(out)
 }
 
 // WriteFile sends content over stdin rather than as part of the command.
@@ -977,7 +992,8 @@ func (t SSHTransport) ReadFile(path string) (string, bool, error) {
 // acceptable because this transport is never used under sudo to write into a
 // directory another user can write: files in the deployment user's own tree
 // are written as that user.
-func (t SSHTransport) WriteFile(path, content string, mode uint32) error {
+func (t SSHTransport) WriteFile(path, content string, mode uint32) (err error) {
+	defer t.logged("write "+path, time.Now(), &err)
 	if err := t.refuseSudoDocker(); err != nil {
 		return err
 	}
@@ -1002,7 +1018,8 @@ func (t SSHTransport) WriteFile(path, content string, mode uint32) error {
 // RunInput runs a command with stdin, for the same reason WriteFile sends
 // content that way: what goes in carries credentials, and only the command
 // line is visible in the process table.
-func (t SSHTransport) RunInput(command, stdin string) (string, error) {
+func (t SSHTransport) RunInput(command, stdin string) (out string, err error) {
+	defer t.logged(command, time.Now(), &err)
 	if err := t.refuseSudoDocker(); err != nil {
 		return "", err
 	}
@@ -1010,7 +1027,7 @@ func (t SSHTransport) RunInput(command, stdin string) (string, error) {
 	if err != nil {
 		return "", ui.RedactError(err)
 	}
-	out, err := t.run(wrapped, in)
+	out, err = t.run(wrapped, in)
 	if err != nil {
 		return out, ui.RedactError(fmt.Errorf("%s: %s: %w\n%s", t.Describe(), t.named(command), err, strings.TrimRight(out, "\n")))
 	}
