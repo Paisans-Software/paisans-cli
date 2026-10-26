@@ -176,11 +176,12 @@ func tryMailFromSites(r ui.Reporter, cfg *config.Config, secrets *config.Secrets
 		return nil
 	}
 	env := smtpEnv(cfg, ssh)
-	for _, c := range checks {
-		step := r.Step(c.Title())
+	// Every login is tried at once, each from its own site, and reported
+	// in order: each is a connection and a TLS handshake away, so a run waits
+	// on the slowest rather than on them all in turn.
+	logins := make([]chan error, len(checks))
+	for i, c := range checks {
 		if c.Skip != "" {
-			step.End(ui.Warned, "not checked")
-			r.Explain(c.Whose() + " is not checked: " + c.Skip + ".")
 			continue
 		}
 		password := ""
@@ -188,7 +189,17 @@ func tryMailFromSites(r ui.Reporter, cfg *config.Config, secrets *config.Secrets
 			password, _ = secrets.Get(c.PasswordPath)
 			ui.Secret(password)
 		}
-		if err := smtpcheck.Login(env, c, password); err != nil {
+		logins[i] = make(chan error, 1)
+		go func() { logins[i] <- smtpcheck.Login(env, c, password) }()
+	}
+	for i, c := range checks {
+		step := r.Step(c.Title())
+		if c.Skip != "" {
+			step.End(ui.Warned, "not checked")
+			r.Explain(c.Whose() + " is not checked: " + c.Skip + ".")
+			continue
+		}
+		if err := <-logins[i]; err != nil {
 			step.Fail(err)
 			var failed *smtpcheck.Error
 			if errors.As(err, &failed) && failed.Dialled() {

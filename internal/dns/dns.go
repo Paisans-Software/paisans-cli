@@ -37,6 +37,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -514,21 +515,17 @@ func Build(ctx context.Context, provider Provider, d deployment.Deployment, want
 		}
 		wantedTypes[w.Name][w.Type] = true
 	}
-	existing := map[string][]Record{}
 	parent, rest := splitParent(wants)
+	existing, err := recordsAt(ctx, provider, rest, zones)
+	if err != nil {
+		return nil, err
+	}
 	for _, w := range rest {
 		z, err := FindZone(ctx, provider, w.Name, zones)
 		if err != nil {
 			return nil, err
 		}
-		records, ok := existing[w.Name]
-		if !ok {
-			records, err = provider.Records(ctx, z.id, w.Name)
-			if err != nil {
-				return nil, err
-			}
-			existing[w.Name] = records
-		}
+		records := existing[w.Name]
 		var action Action
 		var detail string
 		switch {
@@ -593,6 +590,51 @@ func Build(ctx context.Context, provider Provider, d deployment.Deployment, want
 	}
 	return plan, nil
 }
+
+// recordsAt is what the provider holds at each name wants name, by name.
+// Each name is a request of its own, so they are asked at once, a few at a
+// time; their zones are found first, in order, since a zone is looked up
+// once and kept in zones. An error is the first name's, in wants' order.
+func recordsAt(ctx context.Context, provider Provider, wants []Want, zones map[string]zone) (map[string][]Record, error) {
+	var names, ids []string
+	seen := map[string]bool{}
+	for _, w := range wants {
+		if seen[w.Name] {
+			continue
+		}
+		seen[w.Name] = true
+		z, err := FindZone(ctx, provider, w.Name, zones)
+		if err != nil {
+			return nil, err
+		}
+		names, ids = append(names, w.Name), append(ids, z.id)
+	}
+	records := make([][]Record, len(names))
+	errs := make([]error, len(names))
+	slots := make(chan struct{}, recordReadsAtOnce)
+	var wg sync.WaitGroup
+	for i := range names {
+		wg.Add(1)
+		slots <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-slots }()
+			records[i], errs[i] = provider.Records(ctx, ids[i], names[i])
+		}()
+	}
+	wg.Wait()
+	out := map[string][]Record{}
+	for i, name := range names {
+		if errs[i] != nil {
+			return nil, errs[i]
+		}
+		out[name] = records[i]
+	}
+	return out, nil
+}
+
+// recordReadsAtOnce is how many names recordsAt asks about at the same time.
+const recordReadsAtOnce = 8
 
 // setAsideFormer splits the records at a want's name into the address
 // records this deployment's dns init made for a former gateway (carrying

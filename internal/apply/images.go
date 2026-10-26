@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
@@ -152,42 +153,71 @@ func CheckPlatforms(site, arch string, images []render.ComposeImage, r Resolver)
 	if _, ok := r.(Platformer); !ok || arch == "" {
 		return nil, nil
 	}
-	var notes []Note
-	var refusals []error
+	var unique []string
 	seen := map[string]bool{}
 	for _, image := range images {
-		if seen[image.Image] {
-			continue
+		if !seen[image.Image] {
+			seen[image.Image] = true
+			unique = append(unique, image.Image)
 		}
-		seen[image.Image] = true
-		pin := ImagePin{Image: image.Image, Reference: image.Image}
-		if ref := blueprints.ParseReference(image.Image); ref.Digest == "" && ref.Tag != "" {
-			tagged, err := image.Image, error(nil)
-			if t, ok := r.(Tracker); ok && imagedigest.IsTrack(image.Image) {
-				tagged, err = t.Track(image.Image)
-			}
-			digest := ""
-			if err == nil {
-				digest, err = r.Digest(tagged)
-			}
-			if err != nil {
-				notes = append(notes, Note{
-					Hint: fmt.Sprintf("could not resolve %s", ui.Name(image.Image)),
-					Text: fmt.Sprintf("Resolving %s failed (%v), so the plan cannot say whether it runs on %s. The pull on %s says so if it does not.", ui.Name(image.Image), err, arch, site),
-				})
-				continue
-			}
-			pin.Reference = tagged + "@" + digest
+	}
+	// Each image is a registry's answer or two away, so they are asked at
+	// once, a few at a time, and reported in the order they are named.
+	type checked struct {
+		note    *Note
+		refusal error
+	}
+	results := make([]checked, len(unique))
+	slots := make(chan struct{}, platformChecksAtOnce)
+	var wg sync.WaitGroup
+	for i, image := range unique {
+		wg.Add(1)
+		slots <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-slots }()
+			results[i].note, results[i].refusal = checkPlatform(site, arch, image, r)
+		}()
+	}
+	wg.Wait()
+	var notes []Note
+	var refusals []error
+	for _, c := range results {
+		if c.refusal != nil {
+			refusals = append(refusals, c.refusal)
 		}
-		note, err := platformCheck(site, arch, pin, r)
-		if err != nil {
-			refusals = append(refusals, err)
-		}
-		if note != nil {
-			notes = append(notes, *note)
+		if c.note != nil {
+			notes = append(notes, *c.note)
 		}
 	}
 	return notes, refusals
+}
+
+// platformChecksAtOnce is how many images CheckPlatforms asks about at the
+// same time.
+const platformChecksAtOnce = 8
+
+// checkPlatform is CheckPlatforms for one image.
+func checkPlatform(site, arch, image string, r Resolver) (*Note, error) {
+	pin := ImagePin{Image: image, Reference: image}
+	if ref := blueprints.ParseReference(image); ref.Digest == "" && ref.Tag != "" {
+		tagged, err := image, error(nil)
+		if t, ok := r.(Tracker); ok && imagedigest.IsTrack(image) {
+			tagged, err = t.Track(image)
+		}
+		digest := ""
+		if err == nil {
+			digest, err = r.Digest(tagged)
+		}
+		if err != nil {
+			return &Note{
+				Hint: fmt.Sprintf("could not resolve %s", ui.Name(image)),
+				Text: fmt.Sprintf("Resolving %s failed (%v), so the plan cannot say whether it runs on %s. The pull on %s says so if it does not.", ui.Name(image), err, arch, site),
+			}, nil
+		}
+		pin.Reference = tagged + "@" + digest
+	}
+	return platformCheck(site, arch, pin, r)
 }
 
 // PeerCompose is an app's compose file as another site running the app

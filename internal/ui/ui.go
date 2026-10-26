@@ -216,22 +216,23 @@ func terminalSize(w io.Writer) (cols, rows int) {
 
 type discard struct{}
 
-func (discard) Section(string)        {}
-func (discard) Step(string) Step      { return discardStep{} }
-func (discard) Warn(string, string)   {}
-func (discard) Note(string, string)   {}
-func (discard) Refuse(string, string) {}
-func (discard) Detail(string, ...any) {}
-func (discard) Trace(string, string)  {}
-func (discard) Result(string, ...any) {}
-func (discard) Explain(string)        {}
-func (discard) Verbatim([]string)     {}
-func (discard) Verbose() bool         { return false }
+func (discard) Section(string)         {}
+func (discard) Step(title string) Step { return discardStep{logStep(title)} }
+func (discard) Warn(string, string)    {}
+func (discard) Note(string, string)    {}
+func (discard) Refuse(string, string)  {}
+func (discard) Detail(string, ...any)  {}
+func (discard) Trace(string, string)   {}
+func (discard) Result(string, ...any)  {}
+func (discard) Explain(string)         {}
+func (discard) Verbatim([]string)      {}
+func (discard) Verbose() bool          { return false }
 
-type discardStep struct{}
+// discardStep draws nothing, and tells the run log of its end (see StepLog).
+type discardStep struct{ log func(Mark, string) }
 
-func (discardStep) Done(string)           {}
-func (discardStep) Fail(error)            {}
-func (discardStep) End(Mark, string)      {}
-func (discardStep) Detail(string, ...any) {}
-func (discardStep) Progress(string)       {}
+func (s discardStep) Done(result string)   { s.log(OK, result) }
+func (s discardStep) Fail(err error)       { s.log(Failed, err.Error()) }
+func (s discardStep) End(m Mark, r string) { s.log(m, r) }
+func (discardStep) Detail(string, ...any)  {}
+func (discardStep) Progress(string)        {}
