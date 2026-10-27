@@ -259,6 +259,7 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 		"apps.talk.rabbitmq_password",
 		"apps.auth.dns_email_hash_key",
 		"apps.digest.digest_signing_key",
+		"apps.digest.mas_admin_client_secret",
 		"apps.talk.mercure_jwt_secret",
 		"apps.talk.valkey_password",
 		"storage.garage.admin_token",

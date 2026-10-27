@@ -2,9 +2,13 @@ package validate
 
 import (
 	"fmt"
+	"regexp"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 )
+
+// matrixLocalpart is the characters a Matrix user ID's localpart may hold.
+var matrixLocalpart = regexp.MustCompile(`^[a-z0-9._=/-]+$`)
 
 // engagement checks the weekly digest app. Every rule is silent when the
 // deployment has no engagement app. The digest reads one Mbin's database
@@ -27,6 +31,12 @@ func (c *checker) engagement() {
 			c.refuse("engagement-must-be-clustered", fmt.Sprintf("apps.%s.placement", name),
 				"engagement must have cluster placement",
 				"is not cluster. The digest keeps its state in the cluster's Postgres and must keep sending when a site is lost, so it runs on every apps site. Set placement: cluster.")
+		}
+		// A non-string is blueprint-setting-invalid's already.
+		if localpart, ok := c.cfg.Apps[name].Settings["bot_localpart"].(string); ok && !matrixLocalpart.MatchString(localpart) {
+			c.refuse("engagement-bot-localpart-invalid", fmt.Sprintf("apps.%s.settings.bot_localpart", name),
+				"the bot's localpart is not a Matrix localpart",
+				"is %q. The Digest Bot's Matrix account takes it as its localpart, which may hold only lowercase letters, digits and . _ = / -. Choose one of those, or leave it unset for digest-bot.", localpart)
 		}
 		if !c.cfg.CanMail(name) {
 			c.warn("engagement-without-smtp", fmt.Sprintf("apps.%s", name),

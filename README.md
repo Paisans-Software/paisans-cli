@@ -895,7 +895,18 @@ Mbin. The design is in `docs/specs/2026-10-24-engagement-digest.md`.
   apply, so a Mbin release that changes its schema is noticed here and not in
   a digest that silently misses a week; the failure says to remove the
   engagement app or hold Mbin on its previous release until the list matches.
-* **What the gateway forwards.** `/u/*`, the unsubscribe links, and
+* **On Matrix.** The app consumes the `matrix-homeserver` role, as Element
+  does. With one homeserver in the deployment it links to it; with several,
+  `settings.homeserver` names one by hostname; with none the bot is off and
+  no Matrix variable is rendered. Linked, the service runs a Digest Bot that
+  sends the week as a direct message to each member who has a Matrix account
+  linked to the same Pocket ID subject (`docs/specs/2026-10-27-engagement-matrix.md`).
+  The bot's localpart is `settings.bot_localpart`, `digest-bot` by default.
+  The MAS admin client it looks members up with is declared by the synapse
+  app, with a secret the two apps share. A synapse blueprint that does not
+  offer `mas_admin_url` leaves the bot off.
+* **What the gateway forwards.** `/u/*`, the unsubscribe links, `/d/*`, the
+  web digests the Matrix message links to, and
   `GET /healthz`, which answers ok or 503, for the monitor's public check;
   everything else on the hostname answers 404. The route has no Pocket ID
   gate (`gateable: false`) because a member clicking from an inbox may not be
@@ -930,6 +941,7 @@ app*).
 | `engagement-one-source` | more than one `mbin` app. Refused: it could not tell which community to summarise |
 | `engagement-source-not-clustered` | the `mbin` app is pinned. Refused: the reader role is created in the cluster's Postgres, and a pinned Mbin runs against a Postgres of its own on its site, where no such role exists |
 | `engagement-without-smtp` | the app resolves no SMTP host or `from_address`. Warned: it is an email and cannot send without them |
+| `engagement-bot-localpart-invalid` | `settings.bot_localpart` is not a Matrix localpart, lowercase letters, digits and `._=/-` only. Refused: MAS would not create the bot's account |
 
 **Mbin must have `placement: cluster`.** The one-Mbin rule also keeps the
 source unambiguous: the digest reads one database and one community's title.
@@ -944,6 +956,7 @@ release that publishes one.
 |---|---|---|
 | `apps.<engagement>.source_database_password` | the password of `<app>_reader` | `secrets rotate` alters the role on the Patroni leader and re-applies the engagement stack; Mbin never holds it, so its stack is untouched. Reconnects |
 | `apps.<engagement>.digest_signing_key` | signs every unsubscribe link | the service rotates it itself, with a restart. **Every unsubscribe link in an email already sent stops working**, because it was signed with the old key; the next digest carries links signed with the new one |
+| `apps.<engagement>.mas_admin_client_secret` | the MAS admin client's secret, shared with the synapse app | rotating it re-applies both stacks, the synapse app's first, so MAS knows the new secret before the service uses it |
 
 ## Monitoring
 
