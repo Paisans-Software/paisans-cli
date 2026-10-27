@@ -465,12 +465,14 @@ func TestSharedSecretReachesTheProviderFirst(t *testing.T) {
 	if err := r.(Prechecker).Precheck(w.env()); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := usesOf(w.env(), r), []string{"home-b:chat,digest", "home-a:digest"}; !slices.Equal(got, want) {
+	// The provider's stack is a step of its own, gated healthy before any
+	// digest stack is handed the next value, even on the site both run on.
+	if got, want := usesOf(w.env(), r), []string{"home-b:chat", "home-a:digest", "home-b:digest"}; !slices.Equal(got, want) {
 		t.Fatalf("users %v, want %v", got, want)
 	}
 
 	// The provider on a site the digest does not run on is a step of its
-	// own, before every digest site.
+	// own too, before every digest site.
 	pinned := w.cfg.Apps["chat"]
 	pinned.Placement.Site = "home-c"
 	w.cfg.Apps["chat"] = pinned
@@ -482,6 +484,7 @@ func TestSharedSecretReachesTheProviderFirst(t *testing.T) {
 
 	// The synapse stack renders the digest's secret into mas.yaml, so an
 	// apply of chat presents it there.
+	// Each health gate records, in step order, what every stack presents.
 	e := w.env()
 	apply := e.Apply
 	e.Apply = func(site string, s *config.Secrets, stacks []string) error {
@@ -489,6 +492,16 @@ func TestSharedSecretReachesTheProviderFirst(t *testing.T) {
 			w.presented[site+"/chat/mas_admin_client_secret"], _ = s.Get("apps.digest.mas_admin_client_secret")
 		}
 		return apply(site, s, stacks)
+	}
+	type gate struct {
+		step string
+		seen map[string]string
+	}
+	var gates []gate
+	healthy := e.Healthy
+	e.Healthy = func(site string, stacks []string) error {
+		gates = append(gates, gate{site + ":" + strings.Join(stacks, ","), maps(w.presented)})
+		return healthy(site, stacks)
 	}
 	run, err := Plan(e, []Rotator{r})
 	if err != nil {
@@ -504,6 +517,25 @@ func TestSharedSecretReachesTheProviderFirst(t *testing.T) {
 	for _, at := range []string{"home-b/chat/mas_admin_client_secret", "home-a/digest/mas_admin_client_secret", "home-b/digest/mas_admin_client_secret"} {
 		if w.presented[at] != next {
 			t.Errorf("%s presents %q, want the next value", at, w.presented[at])
+		}
+	}
+	var steps []string
+	for _, g := range gates {
+		steps = append(steps, g.step)
+	}
+	if want := []string{"home-b:chat", "home-a:digest", "home-b:digest"}; !slices.Equal(steps, want) {
+		t.Fatalf("health gates %v, want %v", steps, want)
+	}
+	// At chat's gate MAS holds the next secret and every digest the old
+	// one, so no digest presents a secret MAS does not yet accept.
+	const old = "digest-mas_admin_client_secret-old"
+	at := gates[0].seen
+	if at["home-b/chat/mas_admin_client_secret"] != next {
+		t.Errorf("at chat's gate chat presents %q, want the next value", at["home-b/chat/mas_admin_client_secret"])
+	}
+	for _, digest := range []string{"home-a/digest/mas_admin_client_secret", "home-b/digest/mas_admin_client_secret"} {
+		if at[digest] != old {
+			t.Errorf("at chat's gate %s presents %q, want the old value", digest, at[digest])
 		}
 	}
 }
