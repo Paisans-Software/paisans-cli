@@ -113,7 +113,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/etc/snippets/web.caddy",
-      "sha256": "17a7151cae4ac1a0069ca41e7af3d4f1fcf9db7f99bd47d28677ebe9f17e6429",
+      "sha256": "891d6d714272da8593e5693011dbcbef039779d353cde25dc14786064946eecb",
       "mode": "0644"
     },
     {

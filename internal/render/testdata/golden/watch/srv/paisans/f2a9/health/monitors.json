@@ -383,7 +383,7 @@
     {
       "name": "web — direct (home-b)",
       "monitor_type": "active",
-      "url": "http://10.44.0.2:80/version",
+      "url": "http://10.44.0.2:8090/version",
       "method": "GET",
       "check_type": "status",
       "expected_status": "200",

@@ -54,14 +54,16 @@ func TestPortCollisionRefuses(t *testing.T) {
 			want: []string{"app forum (mbin)", "app talk (mbin)", "10.44.0.1:8080/tcp", "sites.home-a"},
 		},
 		{
-			// Caddy binds 80 on every address of the gateway.
-			name: "element pinned to the gateway",
+			// Caddy binds 80 on every address of the gateway, so HAProxy on
+			// the gateway's mesh address cannot take it.
+			name: "a cluster port on the gateway's Caddy",
 			change: func(cfg *config.Config) {
-				app := cfg.Apps["web"]
-				app.Placement = config.Placement{Mode: config.PlacementPinned, Site: "vm", Literal: "vm"}
-				cfg.Apps["web"] = app
+				vm := cfg.Sites["vm"]
+				vm.Roles = append(append([]config.Role(nil), vm.Roles...), config.RoleApps)
+				cfg.Sites["vm"] = vm
+				cfg.Cluster.Port = 80
 			},
-			want: []string{"Caddy binds *:80/tcp", "app web (element)", "10.44.0.3:80/tcp"},
+			want: []string{"Caddy binds *:80/tcp", "HAProxy cluster port", "10.44.0.3:80/tcp"},
 		},
 		{
 			name: "a cluster port on Postgres's",
