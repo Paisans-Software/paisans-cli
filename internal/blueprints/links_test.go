@@ -81,3 +81,26 @@ func TestLinkValuesAreTheProvidersExpressions(t *testing.T) {
 		t.Error("a role nobody provides was answered")
 	}
 }
+
+// A provider's values may name the mesh address of the site a pinned app
+// runs on; a clustered app has none, and neither has one outside the
+// deployment.
+func TestMeshAddressIsThePinnedSites(t *testing.T) {
+	cfg := &config.Config{
+		Sites: map[string]config.Site{"vm": {Address: "10.44.0.3"}},
+		Apps: map[string]config.App{
+			"chat": {Blueprint: "synapse", Hostname: "chat.example.org", Placement: config.Placement{Mode: config.PlacementPinned, Site: "vm"}},
+		},
+	}
+	got, err := LinkValues(cfg, "chat", "matrix-homeserver")
+	if err != nil || got["mas_admin_url"] != "http://10.44.0.3:18010" {
+		t.Errorf("pinned: %v, %v", got, err)
+	}
+	cfg.Apps["chat"] = config.App{Blueprint: "synapse", Hostname: "chat.example.org", Placement: config.Placement{Mode: config.PlacementCluster}}
+	if got, _ := LinkValues(cfg, "chat", "matrix-homeserver"); got["mas_admin_url"] != "http://:18010" {
+		t.Errorf("clustered: %v", got["mas_admin_url"])
+	}
+	if v := celApp(config.App{Placement: config.Placement{Mode: config.PlacementPinned, Site: "vm"}})["app.mesh_address"]; v != "" {
+		t.Errorf("with no deployment around it: %q", v)
+	}
+}

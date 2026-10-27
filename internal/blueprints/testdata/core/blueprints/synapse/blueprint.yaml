@@ -31,6 +31,9 @@ provides:
     values:
       base_url: "'https://' + app.hostname"
       server_name: "'wellknown' in app.hostnames ? app.hostnames['wellknown'] : app.hostname"
+      # MAS's admin listener, on the mesh only, which an engagement app
+      # reads to look members up and to run its bot.
+      mas_admin_url: "'http://' + app.mesh_address + ':18010'"
 port: 18008
 config:
   # It also renders a `.env`, but only for its Postgres container's
