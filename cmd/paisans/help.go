@@ -84,7 +84,7 @@ var helpCommands = []helpCommand{
 		name:    "catalog update",
 		summary: "Move catalogs' pins to their newest releases.",
 		usage:   []string{"paisans catalog update [<name>] [--tag <tag>] [--config " + config.FileName + "] [--id <id>]"},
-		detail: "For each declared catalog, or the one named: read its newest tag (or --tag), and when it names another commit, say what it changes for each app using one of its blueprints (images, port, sign-in, the gate's openings, storage, secrets) and move the pin. " +
+		detail: "With no catalog named, first name the core catalog release every command uses and each newer one skipped. For each declared catalog, or the one named: read its newest tag (or --tag), and when it names another commit, say what it changes for each app using one of its blueprints (images, port, sign-in, the gate's openings, storage, secrets) and move the pin. " +
 			"Refuses a move that would leave an app without its blueprint. Edits only " + config.FileName + ". " + draftTopic,
 	},
 	{

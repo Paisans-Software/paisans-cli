@@ -1164,7 +1164,8 @@ paisans catalog list
   pin to the newest release, by the same rule (or `--tag`), when it names
   another commit, saying for each app using one of its blueprints what changes: images, port, sign-in, the
   gate's openings, storage, secrets. A release that drops a blueprint an app
-  uses is refused, and nothing changes.
+  uses is refused, and nothing changes. With no catalog named it first names
+  the core catalog release every command uses, and each newer one it skipped.
 * **`remove <name>`:** refused while an app names one of its blueprints.
 * **`list`:** the core catalog with the release and commit it reads, its
   newest one this toolkit can read or the one pinned under `catalogs.core`,

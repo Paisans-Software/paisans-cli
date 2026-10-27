@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Changed
+
+- `catalog update` names the core catalog release every command uses, and each newer one skipped, instead of reporting only declared catalogs, so "0 of 0 catalogs moved" no longer reads as nothing resolved.
+
 ### Fixed
 
 - `blueprint lint`, `validate` and `deployment apply` refuse a blueprint publishing a port below 1024, which rootless Docker cannot bind outside a Caddy site, instead of failing mid-apply when its container starts.
