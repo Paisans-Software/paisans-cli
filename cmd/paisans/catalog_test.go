@@ -111,6 +111,47 @@ func TestTheCatalogCommands(t *testing.T) {
 	}
 }
 
+// catalog update names the core catalog release every command reads, though
+// it moves only declared catalogs, and names none when one catalog is named.
+func TestCatalogUpdateNamesTheCoreRelease(t *testing.T) {
+	coretest.Cache(t)
+	var out bytes.Buffer
+	reporterOverride = ui.NewPlain(&out, false)
+	defer func() { reporterOverride = nil }()
+	base, err := os.ReadFile(filepath.Join("..", "..", "internal", "render", "testdata", "deployment.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), config.FileName)
+	if err := os.WriteFile(path, base, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	release, err := os.ReadFile(filepath.Join("..", "..", "internal", "blueprints", "testdata", "core.release"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runCatalogUpdate([]string{"--config", path}); err != nil {
+		t.Fatal(err)
+	}
+	want := "using " + strings.TrimSpace(string(release)) + " ("
+	if !strings.Contains(out.String(), "catalog core") || !strings.Contains(out.String(), want) {
+		t.Errorf("the update did not name the core release, %q:\n%s", want, out.String())
+	}
+
+	repo, _ := catalogRepo(t)
+	if err := runCatalogAdd([]string{"ex", repo, "--config", path}); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := runCatalogUpdate([]string{"ex", "--config", path}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "catalog core") {
+		t.Errorf("an update of one catalog named the core catalog:\n%s", out.String())
+	}
+}
+
 func mustRead(t *testing.T, path string) []byte {
 	t.Helper()
 	b, err := os.ReadFile(path)

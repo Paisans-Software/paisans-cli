@@ -208,6 +208,37 @@ func runCatalogUpdate(args []string) error {
 		sort.Strings(names)
 	}
 	r := reporter()
+	// The core catalog is not moved here, but the release it resolves to is
+	// what every other command reads, so it is named first.
+	if len(pos) == 0 {
+		r.Section("catalog " + config.CoreCatalog)
+		core := blueprints.CorePin(cfg, config.CoreCatalog)
+		url := core.URL
+		if url == "" {
+			url = blueprints.CoreURL
+		}
+		s := r.Step("read " + url)
+		if core.Commit == "" {
+			// CorePin read nothing; LoadCore returns why, having kept it.
+			err := blueprints.LoadCore(cfg.Catalogs[config.CoreCatalog].URL)
+			s.Fail(err)
+			return err
+		}
+		if cfg.Catalogs[config.CoreCatalog].Commit != "" {
+			s.Done(fmt.Sprintf("using %s (%s), pinned", core.Tag, core.Commit[:12]))
+		} else {
+			s.Done(fmt.Sprintf("using %s (%s)", core.Tag, core.Commit[:12]))
+			_, skipped := blueprints.CoreRelease()
+			for _, why := range skipped {
+				// A release is skipped as "<tag>: why"; the one other entry is
+				// a forge that could not be listed, which skipped nothing.
+				if tag, _, ok := strings.Cut(why, ": "); ok && !strings.Contains(tag, " ") {
+					why = "skipped " + why
+				}
+				r.Note(why, "")
+			}
+		}
+	}
 	moved := 0
 	for _, name := range names {
 		old := cfg.Catalogs[name]
