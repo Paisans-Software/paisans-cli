@@ -942,6 +942,8 @@ app*).
 | `engagement-source-not-clustered` | the `mbin` app is pinned. Refused: the reader role is created in the cluster's Postgres, and a pinned Mbin runs against a Postgres of its own on its site, where no such role exists |
 | `engagement-without-smtp` | the app resolves no SMTP host or `from_address`. Warned: it is an email and cannot send without them |
 | `engagement-bot-localpart-invalid` | `settings.bot_localpart` is not a Matrix localpart, lowercase letters, digits and `._=/-` only. Refused: MAS would not create the bot's account |
+| `link-provider-ambiguous` | an optional link with its setting unset while several apps provide the role. Refused: it could not tell which to use. Applies to any blueprint's link, the engagement app's `homeserver` being one |
+| `link-shared-secret-outside` | a link that shares a secret, set to a hostname no app in the deployment provides. Refused: the secret can be handed only to an app the deployment renders. Applies to any blueprint's link, the engagement app's being the one that shares a secret |
 
 **Mbin must have `placement: cluster`.** The one-Mbin rule also keeps the
 source unambiguous: the digest reads one database and one community's title.
