@@ -15,8 +15,10 @@ services:
     # firewall, so a port published on every interface of a host with a
     # public address is reachable from the internet whatever ufw says. The
     # gateway, over the mesh, is the only thing that should reach it.
+    # The host side is the blueprint's port, at or above 1024 for rootless
+    # Docker; the image's nginx listens on 80 inside the container.
     ports:
-      - "{{ .MeshAddress }}:{{ .App.Port }}:{{ .App.Port }}"
+      - "{{ .MeshAddress }}:{{ .App.Port }}:80"
     volumes:
       - {{ .DataPath }}/config.json:/app/config.json:ro
 

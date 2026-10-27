@@ -9,7 +9,11 @@ services:
   # does not match it.
   - {name: "app", image: "ghcr.io/element-hq/element-web:v1.*.*", purpose: "the web client"}
 database: {engine: none}
-port: 80
+# The host port the mesh address publishes. Rootless Docker binds a host
+# port below 1024 only on a site admitted for Caddy, and an apps site is
+# not one, so it is 8090 here; the image's nginx still listens on 80
+# inside the container, which compose.yaml.tmpl maps it to.
+port: 8090
 # The homeserver it is a client of: the one at the hostname in
 # settings.homeserver, else at this app's own hostname.
 consumes:
