@@ -2,6 +2,8 @@ package blueprints
 
 import (
 	"fmt"
+	"slices"
+	"strings"
 
 	"cel.dev/cel-go/cel"
 	"gopkg.in/yaml.v3"
@@ -29,13 +31,125 @@ type provided struct {
 	values map[string]cel.Program
 }
 
-// Consume is one role a blueprint consumes. Setting is the app setting
-// naming the provider's hostname, which is how the consumer says which
-// provider it means; an app that leaves it out means a provider at its own
-// hostname.
+// Consume is one role a blueprint consumes. Role is the role. Setting is the
+// app setting naming the provider's hostname, which is how the consumer says
+// which provider it means. Optional says what an app that leaves the setting
+// unset means: without it, a provider at the app's own hostname; with it, the
+// deployment's one provider of the role, or no provider when there is none.
+// SharedSecrets are the consumer's own self rotated secrets that its
+// provider's templates read too, through .Consumers.
 type Consume struct {
-	Role    string `yaml:"role"`
-	Setting string `yaml:"setting"`
+	Role          string   `yaml:"role"`
+	Setting       string   `yaml:"setting"`
+	Optional      bool     `yaml:"optional"`
+	SharedSecrets []string `yaml:"shared_secrets"`
+}
+
+// Link is where one app's consume of a role leads.
+type Link struct {
+	Role     string
+	Linked   bool   // false only for an optional consume with no provider
+	Provider string // the providing app's name; "" for a provider outside the deployment
+	Hostname string // the provider's hostname
+}
+
+// LinkOf is where the app called app in cfg is linked by its consume c. A
+// setting naming a hostname links to the app there that provides the role,
+// or to a provider outside the deployment at that hostname. An unset setting
+// means the app's own hostname, the same way, unless c is optional: then it
+// links to the deployment's one provider of the role, to none when there is
+// none, and is refused when there are several.
+func LinkOf(cfg *config.Config, app string, c Consume) (Link, error) {
+	a := cfg.Apps[app]
+	hostname, _ := SettingsSeen(a)[c.Setting].(string)
+	if hostname == "" && c.Optional {
+		switch providers := ProvidersOf(cfg, c.Role); len(providers) {
+		case 0:
+			return Link{Role: c.Role}, nil
+		case 1:
+			return Link{Role: c.Role, Linked: true, Provider: providers[0], Hostname: cfg.Apps[providers[0]].Hostname}, nil
+		default:
+			return Link{}, fmt.Errorf("apps.%s.settings.%s: unset, and %d apps provide %s (%s); name one by its hostname", app, c.Setting, len(providers), c.Role, strings.Join(providers, ", "))
+		}
+	}
+	if hostname == "" {
+		hostname = a.Hostname
+	}
+	link := Link{Role: c.Role, Linked: true, Hostname: hostname}
+	for _, name := range ProvidersOf(cfg, c.Role) {
+		if cfg.Apps[name].Hostname == hostname {
+			link.Provider = name
+			break
+		}
+	}
+	return link, nil
+}
+
+// ProvidersOf is the apps in cfg whose blueprint provides role, in
+// cfg.AppNames() order.
+func ProvidersOf(cfg *config.Config, role string) []string {
+	var out []string
+	for _, name := range cfg.AppNames() {
+		if slices.Contains(Provides(cfg.Apps[name].Blueprint), role) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// ConsumersOf is the apps in cfg whose consume of role links to the app
+// called provider, sorted. An app whose link cannot be resolved is left out,
+// since validate refuses it.
+func ConsumersOf(cfg *config.Config, provider, role string) []string {
+	var out []string
+	for _, name := range cfg.AppNames() {
+		for _, c := range Consumes(cfg.Apps[name].Blueprint) {
+			if c.Role != role {
+				continue
+			}
+			if link, err := LinkOf(cfg, name, c); err == nil && link.Provider == provider {
+				out = append(out, name)
+			}
+		}
+	}
+	return out
+}
+
+// SharedSecretProvider is the app in cfg that the app called app shares its
+// secret key with: the provider in the deployment that the consume naming
+// key links to. False when no consume shares key, or its link leads to no
+// app in the deployment or cannot be resolved.
+func SharedSecretProvider(cfg *config.Config, app, key string) (string, bool) {
+	for _, c := range Consumes(cfg.Apps[app].Blueprint) {
+		if !slices.Contains(c.SharedSecrets, key) {
+			continue
+		}
+		if link, err := LinkOf(cfg, app, c); err == nil && link.Provider != "" {
+			return link.Provider, true
+		}
+	}
+	return "", false
+}
+
+// checkSharedSecrets refuses a shared secret that is not the consumer's own
+// self rotated secret, or that is shared more than once.
+func checkSharedSecrets(consumes []Consume, generate, selfRotated []string) error {
+	shared := map[string]bool{}
+	for i, c := range consumes {
+		for j, name := range c.SharedSecrets {
+			at := fmt.Sprintf("consumes[%d].shared_secrets[%d]", i, j)
+			switch {
+			case !slices.Contains(generate, name):
+				return fmt.Errorf("%s: %s is not one of secrets.generate; a shared secret is the consumer's own", at, name)
+			case !slices.Contains(selfRotated, name):
+				return fmt.Errorf("%s: %s is not in secrets.self_rotated; rotating a shared secret re-renders the consumer and its provider, as a self rotated secret is", at, name)
+			case shared[name]:
+				return fmt.Errorf("%s: %s is shared twice", at, name)
+			}
+			shared[name] = true
+		}
+	}
+	return nil
 }
 
 // Provides is the roles a blueprint provides.
@@ -119,10 +233,15 @@ func checkLinks(provides []Provide, consumes []Consume) ([]provided, error) {
 		}
 		out = append(out, compiled)
 	}
+	consumed := map[string]bool{}
 	for i, c := range consumes {
 		if !config.BlueprintName(c.Role) {
 			return nil, fmt.Errorf("consumes[%d].role: %q is not a role name: lowercase words joined by dashes", i, c.Role)
 		}
+		if consumed[c.Role] {
+			return nil, fmt.Errorf("consumes[%d].role: %s is consumed twice; a template reads one link per role", i, c.Role)
+		}
+		consumed[c.Role] = true
 		if c.Setting == "" {
 			return nil, fmt.Errorf("consumes[%d].setting: required, the setting naming the provider's hostname", i)
 		}
