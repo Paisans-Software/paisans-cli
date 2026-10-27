@@ -344,6 +344,9 @@ type Plan struct {
 	// the bootstrap to a plan with no action, so the grant runs. See
 	// runSourceGrants.
 	owedGrants []string
+	// held is the app stacks this plan holds back with Except. A held
+	// engagement app's reader is granted by the pass that releases it.
+	held map[string]bool
 	// grantsOwed are the reader roles still owed a grant once this apply's
 	// grants ran, which the record keeps for the next apply.
 	grantsOwed []string
@@ -721,6 +724,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			exceptSet[stack] = true
 		}
 		out.partial = true
+		out.held = exceptSet
 	}
 
 	prefix := site + "/"
