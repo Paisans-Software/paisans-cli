@@ -1743,7 +1743,17 @@ string over the app, `app.hostnames` included), and a consumer's templates
 read them with `.Linked "<role>" "<value>"`, which fails the render for a
 value the provider does not declare. No role is named in Go; a consumer
 pointed at a provider outside the deployment gets the values any blueprint
-providing the role says of that hostname (`kinds.LinkValuesAt`).
+providing the role says of that hostname (`blueprints.LinkValuesAt`). A
+consume marked `optional` with its setting unset links to the deployment's
+one provider of the role, or to none; its `shared_secrets` are the
+consumer's own self rotated secrets that the provider reads too. Templates
+ask `.HasLinked "<role>"` before reading `.Linked` on an optional role,
+`.LinkedApp "<role>"` for the providing app's name, `.LinkedOffers "<role>"
+"<value>"` for whether the provider declares a value, and, on the provider,
+`.Consumers "<role>"` for each linked consumer's name and shared secrets
+(`internal/render/links.go`). Where a consume leads is `blueprints.LinkOf`
+alone, read by render, validate and `secrets rotate`, so the three never
+disagree.
 
 A change to the catalog that an older binary cannot read changes the
 `apiVersion` of what it changes, a blueprint's or the foundation's: an older

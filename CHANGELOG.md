@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Added
+
+- Blueprints may mark a consumed role `optional` and share generated secrets with its provider through `shared_secrets`; templates read `.HasLinked`, `.LinkedApp`, `.LinkedOffers` and `.Consumers`, and `provides` expressions read `app.mesh_address`.
+
 ### Changed
 
 - `catalog update` names the core catalog release every command uses, and each newer one skipped, instead of reporting only declared catalogs, so "0 of 0 catalogs moved" no longer reads as nothing resolved.
