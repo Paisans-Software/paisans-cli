@@ -4907,6 +4907,39 @@ has a convergence check that warns about a site behind the workstation's copy
 or owed anything. A site behind is a warning and not a failure: it serves what
 it last applied, and the next `deployment apply --execute` resumes it.
 
+### One command changes a deployment at a time
+
+Two operators running `deployment apply` from one version both pass their
+gathers, so the fork the store refuses is found only by the next command, while
+both runs go on changing hosts. The deployment's lock serialises one write of a
+record and nothing longer. So every command that publishes or changes the
+deployment as a whole, `deployment apply` (with or without `--site`) and
+`deployment publish`, first takes the **deployment lease**:
+
+* **It is a file on every site,** `/srv/paisans/<token>/.paisans/lease`,
+  written under the deployment's lock: a fresh id for the command, who ran it
+  (the workstation's user and host), the command, when it was taken and when it
+  was last renewed. It is taken on every ready site at once, before the gather,
+  which may merge the draft forward, and held to the end of the run; a step the
+  run takes, such as `apply --site` inside `apply`, takes none of its own.
+* **A live lease of another command refuses the run,** naming the command, who
+  ran it and since when, and nothing is changed. A refusal on any site
+  releases the sites already taken, so the two commands never each hold half.
+* **It is renewed every 30 seconds and expires 2 minutes after its last
+  renewal,** judged by the site's own clock against the times it wrote, so two
+  workstations' clocks never need to agree. A command that dies, its
+  workstation lost or its connection cut, stops renewing, and its lease stops
+  blocking within two minutes.
+* **`--break-lease` takes over a live lease** once the operator knows its
+  command is no longer running, after the word `break`, which `--yes` types.
+  The command it was taken from finds the lease lost at its next renewal and
+  says so at its end, naming `deployment log`.
+* **A site that cannot be reached is left out with a warning,** so a site that
+  is down never blocks a run, and at least one site must take it. A command
+  from another workstation that reaches only the sites this one could not is
+  not stopped by it; the store's fork check is still there behind it.
+* **A dry run takes none,** since it changes nothing.
+
 ### A folder holds a draft
 
 The operator edits a deployment in any folder they like, often a git

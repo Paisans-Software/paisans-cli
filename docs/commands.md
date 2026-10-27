@@ -1606,6 +1606,10 @@ images it superseded* in `README.md`).
   sender, and under a failed command or step what the host said (see *This
   workstation keeps one system copy of each deployment* in `README.md`). A dry
   run writes none.
+* **Lease:** with `--execute` the run takes the deployment lease on every
+  ready site before its gather and holds it to its end; another command's live
+  lease refuses it, and `--break-lease` takes one over after the word `break`
+  (see *One command changes a deployment at a time* in `README.md`).
 * **Stopped after the publish:** the stop says the revision is published and
   not applied on every site, and names `deployment log`, which shows what each
   site runs (see *A published version is not a deployed one* in `README.md`).

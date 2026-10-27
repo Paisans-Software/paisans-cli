@@ -153,11 +153,11 @@ var helpCommands = []helpCommand{
 		summary: "Take every site from " + config.FileName + " to a running stack.",
 		usage: []string{
 			"paisans deployment apply [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n" +
-				"                         [--min-free <size>] [--keep-images] [--require-all] [--execute] [--yes]",
+				"                         [--min-free <size>] [--keep-images] [--require-all] [--break-lease] [--execute] [--yes]",
 			"paisans deployment apply --site <name> [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n" +
 				"                         [--ssh <destination>] [--only <stack>]... [--overwrite <path>]...\n" +
 				"                         [--recreate <stack>]... [--hold-apps] [--min-free <size>] [--keep-images]\n" +
-				"                         [--require-all] [--execute] [--yes]",
+				"                         [--require-all] [--break-lease] [--execute] [--yes]",
 		},
 		detail: "Without --site: take every site from " + config.FileName + " to a running stack, running init, site prepare, apply, site add, storage and dns init in the order the deployment needs. " +
 			"With --site: compare that site's rendered artifacts with what is on its host and show what would change.\n\n" +
@@ -169,6 +169,7 @@ var helpCommands = []helpCommand{
 			"A deploy makes the deployed files the system copy and rewrites the draft's \"drafted from\" line to name the version it published.\n\n" +
 			"--yes approves the review entry by entry, and types create and rollback when apply asks for them. " + yesTopic + "\n\n" +
 			"Before anything changes, every app it starts logs in to its mail server from its site, sending nothing; one that does not log in refuses the apply.\n\n" +
+			leaseTopic + "\n\n" +
 			"Every run, --site included, reaches every site's host to classify it, and runs on the sites it has: a site whose host has not admitted the deployment is left out, a joined site that does not answer is kept with its own steps skipped, and the run ends degraded. --require-all: exit 1 when the run is degraded: a site pending or down.\n\n" +
 			"--hold-apps: start none of the site's app stacks, a pinned one included, and apply its mesh, its infrastructure and its Caddy. Without --site, apply runs it on each gateway outside etcd.members before the data sites are founded, so their apps reach Pocket ID through the gateway as they start.",
 	},
@@ -353,10 +354,10 @@ var helpCommands = []helpCommand{
 	{
 		name:    "deployment publish",
 		summary: "Sign the draft and push it to every site.",
-		usage:   []string{"paisans deployment publish [--config " + config.FileName + "] [--merge] [--execute] [--yes]"},
+		usage:   []string{"paisans deployment publish [--config " + config.FileName + "] [--merge] [--break-lease] [--execute] [--yes]"},
 		detail: "Sign the draft's " + config.FileName + ", secrets.enc.yaml and .sops.yaml as a version on the one it was drafted from and push it to every site; --merge builds on every head of a fork. " +
-			"A draft drafted from an older version than the sites' newest is refused, naming deployment pull, which merges it forward, unless the versions after it only sign its files again, as an attestation does. With --execute the published files become the system copy, and the draft's \"drafted from\" line names the new version." +
-			configTrust,
+			"A draft drafted from an older version than the sites' newest is refused, naming deployment pull, which merges it forward, unless the versions after it only sign its files again, as an attestation does. With --execute the published files become the system copy, and the draft's \"drafted from\" line names the new version.\n\n" +
+			leaseTopic + configTrust,
 	},
 	{
 		name:    "deployment pull",

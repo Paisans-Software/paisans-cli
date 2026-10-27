@@ -551,6 +551,8 @@ type convergeOptions struct {
 	answers answerer
 	stdin   io.Reader
 	stdout  io.Writer
+	// BreakLease is --break-lease: take over another command's live lease.
+	BreakLease bool
 }
 
 // convergeFlags is args with the flags o hands on, each to the commands that
@@ -896,6 +898,18 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		return err
 	}
 	steps := runOn(cfg, sites, convergePlan(cfg, st))
+	// The run holds the deployment's lease from before its gather, which
+	// may merge the draft forward, to its end, so no other command
+	// publishes or changes a host while it runs. A dry run changes
+	// nothing and takes none. See internal/lease.
+	if execute {
+		r.Section("deployment lease")
+		release, err := takeLease(r, cfg, readySites(cfg, sites), func(name string) apply.Transport { return convergeHost(name, cfg.Sites[name]) }, "deployment apply", leaseOptions{breakLease: o.BreakLease, answers: o.answers, stdin: o.stdin, stdout: o.stdout})
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
 	// The version the run applies is gathered once, before the review, so
 	// a fork or a stale base is refused before the operator is asked
 	// anything; its steps do not gather again.

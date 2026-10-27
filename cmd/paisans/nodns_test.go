@@ -19,6 +19,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/keystore"
+	"github.com/paisans-software/paisans-cli/internal/lease"
 	"github.com/paisans-software/paisans-cli/internal/localstore"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
 	"github.com/paisans-software/paisans-cli/internal/selfcheck"
@@ -35,6 +36,15 @@ import (
 // testCaddyDigest, and keeps its age keys in memory.
 func TestMain(m *testing.M) {
 	imageDigests = fixedDigest(testCaddyDigest)
+	// Every site takes the deployment lease; a test about the lease sets
+	// lease.Take back (realLease).
+	leaseTake = func(sites map[string]lease.Runner, d deployment.Deployment, h lease.Holder, takeover bool) (*lease.Lease, map[string]error, error) {
+		taken := map[string]lease.Runner{}
+		for name := range sites {
+			taken[name] = leaseTaken{}
+		}
+		return lease.Take(taken, d, h, takeover)
+	}
 	dnsProviderFor = func(name, _ string) (dns.Provider, error) {
 		return nil, fmt.Errorf("test: no DNS provider may be built in tests, asked for %s", name)
 	}
@@ -165,6 +175,11 @@ func gitDirect(dir string) {
 	}
 	os.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
+
+// leaseTaken is a site that takes every lease.
+type leaseTaken struct{}
+
+func (leaseTaken) Run(string) (string, error) { return lease.TakenMarker + "\n", nil }
 
 // noStore is a configuration store that checks nothing and publishes
 // nothing.
