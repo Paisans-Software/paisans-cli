@@ -20,6 +20,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/draft"
+	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/localstore"
 	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -970,8 +971,60 @@ func runDeploymentLog(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	if len(shas) == 0 {
 		r.Result("no site holds a version yet")
+		return nil
+	}
+	head := ""
+	if len(g.Verdict.Heads) == 1 {
+		head = g.Verdict.Heads[0]
+	}
+	r.Section("what each site applied")
+	for _, line := range appliedBySite(cfg, sites, head) {
+		fmt.Fprintln(stdout, line)
 	}
 	return nil
+}
+
+// appliedBySite is a line per site, in name order, saying which version the
+// site last finished applying, from its grant record, and what its pending
+// record says a stopped apply still owes it. apply publishes a version
+// before it changes any host, so that every site's store holds what is
+// applied even when a run stops part way; the head every site holds is
+// therefore not by itself what runs, and this is what says so. head is the
+// one trusted head, or empty for none or a fork.
+func appliedBySite(cfg *config.Config, sites map[string]apply.Transport, head string) []string {
+	names := slices.Sorted(maps.Keys(sites))
+	lines := make([]string, len(names))
+	d := cfg.Deployment()
+	atOnce(len(names), func(i int) {
+		name := names[i]
+		t := sites[name]
+		rec, _, _, err := grant.Read(t, d)
+		if err != nil {
+			lines[i] = name + "  not read: " + errLine(err)
+			return
+		}
+		owed, err := apply.ReadOwed(t, d)
+		if err != nil {
+			lines[i] = name + "  not read: " + errLine(err)
+			return
+		}
+		line := name + "  no apply has finished here"
+		if c := rec.Config; c != nil {
+			where := "behind the head"
+			switch {
+			case c.Hash == head:
+				where = "the head"
+			case head == "":
+				where = "no single head to compare with"
+			}
+			line = fmt.Sprintf("%s  applied revision %d, %s, %s", name, c.Revision, shortSHA(c.Hash), where)
+		}
+		if !owed.None() {
+			line += "; still owes " + owed.String()
+		}
+		lines[i] = line
+	})
+	return lines
 }
 
 func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) error {

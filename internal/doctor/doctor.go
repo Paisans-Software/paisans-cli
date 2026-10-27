@@ -70,9 +70,11 @@ const (
 	SectionPocketID   = "pocket-id"
 	SectionClocks     = "clocks"
 	SectionLeftovers  = "leftovers"
+	// SectionConvergence is whether each site runs the version published.
+	SectionConvergence = "convergence"
 )
 
-var sections = []string{SectionReach, SectionAdmission, SectionUser, SectionDocker, SectionLinger, SectionSudo, SectionSwap, SectionMemory, SectionMesh, SectionEtcd, SectionPatroni, SectionContainers, SectionSettings, SectionPocketID, SectionClocks, SectionLeftovers, SectionSelfCheck, SectionCaddy, SectionSecrets, SectionToken, SectionRecords}
+var sections = []string{SectionReach, SectionAdmission, SectionUser, SectionDocker, SectionLinger, SectionSudo, SectionSwap, SectionMemory, SectionMesh, SectionEtcd, SectionPatroni, SectionContainers, SectionSettings, SectionPocketID, SectionClocks, SectionLeftovers, SectionConvergence, SectionSelfCheck, SectionCaddy, SectionSecrets, SectionToken, SectionRecords}
 
 // Finding is one line of the report, with any explanation, recovery advice or
 // evidence under it.
@@ -236,7 +238,10 @@ type Input struct {
 	Standby    []StandbyProbe
 	Clocks     []ClockSample
 	Leftovers  []LeftoverProbe
-	Settings   []SettingsProbe
+	// Convergence is each site's applied revision and what it is still
+	// owed (convergence.go).
+	Convergence []ConvergenceProbe
+	Settings    []SettingsProbe
 	// SelfChecks is each Caddy site's own answer, asked from outside (selfcheck.go).
 	SelfChecks []SelfCheckProbe
 	// Caddy is each Caddy site's certificate log, Secrets whether the
@@ -341,6 +346,7 @@ func Diagnose(cfg *config.Config, in Input) Report {
 	findings = append(findings, Standby(cfg.Deployment(), in.Standby, noPrimary)...)
 	findings = append(findings, Clocks(in.Clocks)...)
 	findings = append(findings, Leftovers(in.Leftovers)...)
+	findings = append(findings, Convergence(in.Convergence)...)
 	findings = append(findings, SelfChecks(cfg, in.SelfChecks)...)
 	findings = append(findings, CaddyCertificates(cfg, in.Caddy)...)
 	findings = append(findings, Secrets(in.Secrets)...)

@@ -371,9 +371,9 @@ var helpCommands = []helpCommand{
 	},
 	{
 		name:    "deployment log",
-		summary: "List every version, its signer, and the sites holding it.",
+		summary: "List every version, its signer, the sites holding it, and what each site applied.",
 		usage:   []string{"paisans deployment log [--config " + config.FileName + "] [--root <sha>] [--key <path.pub>]"},
-		detail:  "List every version of the configuration the sites keep, its signer, and the sites holding it." + configTrust + "\n\n" + keyTrust,
+		detail:  "List every version of the configuration the sites keep, its signer, and the sites holding it, then the revision each site last finished applying, whether that is the head, and what a stopped apply still owes it: apply publishes a version before it changes any host, so a version every site holds is not by itself what runs." + configTrust + "\n\n" + keyTrust,
 	},
 	{
 		name:    "deployment recover",
@@ -388,7 +388,7 @@ var helpCommands = []helpCommand{
 		name:    "deployment list",
 		summary: "List the system copies on this workstation.",
 		usage:   []string{"paisans deployment list"},
-		detail: "List every deployment's system copy on this workstation: its id, domain, revision, version, whether it is verified, where it came from and when. " +
+		detail: "List every deployment's system copy on this workstation: its id, domain, revision, version, whether it is verified, where it came from and when. A verified copy is a version the sites trust, not one every site runs: deployment log says what each site applied. " +
 			"A system copy is the one copy of a deployment this workstation trusts: the files of the version it last deployed or synced, the signed versions gathered from the sites, and the root, signing key and newest revision trust is read from. " +
 			"The first deploy of a new deployment, deployment recover --execute, the join of operator register and operator register --root --execute make one, and deployment fetch fills one with no version from a host; a deploy or deployment pull moves it to a newer version, and an attestation by operator register moves its head to the attestation. Each records the version it moved to, which this list shows. " +
 			"System copies are kept under deployments/ in ~/Library/Application Support/Paisans on macOS, and in $XDG_DATA_HOME/paisans (~/.local/share/paisans) elsewhere, or in $" + localstore.DirVariable + " when set; locks/ there holds the lock a command takes while it writes one, and replaced/ the copies a recovery moved aside. " +

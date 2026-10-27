@@ -970,7 +970,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	err = convergeExecute(r, cfg, steps, o, publish)
 	reportLeaderMoves(r, moved())
 	if err != nil {
-		return err
+		return publishedNotApplied(err, reviewedByRun.version)
 	}
 	// Each step pointed the retries, holds and login notes at its own
 	// reporter; the check draws on r.
@@ -996,6 +996,23 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		return nil
 	}
 	return degradedEnd(r, sites, o.RequireAll, webServerEnd(end, broken, adminErr))
+}
+
+// publishedNotApplied is err, a run's stop after it published v, saying so:
+// the version is published before any step changes a host, so every site's
+// store holds it while a site the run did not finish still runs what it last
+// applied. Without this a stopped run's version reads as deployed wherever
+// versions are listed. Nil v, a stop before the publish, leaves err as it is.
+func publishedNotApplied(err error, v *appliedVersion) error {
+	if v == nil {
+		return err
+	}
+	note := fmt.Sprintf("Revision %d is published, so every site holds it, but not every site has applied it: %s deployment log shows which revision each site runs and what it still owes.", v.revision, progname.Cmd())
+	var p *ui.Problem
+	if errors.As(err, &p) {
+		return &ui.Problem{Hint: p.Hint, Explain: strings.TrimRight(p.Explain+"\n"+note, "\n"), Cause: p.Cause}
+	}
+	return &ui.Problem{Hint: errLine(err), Explain: note, Cause: err}
 }
 
 // runReady is the sites of cfg a step of the run reaches: every one but
