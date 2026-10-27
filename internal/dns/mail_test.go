@@ -870,6 +870,27 @@ func TestWeakerPolicyBetweenIsNotCovered(t *testing.T) {
 	}
 }
 
+// A policy the plan writes between a hostname and the registrable domain is
+// judged as written, so one run plans every hostname's own policy below it.
+func TestOneRunPlansHostnamePoliciesBelowASenderPolicyItCreates(t *testing.T) {
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{{Type: "TXT", Name: "_dmarc.example.org", Content: dmarcLockdown}}
+	c := fake.serve(t)
+	cfg := staged()
+	cfg.Community.MailDomains = []string{"staging.example.org"}
+	p := plan(t, c, cfg)
+	if e, _ := entryAt(p, "_dmarc.talk.staging.example.org"); e.Action != Create {
+		t.Errorf("got %s, want create", e.Action)
+	}
+	if err := Execute(context.Background(), c, p, &ui.Recorder{}); err != nil {
+		t.Fatal(err)
+	}
+	if again := plan(t, c, cfg); len(again.Creates()) != 0 {
+		t.Errorf("second run creates %+v", again.Creates())
+	}
+}
+
 // A hostname's own policy at a name the registrable domain's covers is a
 // conflict all the same when it is weaker: a receiver reads it first.
 func TestCoveredHostnameWithAWeakPolicyIsAConflict(t *testing.T) {
