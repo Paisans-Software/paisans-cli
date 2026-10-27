@@ -140,8 +140,8 @@ blueprint's `mas.yaml`, so the toolkit can render it for the service.
 One room per member, created by the bot. Created the first Monday a member
 qualifies, or when a member asks to start (below).
 
-* **Created as a direct chat**: `preset: trusted_private_chat` or
-  `private_chat`, `is_direct: true`, the member invited, `m.federate: false`,
+* **Created as a direct chat**: `preset: private_chat` (never
+  `trusted_private_chat`, which gives the member the bot's power level), `is_direct: true`, the member invited, `m.federate: false`,
   and the bot's display name `Digest Bot` (*provisional* on the name's
   spelling and on the avatar, which is none).
 * **Never encrypted.** The room is created with no `m.room.encryption`
@@ -229,6 +229,11 @@ Each sent digest, email or DM, can be read at
   deactivated, the room is gone) is recorded as failed for that member and
   week and not retried; a vanished room is forgotten so that the next week
   creates a new one, provided the member did not leave it.
+* **Room creation is slower still.** Synapse's default room creation limit
+  allows about one room a minute after a burst, so the first Monday a
+  large community turns the bot on, not every member gets a room that day.
+  The Matrix half stops when the send day ends; a member not reached gets
+  their first DM the next week (author's call).
 * **Paced, never exempt.** Founder decision, 2026-10-27: the bot is not a
   Synapse admin and is not exempted from rate limits. The run staggers its
   sends to stay inside Synapse's default message rate for a user
@@ -309,9 +314,12 @@ resource today, and the gateway sends everything outside `/_matrix` and
 ### The bot's access token
 
 The service obtains the bot's client server API token through the admin
-client, with the narrowest scope that lets it sync, create rooms, send and
-manage its own memberships (`urn:matrix:client:api:*`, never
-`urn:synapse:admin:*`), and stores it in its own database. It renews it
+client, as a personal session with the narrowest scope that lets it sync,
+create rooms, send and manage its own memberships:
+`urn:matrix:client:api:* urn:matrix:client:device:DIGESTBOT`, never
+`urn:synapse:admin:*`. Synapse needs the device for transaction ids to
+deduplicate a send; the bot never uploads keys to it, so the device takes no
+part in encryption. The token is stored in the service's own database. It renews it
 when the homeserver refuses it.
 
 The builder verifies each MAS admin API endpoint used (user lookup by
