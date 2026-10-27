@@ -12,6 +12,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Added
 
+- `deployment apply` and `deployment publish` hold a deployment lease on every site while they run, refusing a second command until it ends or expires; `--break-lease` takes over a dead one.
 - `deployment log` and `doctor` show the revision each site last finished applying and what a stopped apply still owes it, and a stopped apply says its published revision is not applied everywhere.
 
 ### Fixed

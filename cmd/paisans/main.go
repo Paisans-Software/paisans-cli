@@ -570,6 +570,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	keepImages := fs.Bool("keep-images", false, "leave the images this apply supersedes on the host, Eg: to keep one to roll back to")
 	mustAll := fs.Bool("require-all", false, "exit 1 when the run is degraded: a site pending or down")
 	holdApps := fs.Bool("hold-apps", false, "start none of the site's app stacks: apply its mesh, its infrastructure and its Caddy")
+	breakLease := breakLeaseFlag(fs)
 	answers := yesFlag(fs)
 	if err := parseFlags(fs, args); err != nil {
 		return err
@@ -592,7 +593,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 			return fmt.Errorf("apply: --ssh, --overwrite, --only, --recreate and --hold-apps are about one site, and apply without --site converges every site. Name it with --site")
 		}
 		verbose := fs.Lookup("verbose").Value.(flag.Getter).Get().(bool)
-		return runConverge(r, convergeOptions{Config: *configPath, Secrets: *secretsPath, Execute: *execute, Verbose: verbose, KeepImages: *keepImages, MinFree: *minFree, RequireAll: *mustAll, answers: ans, stdin: stdin, stdout: stdout})
+		return runConverge(r, convergeOptions{Config: *configPath, Secrets: *secretsPath, Execute: *execute, Verbose: verbose, KeepImages: *keepImages, MinFree: *minFree, RequireAll: *mustAll, BreakLease: *breakLease, answers: ans, stdin: stdin, stdout: stdout})
 	}
 
 	// The deployment and the version open the apply. As a step of apply
@@ -644,6 +645,21 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	cfg, sites, err := effectiveConfig(r, declaration, *site)
 	if err != nil {
 		return err
+	}
+	// On its own, apply --site holds the deployment's lease on every ready
+	// site, as apply without --site does: it publishes the version it
+	// applies to all of them. As a step of that run, the run holds it.
+	if *execute && reviewedByRun == nil {
+		release, err := takeLease(r, cfg, readySites(cfg, sites), func(name string) apply.Transport {
+			if name == *site {
+				return siteTransport(name, cfg.Sites[name], *destination)
+			}
+			return convergeHost(name, cfg.Sites[name])
+		}, "deployment apply --site "+*site, leaseOptions{breakLease: *breakLease, answers: ans, stdin: stdin, stdout: stdout})
+		if err != nil {
+			return err
+		}
+		defer release()
 	}
 
 	if *secretsPath == "" {

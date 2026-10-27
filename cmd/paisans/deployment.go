@@ -436,6 +436,7 @@ func runDeploymentPublish(args []string, stdin io.Reader, stdout io.Writer) erro
 	configPath := fs.String("config", config.FileName, configHelp)
 	merge := fs.Bool("merge", false, "publish a version whose parents are every head, after merging them by hand")
 	execute := fs.Bool("execute", false, "sign the version and push it to the sites")
+	breakLease := breakLeaseFlag(fs)
 	answers := yesFlag(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -470,6 +471,15 @@ func runDeploymentPublish(args []string, stdin io.Reader, stdout io.Writer) erro
 	r := reporter()
 	r.Section("publish " + *configPath)
 	sites := configTransports(cfg)
+	// publish holds the deployment's lease while it gathers and pushes, so
+	// it never publishes beside a running apply. See internal/lease.
+	if *execute {
+		release, err := takeLease(r, cfg, cfg.SiteNames(), func(name string) apply.Transport { return sites[name] }, "deployment publish", leaseOptions{breakLease: *breakLease, answers: ans, stdin: stdin, stdout: stdout})
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
 	t, err := gatherDeploy(r, d, cfg, sites, raw.Paisans, gatherMode{execute: *execute, answers: ans}, stdin, stdout)
 	defer t.done()
 	if err != nil {
