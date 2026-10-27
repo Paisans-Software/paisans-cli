@@ -2,6 +2,7 @@ package render_test
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -207,14 +208,20 @@ func TestEngagementWithoutHomeserverRendersNoMatrix(t *testing.T) {
 	delete(cfg.Apps, "chat")
 	delete(cfg.Apps, "web")
 	env, _ := digestAndTalkEnv(t, cfg)
-	for _, line := range strings.Split(env, "\n") {
-		if strings.HasPrefix(line, "ENGAGEMENT_MATRIX_") || strings.HasPrefix(line, "ENGAGEMENT_MAS_") {
-			t.Errorf("the digest's .env has %q with no homeserver", line)
-		}
+	// The linked render with its Matrix block taken out, the block's comment
+	// and every ENGAGEMENT_MATRIX_ and ENGAGEMENT_MAS_ line, is the unlinked
+	// render byte for byte.
+	lines := strings.Split(with, "\n")
+	start := slices.Index(lines, "# The homeserver the Digest Bot runs on, and the MAS admin client it looks")
+	if start < 0 {
+		t.Fatalf("the linked .env has no Matrix block:\n%s", with)
 	}
-	for _, key := range engagementKeys {
-		if got, want := envValue(env, key), envValue(with, key); got != want {
-			t.Errorf("%s=%s with no homeserver, want %s", key, got, want)
-		}
+	end := start
+	for end < len(lines) && (strings.HasPrefix(lines[end], "#") || strings.HasPrefix(lines[end], "ENGAGEMENT_MATRIX_") || strings.HasPrefix(lines[end], "ENGAGEMENT_MAS_")) {
+		end++
+	}
+	want := strings.Join(slices.Delete(lines, start, end), "\n")
+	if env != want {
+		t.Errorf("the digest's .env with no homeserver:\n%s\nwant the linked one without its Matrix block:\n%s", env, want)
 	}
 }

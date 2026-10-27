@@ -49,11 +49,18 @@ checks:
 // fixture with an app using it, and loads that.
 func loadWithCatalog(t *testing.T, settings string) *config.Config {
 	t.Helper()
+	return loadWithBlueprint(t, notesBlueprint, settings)
+}
+
+// loadWithBlueprint writes a catalog holding blueprint as notes, and the
+// render fixture with an app using it, and loads that.
+func loadWithBlueprint(t *testing.T, blueprint, settings string) *config.Config {
+	t.Helper()
 	coretest.Cache(t)
 	repo := filepath.Join(t.TempDir(), "paisans-example")
 	for name, content := range map[string]string{
 		"catalog.yaml":                        "apiVersion: paisans.catalog/v1\nname: example\n",
-		"blueprints/notes/blueprint.yaml":     notesBlueprint,
+		"blueprints/notes/blueprint.yaml":     blueprint,
 		"blueprints/notes/compose.yaml.tmpl":  "services: {}\n",
 		"blueprints/notes/caddy.snippet.tmpl": "\n",
 	} {

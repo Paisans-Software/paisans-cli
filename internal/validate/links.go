@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -11,12 +12,19 @@ import (
 // two ways a blueprint's link can be left unresolvable: an optional link with
 // several providers and no setting to choose one, and a shared secret whose
 // provider is not in the deployment to be handed it. An app whose link cannot
-// be resolved is reported once, as the first, and skipped by the second.
+// be resolved is reported once, as the first, and skipped by the second. A
+// link LinkOf cannot resolve for another reason is reported with its error.
 func (c *checker) links() {
 	for _, app := range c.cfg.AppNames() {
 		for _, consume := range blueprints.Consumes(c.cfg.Apps[app].Blueprint) {
 			setting, _ := blueprints.SettingsSeen(c.cfg.Apps[app])[consume.Setting].(string)
 			link, err := blueprints.LinkOf(c.cfg, app, consume)
+			if err != nil && !errors.Is(err, blueprints.ErrLinkAmbiguous) {
+				c.refuse("link-unresolvable", fmt.Sprintf("apps.%s.settings.%s", app, consume.Setting),
+					"this app's link to its provider cannot be resolved",
+					"%s", err.Error())
+				continue
+			}
 			if err != nil {
 				hostnames := c.providerHostnames(consume.Role)
 				c.refuse("link-provider-ambiguous", fmt.Sprintf("apps.%s.settings.%s", app, consume.Setting),
@@ -33,9 +41,16 @@ func (c *checker) links() {
 				key = fmt.Sprintf("apps.%s.settings.%s", app, consume.Setting)
 			}
 			hostnames := c.providerHostnames(consume.Role)
-			remedy := "Remove the setting."
-			if len(hostnames) > 0 {
+			var remedy string
+			switch {
+			case setting != "" && len(hostnames) > 0:
 				remedy = fmt.Sprintf("Set it to one of %s.", strings.Join(hostnames, ", "))
+			case setting != "":
+				remedy = "Remove the setting."
+			case len(hostnames) > 0:
+				remedy = fmt.Sprintf("Set settings.%s to one of %s.", consume.Setting, strings.Join(hostnames, ", "))
+			default:
+				remedy = fmt.Sprintf("Set settings.%s to a hostname that provides %s, or add an app that provides it.", consume.Setting, consume.Role)
 			}
 			c.refuse("link-shared-secret-outside", key,
 				"a shared secret needs its provider in this deployment",

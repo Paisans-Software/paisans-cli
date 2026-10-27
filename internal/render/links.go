@@ -15,7 +15,7 @@ type Consumer struct {
 	Secrets map[string]string
 }
 
-// linkValues fills v's links, linkedApps and consumers: where each role the
+// linkValues fills v's links, linkedTo and consumers: where each role the
 // app's blueprint consumes leads (blueprints.LinkOf) and what its provider
 // offers there, and which apps consume each role it provides.
 func (p *planner) linkValues(v *appValues) error {
@@ -32,10 +32,10 @@ func (p *planner) linkValues(v *appValues) error {
 			return err
 		}
 		if v.links == nil {
-			v.links, v.linkedApps = map[string]map[string]string{}, map[string]string{}
+			v.links, v.linkedTo = map[string]map[string]string{}, map[string]blueprints.Link{}
 		}
 		v.links[c.Role] = values
-		v.linkedApps[c.Role] = link.Provider
+		v.linkedTo[c.Role] = link
 	}
 	for _, role := range blueprints.Provides(v.App.Blueprint) {
 		if v.consumers == nil {
@@ -126,15 +126,14 @@ func (v appValues) LinkedOffers(role, value string) bool {
 // to. An unlinked role, or a provider outside the deployment, fails the
 // render.
 func (v appValues) LinkedApp(role string) (string, error) {
-	provider, ok := v.linkedApps[role]
+	link, ok := v.linkedTo[role]
 	if !ok {
 		return "", fmt.Errorf("the role %s is not linked", role)
 	}
-	if provider == "" {
-		c, _ := v.consumes(role)
-		return "", fmt.Errorf("the provider of %s at %s is outside the deployment, so it has no app name", role, v.Setting(c.Setting, v.Hostname))
+	if link.Provider == "" {
+		return "", fmt.Errorf("the provider of %s at %s is outside the deployment, so it has no app name", role, link.Hostname)
 	}
-	return provider, nil
+	return link.Provider, nil
 }
 
 // Consumers is the apps linked to this one by role, sorted by name, each

@@ -36,7 +36,8 @@ const celCostLimit = 10000
 //     (SettingsSeen)
 //   - app.smtp, its resolved mail settings (host, port, security, username,
 //     from_address, from_name), without the password, empty in a condition
-//   - app.mesh_address, the mesh address of the site a pinned app runs on, empty for a clustered app and in a condition
+//   - app.mesh_address, the mesh address of the site a pinned app runs
+//     on, empty for a clustered app and in a condition
 //   - app.name, its name under apps, empty in a condition
 //   - app.oidc, whether its blueprint signs members in through the identity
 //     provider
@@ -142,13 +143,11 @@ func celAppIn(cfg *config.Config, name string) map[string]any {
 	sites := []string{}
 	if app.Placement.Mode == config.PlacementPinned {
 		sites = append(sites, app.Placement.Site)
+		vars["app.mesh_address"] = cfg.Sites[app.Placement.Site].Address
 	} else {
 		sites = append(sites, cfg.AppsSites()...)
 	}
 	vars["app.sites"] = sites
-	if app.Placement.Mode == config.PlacementPinned {
-		vars["app.mesh_address"] = cfg.Sites[app.Placement.Site].Address
-	}
 	storage := map[string]string{"mode": "local"}
 	if InObjectStorage(cfg, app) {
 		storage["mode"] = "object"

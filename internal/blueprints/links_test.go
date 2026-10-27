@@ -1,6 +1,7 @@
 package blueprints
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -161,7 +162,7 @@ func TestLinkOfAnOptionalConsume(t *testing.T) {
 		t.Errorf("one provider: %+v, %v", got, err)
 	}
 	cfg.Apps["chat2"] = chat2
-	if _, err := LinkOf(cfg, "digest", c); err == nil || !strings.Contains(err.Error(), "apps.digest.settings.homeserver: unset, and 2 apps provide matrix-homeserver (chat, chat2)") {
+	if _, err := LinkOf(cfg, "digest", c); err == nil || err.Error() != "apps.digest.settings.homeserver: unset, and 2 apps provide matrix-homeserver (chat, chat2); name one by its hostname" || !errors.Is(err, ErrLinkAmbiguous) {
 		t.Errorf("two providers: %v", err)
 	}
 	digest.Settings = map[string]any{"homeserver": "chat2.example.org"}
@@ -188,6 +189,11 @@ func TestLinkOfWithoutOptionalIsUnchanged(t *testing.T) {
 	if err != nil || got != (Link{Role: "matrix-homeserver", Linked: true, Hostname: "web.example.org"}) {
 		t.Errorf("got %+v, %v", got, err)
 	}
+	cfg.Apps["web"] = config.App{Blueprint: "element", Hostname: "web.example.org", Settings: map[string]any{"homeserver": "chat.example.org"}}
+	got, err = LinkOf(cfg, "web", c)
+	if err != nil || got != (Link{Role: "matrix-homeserver", Linked: true, Provider: "chat", Hostname: "chat.example.org"}) {
+		t.Errorf("named: %+v, %v", got, err)
+	}
 }
 
 // A provider's consumers are the apps whose consume links to it, sorted, and
@@ -202,6 +208,9 @@ func TestConsumersOfAndSharedSecretProvider(t *testing.T) {
 	if got := ConsumersOf(cfg, "chat", "matrix-homeserver"); strings.Join(got, ",") != "a,b" {
 		t.Errorf("consumers: %v", got)
 	}
+	if got := ConsumersOf(cfg, "", "matrix-homeserver"); got != nil {
+		t.Errorf("consumers of no provider: %v", got)
+	}
 	if got, ok := SharedSecretProvider(cfg, "a", "s"); got != "chat" || !ok {
 		t.Errorf("shared: %q, %v", got, ok)
 	}
@@ -211,5 +220,10 @@ func TestConsumersOfAndSharedSecretProvider(t *testing.T) {
 	delete(cfg.Apps, "chat")
 	if _, ok := SharedSecretProvider(cfg, "a", "s"); ok {
 		t.Error("a secret is shared with no provider")
+	}
+	// With no provider the optional consumes link nowhere, and they are
+	// nobody's consumers, not the consumers of provider "".
+	if got := ConsumersOf(cfg, "", "matrix-homeserver"); got != nil {
+		t.Errorf("unlinked consumers: %v", got)
 	}
 }

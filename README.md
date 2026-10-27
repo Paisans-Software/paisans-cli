@@ -943,7 +943,8 @@ app*).
 | `engagement-without-smtp` | the app resolves no SMTP host or `from_address`. Warned: it is an email and cannot send without them |
 | `engagement-bot-localpart-invalid` | `settings.bot_localpart` is not a Matrix localpart, lowercase letters, digits and `._=/-` only. Refused: MAS would not create the bot's account |
 | `link-provider-ambiguous` | an optional link with its setting unset while several apps provide the role. Refused: it could not tell which to use. Applies to any blueprint's link, the engagement app's `homeserver` being one |
-| `link-shared-secret-outside` | a link that shares a secret, set to a hostname no app in the deployment provides. Refused: the secret can be handed only to an app the deployment renders. Applies to any blueprint's link, the engagement app's being the one that shares a secret |
+| `link-shared-secret-outside` | a link that shares a secret, leading to a hostname no app in the deployment provides: the one its setting names, or the app's own when a link without `optional` leaves it unset. Refused: the secret can be handed only to an app the deployment renders. Applies to any blueprint's link, the engagement app's being the one that shares a secret |
+| `link-unresolvable` | a link the toolkit cannot resolve for any other reason, reported with that reason. Refused: the app's templates could not read their provider |
 
 **Mbin must have `placement: cluster`.** The one-Mbin rule also keeps the
 source unambiguous: the digest reads one database and one community's title.

@@ -115,3 +115,55 @@ func TestElementOutsideTheDeploymentIsStillAllowed(t *testing.T) {
 		}
 	}
 }
+
+// sharingBlueprint consumes matrix-homeserver without optional and shares
+// its secret s, so an unset homeserver means the app's own hostname.
+const sharingBlueprint = `apiVersion: paisans.blueprint/v1
+name: notes
+services:
+  - {name: app, image: "ghcr.io/example/notes:1"}
+database: {engine: none}
+port: 8400
+config: {format: env, file: .env}
+settings:
+  homeserver: {type: string}
+consumes:
+  - {role: matrix-homeserver, setting: homeserver, shared_secrets: [s]}
+secrets:
+  generate:
+    - {name: s, format: password}
+  self_rotated: [s]
+`
+
+// A shared secret's link left unset leads to the app's own hostname, and the
+// remedy is to name a provider, not to remove a setting that is not there.
+func TestASecretOutsideWithTheSettingUnsetSaysToSetIt(t *testing.T) {
+	cfg := loadWithBlueprint(t, sharingBlueprint, "")
+	homeservers := map[string]config.App{}
+	for name, app := range cfg.Apps {
+		if app.Blueprint == "synapse" {
+			homeservers[name] = app
+			delete(cfg.Apps, name)
+		}
+	}
+	result := validate.Check(cfg)
+	f, ok := linkFinding(result, "link-shared-secret-outside")
+	if !ok || f.Key != "apps.notes" {
+		t.Fatalf("not refused at the app: %v", result.Findings)
+	}
+	if strings.Contains(f.Message, "Remove the setting") || !strings.Contains(f.Message, "Set settings.homeserver to a hostname that provides matrix-homeserver, or add an app that provides it.") {
+		t.Errorf("message %q", f.Message)
+	}
+
+	if len(homeservers) != 1 {
+		t.Fatalf("the fixture has %d homeservers, want one", len(homeservers))
+	}
+	var hostname string
+	for name, app := range homeservers {
+		cfg.Apps[name], hostname = app, app.Hostname
+	}
+	f, _ = linkFinding(validate.Check(cfg), "link-shared-secret-outside")
+	if !strings.Contains(f.Message, "Set settings.homeserver to one of "+hostname+".") {
+		t.Errorf("with a homeserver, message %q", f.Message)
+	}
+}

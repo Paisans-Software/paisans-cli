@@ -201,9 +201,10 @@ type appValues struct {
 	// links is what each linked role the app's blueprint consumes offers,
 	// keyed by role and then by value (Linked).
 	links map[string]map[string]string
-	// linkedApps is the providing app's name for each linked role, "" for a
-	// provider outside the deployment (LinkedApp).
-	linkedApps map[string]string
+	// linkedTo is where each linked role leads (blueprints.LinkOf): its
+	// provider's name, "" for one outside the deployment, and hostname
+	// (LinkedApp).
+	linkedTo map[string]blueprints.Link
 	// consumers is the apps linked to this one by each role its blueprint
 	// provides, one entry per role even when none is (Consumers).
 	consumers map[string][]Consumer

@@ -1,6 +1,7 @@
 package blueprints
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -53,12 +54,24 @@ type Link struct {
 	Hostname string // the provider's hostname
 }
 
+// ErrLinkAmbiguous is what LinkOf's error wraps when an optional consume left
+// unset has several providers to choose from.
+var ErrLinkAmbiguous = errors.New("several apps provide the role")
+
+// ambiguousLink is LinkOf's error for an optional consume with several
+// providers: its own message, matching ErrLinkAmbiguous.
+type ambiguousLink struct{ msg string }
+
+func (e ambiguousLink) Error() string { return e.msg }
+func (e ambiguousLink) Unwrap() error { return ErrLinkAmbiguous }
+
 // LinkOf is where the app called app in cfg is linked by its consume c. A
 // setting naming a hostname links to the app there that provides the role,
 // or to a provider outside the deployment at that hostname. An unset setting
 // means the app's own hostname, the same way, unless c is optional: then it
 // links to the deployment's one provider of the role, to none when there is
-// none, and is refused when there are several.
+// none, and is refused, with an error wrapping ErrLinkAmbiguous, when there
+// are several.
 func LinkOf(cfg *config.Config, app string, c Consume) (Link, error) {
 	a := cfg.Apps[app]
 	hostname, _ := SettingsSeen(a)[c.Setting].(string)
@@ -69,7 +82,7 @@ func LinkOf(cfg *config.Config, app string, c Consume) (Link, error) {
 		case 1:
 			return Link{Role: c.Role, Linked: true, Provider: providers[0], Hostname: cfg.Apps[providers[0]].Hostname}, nil
 		default:
-			return Link{}, fmt.Errorf("apps.%s.settings.%s: unset, and %d apps provide %s (%s); name one by its hostname", app, c.Setting, len(providers), c.Role, strings.Join(providers, ", "))
+			return Link{}, ambiguousLink{fmt.Sprintf("apps.%s.settings.%s: unset, and %d apps provide %s (%s); name one by its hostname", app, c.Setting, len(providers), c.Role, strings.Join(providers, ", "))}
 		}
 	}
 	if hostname == "" {
@@ -98,16 +111,19 @@ func ProvidersOf(cfg *config.Config, role string) []string {
 }
 
 // ConsumersOf is the apps in cfg whose consume of role links to the app
-// called provider, sorted. An app whose link cannot be resolved is left out,
-// since validate refuses it.
+// called provider, sorted, and none for provider "". An app whose link
+// cannot be resolved is left out, since validate refuses it.
 func ConsumersOf(cfg *config.Config, provider, role string) []string {
+	if provider == "" {
+		return nil
+	}
 	var out []string
 	for _, name := range cfg.AppNames() {
 		for _, c := range Consumes(cfg.Apps[name].Blueprint) {
 			if c.Role != role {
 				continue
 			}
-			if link, err := LinkOf(cfg, name, c); err == nil && link.Provider == provider {
+			if link, err := LinkOf(cfg, name, c); err == nil && link.Linked && link.Provider == provider {
 				out = append(out, name)
 			}
 		}
@@ -132,7 +148,8 @@ func SharedSecretProvider(cfg *config.Config, app, key string) (string, bool) {
 }
 
 // checkSharedSecrets refuses a shared secret that is not the consumer's own
-// self rotated secret, or that is shared more than once.
+// self rotated secret, or that is shared more than once: a name may be shared
+// once across all the blueprint's consumes.
 func checkSharedSecrets(consumes []Consume, generate, selfRotated []string) error {
 	shared := map[string]bool{}
 	for i, c := range consumes {

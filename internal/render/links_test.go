@@ -66,8 +66,8 @@ func TestLinkedAppOutsideTheDeploymentFails(t *testing.T) {
 		t.Error(`HasLinked("matrix-homeserver") is false, want true`)
 	}
 	_, err := v.LinkedApp("matrix-homeserver")
-	if err == nil || !strings.Contains(err.Error(), "outside the deployment") {
-		t.Errorf(`LinkedApp("matrix-homeserver") error = %v, want one saying "outside the deployment"`, err)
+	if err == nil || !strings.Contains(err.Error(), "at matrix.example.net is outside the deployment") {
+		t.Errorf(`LinkedApp("matrix-homeserver") error = %v, want one saying "at matrix.example.net is outside the deployment"`, err)
 	}
 }
 
