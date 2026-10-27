@@ -217,6 +217,9 @@ func runCatalogUpdate(args []string) error {
 		if url == "" {
 			url = blueprints.CoreURL
 		}
+		if owner, repo, ok := config.CatalogRepo(url); ok {
+			url = owner + "/" + repo
+		}
 		s := r.Step("read " + url)
 		if core.Commit == "" {
 			// CorePin read nothing; LoadCore returns why, having kept it.
