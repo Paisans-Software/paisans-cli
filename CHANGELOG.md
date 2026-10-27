@@ -10,6 +10,14 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Added
+
+- `deployment log` and `doctor` show the revision each site last finished applying and what a stopped apply still owes it, and a stopped apply says its published revision is not applied everywhere.
+
+### Fixed
+
+- The run log keeps what a host said under a failed command or step, so a stopped apply's cause survives the terminal.
+
 ## [0.3.0-rc.12] - 2026-10-27
 
 ### Changed

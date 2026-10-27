@@ -18,7 +18,9 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/draft"
+	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/version"
 )
@@ -1147,5 +1149,44 @@ func TestPublishAfterThePushWarnsAndKeepsTheVersion(t *testing.T) {
 	m, ok := draft.ReadMarker(f.draftBody(t))
 	if head == f.shas[0] || rev != 2 || seen != head || cache.Revision(head) != 2 || !bytes.Equal(got.Paisans, edited.Paisans) || !ok || m.SHA != head || !f.pushed() {
 		t.Errorf("head %s, seen %d %s, marker %+v %v, pushed %v\n%s", head, rev, seen, m, ok, f.pushed(), rep.String())
+	}
+}
+
+// log says, under the versions, which version each site last finished
+// applying and what a stopped apply still owes it: apply publishes before it
+// changes a host, so the head every site holds is not by itself what runs.
+func TestLogSaysWhatEachSiteApplied(t *testing.T) {
+	shas, answer, files := storedHistory(t, 2, 0)
+	recoverHosts(t, answer)
+	d := deployment.Deployment{ID: exampleID}
+	applied := func(sha string, rev int) string {
+		return grant.Encode(grant.Record{Version: grant.Version, Config: &grant.ConfigPart{Hash: sha, Revision: rev}})
+	}
+	hostFiles := map[string]map[string]string{
+		"home-a": {grant.Path(d): applied(shas[1], 2)},
+		"home-b": {grant.Path(d): applied(shas[0], 1), d.Path(".paisans-pending.json"): `{"version":1,"actions":[{"stack":"talk","recreate":true}]}`},
+	}
+	configSiteTransport = func(name string, _ config.Site) apply.Transport {
+		return &storeHost{name: name, answer: answer, files: hostFiles[name]}
+	}
+	w := newWorkstation(t, files[0])
+	if err := w.sys.SetRoot(shas[0]); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.sys.SetHead(shas[0]); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := runDeployment([]string{"log", "--config", w.config()}, noTerminalStdin(), &out); err != nil {
+		t.Fatal(problemText(err), err)
+	}
+	for _, want := range []string{
+		"home-a  applied revision 2, " + shas[1][:12] + ", the head",
+		"home-b  applied revision 1, " + shas[0][:12] + ", behind the head; still owes talk",
+		"vm  no apply has finished here",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("log lacks %q:\n%s", want, out.String())
+		}
 	}
 }

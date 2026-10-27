@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"slices"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -199,6 +201,11 @@ func TestConvergeRunDNSConflictStopsBeforeInstall(t *testing.T) {
 // had not reached are left waiting.
 func TestConvergeRunInstallFailureFailsItsSite(t *testing.T) {
 	ran := fakeConverge(t, map[string]error{"deployment apply --site home-a": errors.New("home-a: boom")})
+	saved := applyStore
+	applyStore = func(ui.Reporter, string, string, *configstore.Files, *config.Config, bool, answerer, io.Reader, io.Writer) (storeVersion, error) {
+		return publishingStore{revision: 7}, nil
+	}
+	t.Cleanup(func() { applyStore = saved })
 	rec := recordConverge(t)
 	err := converge(t, "--execute")
 	if err == nil || !strings.Contains(err.Error(), "deployment apply --site home-a") || !strings.Contains(err.Error(), "home-a: boom") || !strings.Contains(err.Error(), "Run paisans deployment apply --execute again to resume") {
@@ -214,6 +221,21 @@ func TestConvergeRunInstallFailureFailsItsSite(t *testing.T) {
 	if (*ran)[len(*ran)-1] != "deployment apply --site home-a" {
 		t.Errorf("ran on past the failure: %v", *ran)
 	}
+	// The version was published before the first install, so the stop says
+	// it is published and not applied everywhere, and where to look.
+	if !strings.Contains(err.Error(), "Revision 7 is published, so every site holds it, but not every site has applied it") || !strings.Contains(err.Error(), "deployment log") {
+		t.Errorf("the stop does not say the version is published and not applied: %v", err)
+	}
+}
+
+// publishingStore is noStore whose publish reports revision published.
+type publishingStore struct {
+	noStore
+	revision int
+}
+
+func (s publishingStore) publish(ui.Reporter, bool) (*appliedVersion, error) {
+	return &appliedVersion{sha: strings.Repeat("a", 40), revision: s.revision}, nil
 }
 
 // screen is a terminal for a test: it applies the carriage returns,

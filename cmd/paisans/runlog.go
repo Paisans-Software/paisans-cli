@@ -30,7 +30,7 @@ func openRunLog(command string, args []string) (closeLog func()) {
 		return func() {}
 	}
 	savedSteps, savedSSH := ui.StepLog, apply.SSHLog
-	ui.StepLog, apply.SSHLog = l.Step, logSSH
+	ui.StepLog, apply.SSHLog = logStep(l), logSSH
 	return func() {
 		ui.StepLog, apply.SSHLog = savedSteps, savedSSH
 		l.Close()
@@ -41,4 +41,13 @@ func openRunLog(command string, args []string) (closeLog func()) {
 // in Paisans sent it.
 func logSSH(site, command string, took time.Duration, err error) {
 	runlog.Current().SSH(site, ui.Redact(command), runlog.Caller("main.logSSH", "apply.SSHTransport."), took, err)
+}
+
+// logStep is l.Step with each title and result redacted: a failed step's
+// result reaches the log whole, detail lines included.
+func logStep(l *runlog.Log) func(string) func(string, string) {
+	return func(title string) func(string, string) {
+		end := l.Step(ui.Redact(title))
+		return func(mark, result string) { end(mark, ui.Redact(result)) }
+	}
 }
