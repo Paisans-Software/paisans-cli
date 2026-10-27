@@ -2,6 +2,7 @@ package secretsrotate
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -79,7 +80,18 @@ func (r appSelf) Accepts(e Env, next string) (bool, error) { return true, nil }
 // so the window in which it holds a key Pocket ID does not yet accept is
 // seconds. Without them the account service would keep calling with a key
 // Pocket ID no longer accepts.
+//
+// A secret the app's blueprint shares with a linked provider (a consume's
+// shared_secrets) is checked by the provider: the synapse app's MAS reads the
+// engagement app's mas_admin_client_secret from its mas.yaml. So the
+// provider's sites come first, each step holding the provider's stack and,
+// where the app runs there too, the app's after it; then each remaining site
+// of the app, its own stack alone. The app never presents a value its
+// provider does not yet accept.
 func (r appSelf) Users(e Env) []Use {
+	if provider, ok := blueprints.SharedSecretProvider(e.Cfg, r.app, r.key); ok {
+		return sharedUses(e, provider, r.app)
+	}
 	uses := appUses(e, r.app)
 	if r.key != "static_api_key" {
 		return uses
@@ -107,6 +119,29 @@ func (r appSelf) Users(e Env) []Use {
 		}
 	}
 	return uses
+}
+
+// sharedUses is every site running provider, its stack then app's where app
+// runs there too, followed by every other site running app, app's stack
+// alone, in render.AppSites order.
+func sharedUses(e Env, provider, app string) []Use {
+	sites := render.AppSites(e.Cfg)
+	var out []Use
+	done := map[string]bool{}
+	for _, site := range sites[provider] {
+		use := Use{Site: site, Stacks: []string{provider}}
+		if slices.Contains(sites[app], site) {
+			use.Stacks = append(use.Stacks, app)
+		}
+		done[site] = true
+		out = append(out, use)
+	}
+	for _, site := range sites[app] {
+		if !done[site] {
+			out = append(out, Use{Site: site, Stacks: []string{app}})
+		}
+	}
+	return out
 }
 
 // appUses is every site running app, as render places it (render.AppSites:

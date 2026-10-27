@@ -2801,6 +2801,7 @@ Finishing either command first costs nothing but its resume.
 | Pocket ID `operators_heartbeat_token`, `dns_super_admins_heartbeat_token`, `dns_2fa_heartbeat_token` | the monitor | the operators heartbeat on every site the app runs on | its pushes refused while the monitors restart and the pushers switch, normally within the grace before a heartbeat counts as missed |
 | `apps.<app>.heartbeat_token`, for a blueprint that declares a heartbeat | the monitor | the app, on every site it runs on | its pushes refused while the monitors restart and the app switches, normally within the grace before a heartbeat counts as missed |
 | Pocket ID `dns_email_hash_key` | the reconciler | the reconciler, with the hashed mapping rendered under it | a restart of the Pocket ID stack on each site in turn |
+| engagement `mas_admin_client_secret`, and any secret a blueprint shares with its provider | MAS, through the synapse app's `mas.yaml` | the engagement app; the synapse stack is re-applied with it, first | none; a restart of both stacks |
 
 Mbin's `app_secret` signs its four month remember me cookie, not the sessions
 it keeps in Postgres, so an open session lasts until it ends and the next sign
