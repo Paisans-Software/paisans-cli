@@ -145,7 +145,7 @@ today, with the same conventions: `.tmpl` is dropped when rendered, and
 | `apiVersion` | `paisans.blueprint/v1` | |
 | `name` | the blueprint's name within its catalog | the `config.Kind` constant |
 | `requires_toolkit` | the oldest toolkit version that can render it | |
-| `port` | the port the app serves on | `appPort` in `internal/render/plan.go` |
+| `port` | the port the app serves on, from 1024 to 65535 because rootless Docker publishes it | `appPort` in `internal/render/plan.go` |
 | `services` | each compose service, its default image, an optional `when`, and a `port` for one the gateway routes to directly | `catalogue` in `internal/kinds/kinds.go` |
 | `database` | `engine` (`postgres`, `mysql`, `sqlite`, `none`), for a container of its own `service`, and `extra`, databases kept beside the app's own in the same Postgres | `UsesPostgres`, `PostgresService` |
 | `placement` | the placements it allows | `cluster-placement-without-a-cluster` and the pinned only kinds |

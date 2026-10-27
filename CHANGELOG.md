@@ -12,6 +12,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Fixed
 
+- `blueprint lint`, `validate` and `deployment apply` refuse a blueprint publishing a port below 1024, which rootless Docker cannot bind outside a Caddy site, instead of failing mid-apply when its container starts.
 - One `dns init` plans every record when `community.domain` sends mail under a registrable domain with a strict policy: hostnames' own DMARC policies no longer wait for a second run.
 
 ## [0.3.0-rc.11] - 2026-10-26

@@ -179,6 +179,27 @@ func Parse(name string, content []byte, hasTemplate func(string) bool) (*Def, er
 	return d, nil
 }
 
+// MinPublishedPort is the lowest port a blueprint may publish. Every app's
+// port, and every service's that has one, is published on its site's mesh
+// address by the deployment user's rootless Docker, and a rootless daemon
+// binds a port below 1024 only on a site admitted with --public-ports, which
+// only a site running the toolkit's Caddy is given. Refused when the blueprint
+// is read, so that blueprint lint, validate and apply all say so before a
+// container fails to start on a host.
+const MinPublishedPort = 1024
+
+// publishable reports why port cannot be published on a site's mesh address,
+// nil when it can.
+func publishable(port int) error {
+	switch {
+	case port < 0 || port > 65535:
+		return fmt.Errorf("is %d, not a port", port)
+	case port < MinPublishedPort:
+		return fmt.Errorf("is %d, and a site's rootless Docker binds a port below %d only where it runs the toolkit's Caddy; publish a port from %d to 65535 and map it to the container's %d in compose (Eg: \"{{ .MeshAddress }}:%d:%d\")", port, MinPublishedPort, MinPublishedPort, port, port+8000, port)
+	}
+	return nil
+}
+
 func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
 	if s.APIVersion != APIVersion && s.APIVersion != APIVersionV2 && s.APIVersion != APIVersionV1 {
 		return nil, fmt.Errorf("apiVersion: is %q, and this toolkit reads %s, %s and %s", s.APIVersion, APIVersionV1, APIVersionV2, APIVersion)
@@ -199,8 +220,11 @@ func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
 	if hasPostgres != (s.Database.Engine == "postgres") {
 		return nil, fmt.Errorf("database.engine: is %s, so a %q service must be listed exactly when it is postgres", s.Database.Engine, PostgresService)
 	}
-	if s.Port <= 0 || s.Port > 65535 {
+	if s.Port == 0 {
 		return nil, fmt.Errorf("port: required, the port the app listens on in its container")
+	}
+	if err := publishable(s.Port); err != nil {
+		return nil, fmt.Errorf("port: %w", err)
 	}
 	for i, svc := range s.Services {
 		if err := checkServiceImage(svc); err != nil {
@@ -214,8 +238,9 @@ func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
 			continue
 		case i == 0:
 			return nil, fmt.Errorf("services[0].port: the app's port is the blueprint's port, not its service's")
-		case svc.Port < 0 || svc.Port > 65535:
-			return nil, fmt.Errorf("services[%d].port: is %d, not a port", i, svc.Port)
+		}
+		if err := publishable(svc.Port); err != nil {
+			return nil, fmt.Errorf("services[%d].port: %w", i, err)
 		}
 		if other, taken := ports[svc.Port]; taken {
 			return nil, fmt.Errorf("services[%d].port: %d is %s's port too", i, svc.Port, other)

@@ -3803,6 +3803,17 @@ Some combinations are refused by this today, and a homeserver pinned to a data
 site is the one worth knowing: Synapse's 8008 is the Patroni API's, and MAS's
 8009 is bg_mon's.
 
+**A blueprint publishes ports from 1024 up.** Every app
+port and service port is published by the deployment user's rootless Docker,
+which binds a port below 1024 only on a site admitted with `--public-ports`,
+and only a site running the toolkit's Caddy gets that grant. A blueprint whose
+`port` or a service's `port` is below 1024 would therefore fail when its
+container starts, partway through `deployment apply`, so the toolkit refuses it
+when it reads the blueprint: `blueprint lint`, `validate` and `deployment apply`
+all name the port. An app that listens on 80 in its container keeps doing so;
+its blueprint publishes a port from 1024 up and its compose file maps that port
+to 80.
+
 **Leaving `gated` out of an app's stanza means the same thing as
 `gated: false`: ungated, reachable by anyone who can resolve the hostname.**
 That default has to be stated here, not only in a doc comment, because it is
