@@ -55,12 +55,17 @@ func heldParent(ctx context.Context, provider Provider, w *Want, zones map[strin
 // already there and rejects: nothing is written for it, and dns prune
 // removes one this deployment made. A policy this plan creates covers
 // nothing yet: until it reads back, nothing says the provider let it be
-// written.
+// written. A policy this plan creates or updates at a name between is
+// judged as the plan writes it.
 func (p *Plan) cover(ctx context.Context, provider Provider, zones map[string]zone, existing map[string][]Record) error {
 	covering := map[string]Entry{}
+	written := map[string][]Record{}
 	for _, e := range p.Entries {
 		if e.Type == "TXT" && wantPurpose(e.Want) == purposeDMARC {
 			covering[e.Name] = e
+			if e.Action == Create || e.Action == Update {
+				written[e.Name] = []Record{{Type: e.Type, Name: e.Name, Content: e.Content}}
+			}
 		}
 	}
 	for i, e := range p.Entries {
@@ -71,7 +76,7 @@ func (p *Plan) cover(ctx context.Context, provider Provider, zones map[string]zo
 		if !ok || c.Action == Create || c.Action == Conflict {
 			continue
 		}
-		holds, err := coverHolds(ctx, provider, zones, existing, e.Name, e.CoveredBy, c.held)
+		holds, err := coverHolds(ctx, provider, zones, existing, written, e.Name, e.CoveredBy, c.held)
 		if err != nil {
 			return err
 		}
@@ -88,13 +93,15 @@ func (p *Plan) cover(ctx context.Context, provider Provider, zones map[string]zo
 // reads coveredBy for a name with no policy of its own; one following
 // DMARCbis walks up from the name and reads the first policy it finds, so a
 // weaker one between would win. records caches the records at each
-// "_dmarc" name read, and zones each zone found.
+// "_dmarc" name read, and zones each zone found. written are the policies
+// this plan creates or updates, by name: one there stands in for what the
+// provider holds now.
 //
 // The policy must be strict, as the hostname's own is: under relaxed
 // alignment a forger passes with any sibling name's SPF. A name between that
 // is delegated to nameservers the provider does not hold is out of sight,
 // and covers nothing.
-func coverHolds(ctx context.Context, provider Provider, zones map[string]zone, records map[string][]Record, name, coveredBy string, covering []Record) (bool, error) {
+func coverHolds(ctx context.Context, provider Provider, zones map[string]zone, records, written map[string][]Record, name, coveredBy string, covering []Record) (bool, error) {
 	if !strictRejecting(covering) {
 		return false, nil
 	}
@@ -118,9 +125,12 @@ func coverHolds(ctx context.Context, provider Provider, zones map[string]zone, r
 				}
 			}
 		}
-		policy, _, err := readAt(ctx, provider, zones, records, "_dmarc."+a)
-		if err != nil {
-			return false, err
+		policy, planned := written["_dmarc."+a]
+		if !planned {
+			var err error
+			if policy, _, err = readAt(ctx, provider, zones, records, "_dmarc."+a); err != nil {
+				return false, err
+			}
 		}
 		if !noPolicy(policy) && !strictRejecting(policy) {
 			return false, nil
