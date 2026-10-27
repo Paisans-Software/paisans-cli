@@ -134,6 +134,16 @@ func runSourceGrants(plan *Plan, t Transport) error {
 		return nil
 	}
 	for _, r := range plan.Bootstrap.Readers {
+		// A held app's reader may not exist yet: a pass with nothing to act
+		// on runs no bootstrap, and the first pass on a site running Pocket
+		// ID holds every other app back. The pass that releases it creates
+		// the role before granting it.
+		if plan.held[r.App] {
+			if slices.Contains(plan.owedGrants, r.Role) {
+				plan.grantsOwed = append(plan.grantsOwed, r.Role)
+			}
+			continue
+		}
 		done := plan.step("grant " + r.Role)
 		done.Detail("SELECT on the allowlisted columns of database %s, for %s", r.Database, r.App)
 		out, err := t.RunInput(Psql(plan.Deployment), grantSQL(r))

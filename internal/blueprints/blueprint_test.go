@@ -59,6 +59,9 @@ func TestABlueprintMistakeIsRefused(t *testing.T) {
 		{"a check with two messages", minimal + "checks:\n  - {id: x, level: warn, rule: \"true\", message: m, message_expr: \"'m'\"}\n", "one of message and message_expr"},
 		{"a message that is not text", minimal + "checks:\n  - {id: x, level: warn, rule: \"true\", message_expr: \"size(app.sites)\"}\n", "message_expr"},
 		{"a second service on the app's port", strings.Replace(minimal, "  - {name: app, image: \"example/app:1\"}\n", "  - {name: app, image: \"example/app:1\"}\n  - {name: side, image: \"example/side:1\", port: 8000}\n", 1), "is app's port too"},
+		{"an app port rootless Docker cannot publish", strings.Replace(minimal, "port: 8000", "port: 80", 1), "port: is 80, and a site's rootless Docker binds a port below 1024"},
+		{"a service port rootless Docker cannot publish", strings.Replace(minimal, "  - {name: app, image: \"example/app:1\"}\n", "  - {name: app, image: \"example/app:1\"}\n  - {name: side, image: \"example/side:1\", port: 443}\n", 1), "services[1].port: is 443"},
+		{"a port beyond the last", strings.Replace(minimal, "port: 8000", "port: 70000", 1), "port: is 70000, not a port"},
 		{"a port on the app service", strings.Replace(minimal, "{name: app, image: \"example/app:1\"}", "{name: app, image: \"example/app:1\", port: 8001}", 1), "services[0].port"},
 		{"an extra database without postgres", strings.Replace(minimal, "database: {engine: none}", "database: {engine: none, extra: [side]}", 1), "database.extra"},
 		{"a local only reason without local only", minimal + "storage: {local_only_reason: because}\n", "local_only_reason"},
@@ -79,6 +82,11 @@ func TestABlueprintMistakeIsRefused(t *testing.T) {
 		_, err := Parse("example", []byte(c.change), always)
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: got %v, want an error naming %q", c.name, err, c.want)
+		}
+	}
+	for _, port := range []string{"1024", "65535"} {
+		if _, err := Parse("example", []byte(strings.Replace(minimal, "port: 8000", "port: "+port, 1)), always); err != nil {
+			t.Errorf("port %s, the edge of what rootless Docker publishes: %v", port, err)
 		}
 	}
 	if _, err := Parse("other", []byte(minimal), always); err == nil || !strings.Contains(err.Error(), "directory") {

@@ -10,6 +10,18 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+## [0.3.0-rc.12] - 2026-10-27
+
+### Changed
+
+- `catalog update` names the core catalog release every command uses, and each newer one skipped, instead of reporting only declared catalogs, so "0 of 0 catalogs moved" no longer reads as nothing resolved.
+
+### Fixed
+
+- `blueprint lint`, `validate` and `deployment apply` refuse a blueprint publishing a port below 1024, which rootless Docker cannot bind outside a Caddy site, instead of failing mid-apply when its container starts.
+- `deployment apply --execute` on a site running Pocket ID no longer fails granting a new engagement app's reader before the pass that creates its role: a held app's grant waits for the pass releasing it.
+- One `dns init` plans every record when `community.domain` sends mail under a registrable domain with a strict policy: hostnames' own DMARC policies no longer wait for a second run.
+
 ## [0.3.0-rc.11] - 2026-10-26
 
 ### Added
@@ -319,7 +331,8 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.
 - The gateway refuses any request to Pocket ID that carries an `X-API-Key` header with 403, so Pocket ID's API keys work only on the mesh.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.11...develop
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.12...develop
+[0.3.0-rc.12]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.11...v0.3.0-rc.12
 [0.3.0-rc.11]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.10...v0.3.0-rc.11
 [0.3.0-rc.10]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.9...v0.3.0-rc.10
 [0.3.0-rc.9]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.8...v0.3.0-rc.9
