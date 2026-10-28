@@ -1799,6 +1799,30 @@ or `public_address`, or the endpoint's host. A column with nothing in it is
 working directory is read. It loads the file without validating it, since a
 declaration `validate` refuses still names its sites, and it reaches no host.
 
+### `paisans site ssh`
+
+Opens your own ssh session on a site's host, logged in as every command logs in
+there:
+
+```
+paisans site ssh home-a                      # a shell
+paisans site ssh home-a -- docker ps --all   # one command
+```
+
+The login is the one `site list` shows under `SSH`: `ssh.user`, or the
+deployment's own user when the site names none, at its ssh host and port,
+offering the keys its `ssh.keys` lists from your agent, as every other command
+offers them. A plain `ssh` to the same host logs in as your own account, which
+holds none of the deployment's files and none of its rootless Docker; this one
+lands in the deployment user's home, where its containers are.
+
+Words after `--` are run in place of a shell, as `ssh` runs them, and they are
+split off before the flags are read, so a flag of the command is never taken
+for one of `site ssh`'s. The session's exit status is the command's, or 255
+for ssh's own failure. `--config` names the declaration, read without
+validating it, since a declaration `validate` refuses still says how to reach
+its sites. The command changes nothing itself.
+
 ### `paisans site add`
 
 Joins a data site to the running cluster in eight gated stages: preflight,

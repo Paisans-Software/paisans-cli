@@ -92,8 +92,10 @@ func main() {
 			err = runSiteEvict(os.Args[3:], os.Stdin, os.Stdout)
 		case len(os.Args) >= 3 && os.Args[2] == "deployments":
 			err = runSiteDeployments(os.Args[3:])
+		case len(os.Args) >= 3 && os.Args[2] == "ssh":
+			err = runSiteSSH(os.Args[3:])
 		default:
-			os.Exit(groupError(os.Stderr, "site", "site takes one subcommand, list, request, admit, prepare, add, remove, evict or deployments"))
+			os.Exit(groupError(os.Stderr, "site", "site takes one subcommand, list, request, admit, prepare, add, remove, evict, deployments or ssh"))
 		}
 	case "mesh":
 		err = runMesh(os.Args[2:])
@@ -193,6 +195,12 @@ func reportError(w io.Writer, err error, verbose bool) int {
 	// tells it from an error.
 	if errors.Is(err, errImagesMove) {
 		return 3
+	}
+	// site ssh's session ended non-zero, and ssh, or the command, has
+	// said why.
+	var exit remoteExit
+	if errors.As(err, &exit) {
+		return int(exit)
 	}
 	ui.PrintError(w, err, verbose)
 	// Not a failure: a gate is waiting on Garage, and the next run resumes

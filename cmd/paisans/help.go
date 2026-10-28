@@ -43,7 +43,7 @@ type helpSection struct {
 // groupSummary is the line the first page gives a command with
 // subcommands. A command without any is listed by its own summary.
 var groupSummary = map[string]string{
-	"site":        "List, admit, prepare, add, remove and evict sites.",
+	"site":        "List, admit, prepare, add, remove, evict and log in to sites.",
 	"mesh":        "Replace sites' WireGuard keys.",
 	"gateway":     "Move the gateway role to another site.",
 	"storage":     "Provision object storage, join sites to it, replace keys.",
@@ -259,6 +259,15 @@ var helpCommands = []helpCommand{
 		usage:   []string{"paisans site deployments --ssh <user@host[:port] or ssh alias> [--sudo=false]"},
 		detail: "List every admission record on the host --ssh names (the deployment, its user, the site and roles it was admitted as, the grants and when), every deployment in its registry (id, token, domain, site, roles and root), and any deployment directory no registry entry names. " +
 			"--sudo=false lists admission records only, which are readable without sudo. Needs no " + config.FileName + "; changes nothing.\n\n" + sshAliasTopic,
+	},
+	{
+		name:    "site ssh",
+		summary: "Log in to a site's host as the deployment's user.",
+		usage:   []string{"paisans site ssh <site> [--config " + config.FileName + "] [-- command...]"},
+		detail: "Open your own ssh session on the site's host, logged in as every command logs in there: the site's ssh.user, or the deployment's own user when it names none, at its ssh host and port, offering the keys its ssh.keys lists from your agent. " +
+			"A plain ssh to the host reaches your own account; this one reaches the deployment's, with its rootless Docker.\n\n" +
+			"Words after -- run as a command in place of a shell, as for ssh, and its exit status is site ssh's. " +
+			"Reads " + config.FileName + " without validating it; changes nothing itself.",
 	},
 	{
 		name:    "mesh rekey",
