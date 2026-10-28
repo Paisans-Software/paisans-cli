@@ -1,6 +1,7 @@
 // Package hostprep checks a host its owner admitted, as the deployment's
 // user, and keeps that user's own files: the authorized keys, the
-// configuration store and its user units, and the daemon's daemon.json.
+// configuration store and its user units, the daemon's daemon.json, and its
+// shell's DOCKER_HOST and ~/deployment link.
 // What needs root, the profile's packages, the firewall and the watchdog
 // module, is what `paisans site admit` runs, and this package plans it for
 // admit.
@@ -95,7 +96,7 @@ const (
 	KindConfigStore = "configuration store"
 )
 
-var kindOrder = []string{KindDocker, KindWireGuard, KindFirewall, KindSSHKeys, KindWatchdog, KindConfigStore}
+var kindOrder = []string{KindDocker, KindWireGuard, KindFirewall, KindSSHKeys, KindWatchdog, KindConfigStore, KindShell}
 
 // Kinds is each kind of change the plan's steps make, once: those named
 // above in their order, then any other in the order its first step runs.
@@ -281,13 +282,15 @@ func UnsupportedMessage(host OSRelease) string {
 // fix by admitting again.
 // planReads is every file Build reads once it knows the login user's home,
 // in the order it reads them: the authorized keys and the record of the ones
-// Paisans owns, Docker's daemon.json, and the configuration store's.
+// Paisans owns, Docker's daemon.json, the configuration store's, and the
+// user's ~/.bashrc.
 func planReads(d deployment.Deployment, home string) []string {
 	units := UserUnitDir(home) + "/" + d.Prefix()
 	return []string{
 		home + "/.ssh/authorized_keys", OwnedKeysPath(d), home + "/.config/docker/daemon.json",
 		ConfigRepo(d) + "/HEAD", ConfigPeers(d), ConfigScriptDir(d) + "/config-sync.sh",
 		units + "-config-daemon.service", units + "-config-sync.service", units + "-config-sync.timer",
+		home + "/.bashrc",
 	}
 }
 
@@ -350,6 +353,16 @@ func Build(site string, cfg *config.Config, t Transport, rec admission.Record) (
 		return nil, fmt.Errorf("configuration store on %s: %w", t.Describe(), err)
 	}
 	plan.add(store)
+	bashrc, err := planBashrc(t, d, home)
+	if err != nil {
+		return nil, fmt.Errorf("the shell on %s: %w", t.Describe(), err)
+	}
+	plan.add(bashrc)
+	link, err := planDeploymentLink(t, d, home)
+	if err != nil {
+		return nil, err
+	}
+	plan.add(link)
 	plan.add(keys)
 	// Last of all: a key is taken away only once everything else, the listed
 	// keys included, is in place.

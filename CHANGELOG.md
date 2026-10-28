@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Added
+
+- `site prepare`, and so every `deployment apply`, keeps `DOCKER_HOST` set at the deployment's rootless Docker in its user's `~/.bashrc`, and links `~/deployment` to `/srv/paisans/<token>`.
+
 ## [0.3.0-rc.13] - 2026-10-27
 
 ### Added
