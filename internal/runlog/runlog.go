@@ -6,7 +6,11 @@
 // A run's log is runs/<UTC time>-<command>.log under the operator's data
 // directory. It holds no secret: a command sent to a host carries none on
 // its line (what must not appear in `ps` goes over stdin), and each line is
-// cut to its first line and redacted besides. The newest Keep logs are kept.
+// cut to its first line and redacted besides. A failure keeps what follows
+// its first line too, the host's own output, as indented detail lines: that
+// is the one part of a failed run the terminal shows and the log otherwise
+// would not, and it is redacted before it reaches the log, as every error a
+// transport returns is. The newest Keep logs are kept.
 package runlog
 
 import (
@@ -24,6 +28,11 @@ import (
 // Keep is how many run logs are kept; opening one removes the oldest beyond
 // it.
 const Keep = 20
+
+// MaxDetail is how many lines of a failure's detail are kept. A host's
+// output past it is rarely the cause, and a log of a failed run stays
+// readable.
+const MaxDetail = 40
 
 // Dir is where run logs go under the data directory base.
 func Dir(base string) string { return filepath.Join(base, "runs") }
@@ -120,6 +129,9 @@ func (l *Log) Step(title string) (end func(mark, result string)) {
 			line += ": " + firstLine(result)
 		}
 		fmt.Fprintf(l.w, "%s  step  %-5s %s (%.2fs)\n", l.at(), mark, line, l.now().Sub(opened).Seconds())
+		if mark == "fail" {
+			l.detailLocked(result)
+		}
 	}
 }
 
@@ -136,8 +148,28 @@ func (l *Log) SSH(site, command, by string, took time.Duration, err error) {
 		status = " FAILED"
 	}
 	fmt.Fprintf(l.w, "%s  ssh   %5.2fs %s%s: %s  [%s]\n", l.at(), took.Seconds(), site, status, clip(firstLine(command), 120), by)
+	if err != nil {
+		l.detailLocked(err.Error())
+	}
 	add(l.calls, site, took)
 	add(l.callers, by, took)
+}
+
+// detailLocked writes the lines of text after its first, each indented
+// under the line that failed, at most MaxDetail of them.
+func (l *Log) detailLocked(text string) {
+	_, rest, ok := strings.Cut(strings.TrimRight(text, "\n"), "\n")
+	if !ok {
+		return
+	}
+	lines := strings.Split(rest, "\n")
+	shown := lines[:min(len(lines), MaxDetail)]
+	for _, line := range shown {
+		fmt.Fprintf(l.w, "                 | %s\n", strings.TrimRight(line, "\r"))
+	}
+	if left := len(lines) - len(shown); left > 0 {
+		fmt.Fprintf(l.w, "                 | ... %d more lines\n", left)
+	}
 }
 
 func add(m map[string]*tally, key string, took time.Duration) {

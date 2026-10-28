@@ -26,3 +26,7 @@ func WGHelperScriptWith(dir, systemctl string, d deployment.Deployment, listenPo
 func WGHelperScriptOwnedBy(dir string, owner int, d deployment.Deployment, listenPort int, subnet string) (string, error) {
 	return wgHelperScript(dir, owner, "systemctl", d, listenPort, subnet)
 }
+
+// WithBashrcBlock is have with the deployment's environment block, as site
+// prepare keeps it in ~/.bashrc.
+func WithBashrcBlock(d deployment.Deployment, have string) string { return withBashrcBlock(d, have) }

@@ -543,7 +543,7 @@ paisans deployment publish --execute      # sign the draft, push to every site
 paisans deployment publish --merge --execute   # one version on every head of a fork
 paisans deployment pull                   # what would be merged
 paisans deployment pull --execute         # merge the sites' newest into the draft
-paisans deployment log                    # every version, signer, build, holding sites; a root's full hash
+paisans deployment log                    # every version, signer, build, holding sites; a root's full hash; what each site applied
 paisans deployment recover --from admin@203.0.113.9 --key ~/.ssh/id_ed25519.pub --execute   # empty directory
 paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # or pin the root
 ```
@@ -1190,7 +1190,7 @@ there. See *A blueprint can come from a catalog* in `README.md`.
 Keeps what is the deployment's user's on a host its owner has admitted the
 deployment to: the user's authorized keys (every key of each operator the
 site's `ssh.keys` names), its configuration store with the units that serve
-it, and its `daemon.json`. It runs as the deployment's user, installs nothing
+it, its `daemon.json`, and its shell. It runs as the deployment's user, installs nothing
 and writes nothing that is root's. Docker, the WireGuard tools, the firewall
 and the watchdog are `site admit`'s.
 
@@ -1243,6 +1243,16 @@ paisans site prepare --all --execute          # every site, one at a time
   it is there; a daemon that stops later is restarted after ten seconds. Every site's `site prepare` is also what makes the
   store `deployment apply` publishes to, so `deployment apply` refuses a version no site could take
   with this command named.
+
+* **Shell:** plans under *shell* a block at the top of the user's
+  `~/.bashrc`, between `# >>> paisans-<token> >>>` and its closing marker,
+  that sets `XDG_RUNTIME_DIR` when the session has none and `DOCKER_HOST` at
+  the user's rootless daemon, so `docker` and `systemctl --user` work in a
+  shell on the host and in a command sent over ssh (`site ssh -- docker ps`).
+  An older block is replaced where it stands, and the rest of the file is
+  left as it is. It also links `~/deployment` to `/srv/paisans/<token>`,
+  where the stacks are; a link elsewhere is pointed back, and a file or
+  directory of that name is left, with a warning.
 
 See *`site prepare` keeps what is the deployment's user's*, *Docker is judged
 by its version, not its source* and *`deployment apply` and `site prepare` review what
@@ -1603,8 +1613,16 @@ images it superseded* in `README.md`).
 * **Run log:** every `deployment apply --execute`, with or without `--site`,
   writes `runs/<UTC time>-deployment-apply.log` in the data directory: each
   step and each command sent to a host, timed, with a summary by site and by
-  sender (see *This workstation keeps one system copy of each deployment* in
-  `README.md`). A dry run writes none.
+  sender, and under a failed command or step what the host said (see *This
+  workstation keeps one system copy of each deployment* in `README.md`). A dry
+  run writes none.
+* **Lease:** with `--execute` the run takes the deployment lease on every
+  ready site before its gather and holds it to its end; another command's live
+  lease refuses it, and `--break-lease` takes one over after the word `break`
+  (see *One command changes a deployment at a time* in `README.md`).
+* **Stopped after the publish:** the stop says the revision is published and
+  not applied on every site, and names `deployment log`, which shows what each
+  site runs (see *A published version is not a deployed one* in `README.md`).
 * **Sites missing:** the run first classifies every declared site, once, as
   ready, pending or down (see *A deployment with sites missing* in
   `README.md`). A pending site, whose host has not admitted the deployment or
@@ -1790,6 +1808,31 @@ or `public_address`, or the endpoint's host. A column with nothing in it is
 `-`. `--config` names the declaration; without it, `paisans-stack.yaml` in the
 working directory is read. It loads the file without validating it, since a
 declaration `validate` refuses still names its sites, and it reaches no host.
+
+### `paisans site ssh`
+
+Opens your own ssh session on a site's host, logged in as every command logs in
+there:
+
+```
+paisans site ssh home-a                      # a shell
+paisans site ssh home-a -- docker ps --all   # one command
+```
+
+The login is the one `site list` shows under `SSH`: `ssh.user`, or the
+deployment's own user when the site names none, at its ssh host and port,
+offering the keys its `ssh.keys` lists from your agent, as every other command
+offers them. A plain `ssh` to the same host logs in as your own account, which
+holds none of the deployment's files and none of its rootless Docker; this one
+lands in the deployment user's home, where `site prepare` keeps `DOCKER_HOST`
+set at the deployment's Docker and `~/deployment` linked to its stacks.
+
+Words after `--` are run in place of a shell, as `ssh` runs them, and they are
+split off before the flags are read, so a flag of the command is never taken
+for one of `site ssh`'s. The session's exit status is the command's, or 255
+for ssh's own failure. `--config` names the declaration, read without
+validating it, since a declaration `validate` refuses still says how to reach
+its sites. The command changes nothing itself.
 
 ### `paisans site add`
 

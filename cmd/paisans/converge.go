@@ -551,6 +551,8 @@ type convergeOptions struct {
 	answers answerer
 	stdin   io.Reader
 	stdout  io.Writer
+	// BreakLease is --break-lease: take over another command's live lease.
+	BreakLease bool
 }
 
 // convergeFlags is args with the flags o hands on, each to the commands that
@@ -896,6 +898,18 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		return err
 	}
 	steps := runOn(cfg, sites, convergePlan(cfg, st))
+	// The run holds the deployment's lease from before its gather, which
+	// may merge the draft forward, to its end, so no other command
+	// publishes or changes a host while it runs. A dry run changes
+	// nothing and takes none. See internal/lease.
+	if execute {
+		r.Section("deployment lease")
+		release, err := takeLease(r, cfg, readySites(cfg, sites), func(name string) apply.Transport { return convergeHost(name, cfg.Sites[name]) }, "deployment apply", leaseOptions{breakLease: o.BreakLease, answers: o.answers, stdin: o.stdin, stdout: o.stdout})
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
 	// The version the run applies is gathered once, before the review, so
 	// a fork or a stale base is refused before the operator is asked
 	// anything; its steps do not gather again.
@@ -970,7 +984,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	err = convergeExecute(r, cfg, steps, o, publish)
 	reportLeaderMoves(r, moved())
 	if err != nil {
-		return err
+		return publishedNotApplied(err, reviewedByRun.version)
 	}
 	// Each step pointed the retries, holds and login notes at its own
 	// reporter; the check draws on r.
@@ -996,6 +1010,23 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		return nil
 	}
 	return degradedEnd(r, sites, o.RequireAll, webServerEnd(end, broken, adminErr))
+}
+
+// publishedNotApplied is err, a run's stop after it published v, saying so:
+// the version is published before any step changes a host, so every site's
+// store holds it while a site the run did not finish still runs what it last
+// applied. Without this a stopped run's version reads as deployed wherever
+// versions are listed. Nil v, a stop before the publish, leaves err as it is.
+func publishedNotApplied(err error, v *appliedVersion) error {
+	if v == nil {
+		return err
+	}
+	note := fmt.Sprintf("Revision %d is published, so every site holds it, but not every site has applied it: %s deployment log shows which revision each site runs and what it still owes.", v.revision, progname.Cmd())
+	var p *ui.Problem
+	if errors.As(err, &p) {
+		return &ui.Problem{Hint: p.Hint, Explain: strings.TrimRight(p.Explain+"\n"+note, "\n"), Cause: p.Cause}
+	}
+	return &ui.Problem{Hint: errLine(err), Explain: note, Cause: err}
 }
 
 // runReady is the sites of cfg a step of the run reaches: every one but

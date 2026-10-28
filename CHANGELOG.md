@@ -16,6 +16,21 @@ changes share a bullet. Detailed notes are on the corresponding
 - The `engagement` blueprint renders the Digest Bot's homeserver, MAS admin client and `bot_localpart` when the deployment runs a `matrix-homeserver`, and the gateway forwards its web digests at `/d/*`.
 - `validate` refuses an optional link with several providers and no setting, a link sharing a secret with a provider outside the deployment, and an engagement `bot_localpart` that is not a Matrix localpart.
 - `secrets rotate` re-applies the linked provider with a consumer's shared secret, so `apps.<engagement>.mas_admin_client_secret` reaches the synapse app before the engagement app.
+- `site prepare`, and so every `deployment apply`, keeps `DOCKER_HOST` set at the deployment's rootless Docker in its user's `~/.bashrc`, and links `~/deployment` to `/srv/paisans/<token>`.
+
+## [0.3.0-rc.13] - 2026-10-27
+
+### Added
+
+- `deployment apply` and `deployment publish` hold a deployment lease on every site while they run, refusing a second command until it ends or expires; `--break-lease` takes over a dead one.
+- `site ssh <site>` opens your ssh session on a site's host as the site's ssh user, or the deployment's own user when it names none, or runs a command given after `--`.
+- `deployment log` and `doctor` show the revision each site last finished applying and what a stopped apply still owes it, and a stopped apply says its published revision is not applied everywhere.
+
+### Fixed
+
+- The run log keeps what a host said under a failed command or step, so a stopped apply's cause survives the terminal.
+
+## [0.3.0-rc.12] - 2026-10-27
 
 ### Changed
 
@@ -24,6 +39,7 @@ changes share a bullet. Detailed notes are on the corresponding
 ### Fixed
 
 - `blueprint lint`, `validate` and `deployment apply` refuse a blueprint publishing a port below 1024, which rootless Docker cannot bind outside a Caddy site, instead of failing mid-apply when its container starts.
+- `deployment apply --execute` on a site running Pocket ID no longer fails granting a new engagement app's reader before the pass that creates its role: a held app's grant waits for the pass releasing it.
 - One `dns init` plans every record when `community.domain` sends mail under a registrable domain with a strict policy: hostnames' own DMARC policies no longer wait for a second run.
 
 ## [0.3.0-rc.11] - 2026-10-26
@@ -335,7 +351,9 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.
 - The gateway refuses any request to Pocket ID that carries an `X-API-Key` header with 403, so Pocket ID's API keys work only on the mesh.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.11...develop
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.13...develop
+[0.3.0-rc.13]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.12...v0.3.0-rc.13
+[0.3.0-rc.12]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.11...v0.3.0-rc.12
 [0.3.0-rc.11]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.10...v0.3.0-rc.11
 [0.3.0-rc.10]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.9...v0.3.0-rc.10
 [0.3.0-rc.9]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.8...v0.3.0-rc.9

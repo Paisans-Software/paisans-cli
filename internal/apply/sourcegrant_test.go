@@ -543,3 +543,60 @@ func TestAQuietApplyThatFindsNoLeaderSaysTheAppsAreUntouched(t *testing.T) {
 		})
 	}
 }
+
+// heldBootstrapPlan is bootstrapPlan holding the named app stacks back.
+func heldBootstrapPlan(t *testing.T, host *fakeHost, held ...string) *apply.Plan {
+	t.Helper()
+	cfg, secrets := fixture(t)
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host, apply.Except(held...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := apply.Databases(cfg, secrets, "home-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.WithDatabases(b)
+	return p
+}
+
+// A site that runs Pocket ID applies first with every other app held back.
+// When the digest is new, that pass has nothing to act on, so it runs no
+// bootstrap and its reader's role does not exist yet. The held digest's
+// grant waits for the pass that starts it, which creates the role first.
+func TestAHeldReaderIsNotGranted(t *testing.T) {
+	noWait(t)
+	host := &orderedHost{fakeHost: newHost()}
+	if err := apply.Execute(heldBootstrapPlan(t, host.fakeHost, "digest"), host); err != nil {
+		t.Fatal(err)
+	}
+	host.commands, host.inputs = nil, nil
+	first := heldBootstrapPlan(t, host.fakeHost, "digest")
+	if len(first.Actions) != 0 {
+		t.Fatalf("the held pass has actions, so it does not test a quiet one: %+v", first.Actions)
+	}
+	if err := apply.Execute(first, host); err != nil {
+		t.Fatal(err)
+	}
+	if host.ran(`stdin: \connect "talk"`) {
+		t.Errorf("a pass holding the digest back granted its reader: %v", host.commands)
+	}
+
+	host.commands, host.inputs = nil, nil
+	final := bootstrapPlan(t, host.fakeHost)
+	if _, ok := actionOn(final, "digest"); !ok {
+		t.Fatalf("the pass releasing the digest does not start it: %+v", final.Actions)
+	}
+	if err := apply.Execute(final, host); err != nil {
+		t.Fatal(err)
+	}
+	create, grant := host.indexOf(`CREATE ROLE "digest_reader"`), host.indexOf(`stdin: \connect "talk"`)
+	switch {
+	case create < 0:
+		t.Errorf("the pass releasing the digest did not create its reader: %v", host.commands)
+	case grant < 0:
+		t.Errorf("the pass releasing the digest did not grant its reader: %v", host.commands)
+	case grant < create:
+		t.Errorf("the reader was granted before it was created: create %d, grant %d", create, grant)
+	}
+}

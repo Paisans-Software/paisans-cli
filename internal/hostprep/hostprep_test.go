@@ -141,10 +141,12 @@ func preparedHost(gateway bool) *fakeHost {
 		files: map[string]string{
 			"/etc/os-release": ubuntu2404,
 			daemonJSONPath:    daemon,
+			bashrcPath:        hostprep.WithBashrcBlock(cfg.Deployment(), ""),
 		},
 		responses: map[string]string{
 			probeWatchdog:  "device present\nidentity watchdog0 iTCO_wdt\nsystemd 0\ndaemon absent\nowner 1000\nuid 1000\nsubuid paisans-f2a9:165536:65536\n",
 			"docker ps -q": "3f2a9c1d0b7e\n9b1c4e2f8a6d\n",
+			probeLink:      "link /srv/paisans/f2a9\n",
 		},
 	}))
 }
@@ -878,6 +880,8 @@ func expectedKind(title string) (family, kind string) {
 		return title, hostprep.KindConfigStore
 	case strings.HasSuffix(title, ".peers"), title == "write config-sync.sh", strings.HasPrefix(title, "write paisans-f2a9-config-"):
 		return "write <configuration store file>", hostprep.KindConfigStore
+	case title == "set DOCKER_HOST in .bashrc", title == "link ~/deployment":
+		return title, hostprep.KindShell
 	}
 	return title, ""
 }
@@ -940,6 +944,7 @@ func TestEveryStepCarriesItsKind(t *testing.T) {
 		"write daemon.json",
 		"create the configuration repository", "write <configuration store file>", "start the configuration store",
 		"create authorized_keys", "authorize ssh key", "rename ssh key", "forget ssh key", "remove ssh key",
+		"set DOCKER_HOST in .bashrc", "link ~/deployment",
 	} {
 		if !seen[family] {
 			t.Errorf("no plan here builds %q", family)
@@ -954,7 +959,7 @@ func TestAPlansKindsAreDistinctAndInAFixedOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(plan.Kinds(), ", "); got != "docker, configuration store" {
+	if got := strings.Join(plan.Kinds(), ", "); got != "docker, configuration store, shell" {
 		t.Errorf("a fresh data site's kinds are %q", got)
 	}
 	shuffled := &hostprep.Plan{Section: hostprep.Section{Steps: []hostprep.Step{
@@ -1003,6 +1008,13 @@ func TestKeysGoToTheDefaultUserWhenSSHUserIsLeftOut(t *testing.T) {
 
 // daemonJSONPath is the deployment user's daemon.json on the fake hosts.
 const daemonJSONPath = "/home/ubuntu/.config/docker/daemon.json"
+
+// bashrcPath is the fixture user's ~/.bashrc, and probeLink the key of the
+// ~/deployment probe.
+const (
+	bashrcPath = "/home/ubuntu/.bashrc"
+	probeLink  = "readlink"
+)
 
 // admitted is the record site admit leaves for site with every grant its
 // roles need: what site prepare is checked against.

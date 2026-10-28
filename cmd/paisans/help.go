@@ -43,7 +43,7 @@ type helpSection struct {
 // groupSummary is the line the first page gives a command with
 // subcommands. A command without any is listed by its own summary.
 var groupSummary = map[string]string{
-	"site":        "List, admit, prepare, add, remove and evict sites.",
+	"site":        "List, admit, prepare, add, remove, evict and log in to sites.",
 	"mesh":        "Replace sites' WireGuard keys.",
 	"gateway":     "Move the gateway role to another site.",
 	"storage":     "Provision object storage, join sites to it, replace keys.",
@@ -153,11 +153,11 @@ var helpCommands = []helpCommand{
 		summary: "Take every site from " + config.FileName + " to a running stack.",
 		usage: []string{
 			"paisans deployment apply [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n" +
-				"                         [--min-free <size>] [--keep-images] [--require-all] [--execute] [--yes]",
+				"                         [--min-free <size>] [--keep-images] [--require-all] [--break-lease] [--execute] [--yes]",
 			"paisans deployment apply --site <name> [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n" +
 				"                         [--ssh <destination>] [--only <stack>]... [--overwrite <path>]...\n" +
 				"                         [--recreate <stack>]... [--hold-apps] [--min-free <size>] [--keep-images]\n" +
-				"                         [--require-all] [--execute] [--yes]",
+				"                         [--require-all] [--break-lease] [--execute] [--yes]",
 		},
 		detail: "Without --site: take every site from " + config.FileName + " to a running stack, running init, site prepare, apply, site add, storage and dns init in the order the deployment needs. " +
 			"With --site: compare that site's rendered artifacts with what is on its host and show what would change.\n\n" +
@@ -169,6 +169,7 @@ var helpCommands = []helpCommand{
 			"A deploy makes the deployed files the system copy and rewrites the draft's \"drafted from\" line to name the version it published.\n\n" +
 			"--yes approves the review entry by entry, and types create and rollback when apply asks for them. " + yesTopic + "\n\n" +
 			"Before anything changes, every app it starts logs in to its mail server from its site, sending nothing; one that does not log in refuses the apply.\n\n" +
+			leaseTopic + "\n\n" +
 			"Every run, --site included, reaches every site's host to classify it, and runs on the sites it has: a site whose host has not admitted the deployment is left out, a joined site that does not answer is kept with its own steps skipped, and the run ends degraded. --require-all: exit 1 when the run is degraded: a site pending or down.\n\n" +
 			"--hold-apps: start none of the site's app stacks, a pinned one included, and apply its mesh, its infrastructure and its Caddy. Without --site, apply runs it on each gateway outside etcd.members before the data sites are founded, so their apps reach Pocket ID through the gateway as they start.",
 	},
@@ -206,7 +207,7 @@ var helpCommands = []helpCommand{
 		name:    "site prepare",
 		summary: "Keep the deployment user's keys, configuration store and daemon settings on an admitted host.",
 		usage:   []string{"paisans site prepare --site <name> [--config " + config.FileName + "] [--ssh <destination>]\n                     [--execute] [--yes]", "paisans site prepare --all [--config " + config.FileName + "] [--execute] [--yes]"},
-		detail: "Run as the deployment's user on a host whose owner has admitted the deployment: check the admission record against " + config.FileName + ", refusing on any difference, read the watchdog site admit set up, and keep the user's daemon.json, its configuration store with the units that serve it, and its authorized keys from ssh.keys. " +
+		detail: "Run as the deployment's user on a host whose owner has admitted the deployment: check the admission record against " + config.FileName + ", refusing on any difference, read the watchdog site admit set up, and keep the user's daemon.json, its configuration store with the units that serve it, its authorized keys from ssh.keys, and its shell: DOCKER_HOST set in ~/.bashrc and ~/deployment linked to the deployment's directory. " +
 			"Installs nothing and writes nothing that is root's. Writes nothing without --execute. " +
 			"--all prepares every site, one at a time in the configuration's order, each with its own review, and stops at the first that fails.",
 	},
@@ -258,6 +259,15 @@ var helpCommands = []helpCommand{
 		usage:   []string{"paisans site deployments --ssh <user@host[:port] or ssh alias> [--sudo=false]"},
 		detail: "List every admission record on the host --ssh names (the deployment, its user, the site and roles it was admitted as, the grants and when), every deployment in its registry (id, token, domain, site, roles and root), and any deployment directory no registry entry names. " +
 			"--sudo=false lists admission records only, which are readable without sudo. Needs no " + config.FileName + "; changes nothing.\n\n" + sshAliasTopic,
+	},
+	{
+		name:    "site ssh",
+		summary: "Log in to a site's host as the deployment's user.",
+		usage:   []string{"paisans site ssh <site> [--config " + config.FileName + "] [-- command...]"},
+		detail: "Open your own ssh session on the site's host, logged in as every command logs in there: the site's ssh.user, or the deployment's own user when it names none, at its ssh host and port, offering the keys its ssh.keys lists from your agent. " +
+			"A plain ssh to the host reaches your own account; this one reaches the deployment's, where site prepare sets DOCKER_HOST and links ~/deployment.\n\n" +
+			"Words after -- run as a command in place of a shell, as for ssh, and its exit status is site ssh's. " +
+			"Reads " + config.FileName + " without validating it; changes nothing itself.",
 	},
 	{
 		name:    "mesh rekey",
@@ -353,10 +363,10 @@ var helpCommands = []helpCommand{
 	{
 		name:    "deployment publish",
 		summary: "Sign the draft and push it to every site.",
-		usage:   []string{"paisans deployment publish [--config " + config.FileName + "] [--merge] [--execute] [--yes]"},
+		usage:   []string{"paisans deployment publish [--config " + config.FileName + "] [--merge] [--break-lease] [--execute] [--yes]"},
 		detail: "Sign the draft's " + config.FileName + ", secrets.enc.yaml and .sops.yaml as a version on the one it was drafted from and push it to every site; --merge builds on every head of a fork. " +
-			"A draft drafted from an older version than the sites' newest is refused, naming deployment pull, which merges it forward, unless the versions after it only sign its files again, as an attestation does. With --execute the published files become the system copy, and the draft's \"drafted from\" line names the new version." +
-			configTrust,
+			"A draft drafted from an older version than the sites' newest is refused, naming deployment pull, which merges it forward, unless the versions after it only sign its files again, as an attestation does. With --execute the published files become the system copy, and the draft's \"drafted from\" line names the new version.\n\n" +
+			leaseTopic + configTrust,
 	},
 	{
 		name:    "deployment pull",
@@ -371,9 +381,9 @@ var helpCommands = []helpCommand{
 	},
 	{
 		name:    "deployment log",
-		summary: "List every version, its signer, and the sites holding it.",
+		summary: "List every version, its signer, the sites holding it, and what each site applied.",
 		usage:   []string{"paisans deployment log [--config " + config.FileName + "] [--root <sha>] [--key <path.pub>]"},
-		detail:  "List every version of the configuration the sites keep, its signer, and the sites holding it." + configTrust + "\n\n" + keyTrust,
+		detail:  "List every version of the configuration the sites keep, its signer, and the sites holding it, then the revision each site last finished applying, whether that is the head, and what a stopped apply still owes it: apply publishes a version before it changes any host, so a version every site holds is not by itself what runs." + configTrust + "\n\n" + keyTrust,
 	},
 	{
 		name:    "deployment recover",
@@ -388,7 +398,7 @@ var helpCommands = []helpCommand{
 		name:    "deployment list",
 		summary: "List the system copies on this workstation.",
 		usage:   []string{"paisans deployment list"},
-		detail: "List every deployment's system copy on this workstation: its id, domain, revision, version, whether it is verified, where it came from and when. " +
+		detail: "List every deployment's system copy on this workstation: its id, domain, revision, version, whether it is verified, where it came from and when. A verified copy is a version the sites trust, not one every site runs: deployment log says what each site applied. " +
 			"A system copy is the one copy of a deployment this workstation trusts: the files of the version it last deployed or synced, the signed versions gathered from the sites, and the root, signing key and newest revision trust is read from. " +
 			"The first deploy of a new deployment, deployment recover --execute, the join of operator register and operator register --root --execute make one, and deployment fetch fills one with no version from a host; a deploy or deployment pull moves it to a newer version, and an attestation by operator register moves its head to the attestation. Each records the version it moved to, which this list shows. " +
 			"System copies are kept under deployments/ in ~/Library/Application Support/Paisans on macOS, and in $XDG_DATA_HOME/paisans (~/.local/share/paisans) elsewhere, or in $" + localstore.DirVariable + " when set; locks/ there holds the lock a command takes while it writes one, and replaced/ the copies a recovery moved aside. " +

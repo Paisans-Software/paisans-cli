@@ -17,6 +17,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/doctor"
+	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/mesh"
 	"github.com/paisans-software/paisans-cli/internal/patroni"
@@ -104,6 +105,8 @@ func readOnly(cfg *config.Config) (exact []string, prefixes []string) {
 	}
 	exact = append(exact, hostcheck.ReadCommands(cfg.Deployment())...)
 	exact = append(exact, "read "+cfg.Deployment().Manifest(), "read "+admittedPath(cfg))
+	// What each site applied and is still owed, for the convergence check.
+	exact = append(exact, "read "+grant.Path(cfg.Deployment()), "read "+cfg.Deployment().Path(".paisans-pending.json"))
 	// Each gated app's settings read, which blueprints.LiveSettings promises
 	// prints only the named settings.
 	for _, name := range cfg.AppNames() {
@@ -503,7 +506,7 @@ func TestDoctorDiagnosesTheStuckReplicaAndOnlyReads(t *testing.T) {
 		"fail: check pocket-id auth no active instance, so sign in is down",
 		"home-b   unreachable did not answer ssh (see reach)",
 		"There is no database primary (see patroni)",
-		"Not checked because of this: admission, user, docker, docker engine, docker source mark, linger, sudo rights, swap, memory, mesh, patroni, containers, settings talk, clocks, leftovers on home-b.",
+		"Not checked because of this: admission, user, docker, docker engine, docker source mark, linger, sudo rights, swap, memory, mesh, patroni, containers, settings talk, clocks, leftovers, convergence on home-b.",
 		"done: check admission home-a admitted as ubuntu by paisans " + version.Current().String() + ", covering its roles",
 		"done: check user home-a ubuntu is in no privileged group",
 		"done: check docker home-a its rootless Docker answers at unix:///run/user/1000/docker.sock",

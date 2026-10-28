@@ -98,3 +98,47 @@ func TestCallerSkipsTheNamedFunctions(t *testing.T) {
 		t.Errorf("Caller = %q", got)
 	}
 }
+
+func TestAFailureKeepsWhatTheHostSaid(t *testing.T) {
+	var b strings.Builder
+	at := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+	l := newLog(&b, func() time.Time { return at })
+	end := l.Step("recreate chat")
+	l.SSH("site-a", "docker compose up -d", "apply.runAction", time.Second,
+		errors.New("site-a: docker compose up -d: exit status 1\nError response from daemon: ports are not available: exposing port TCP 0.0.0.0:80\n"))
+	l.SSH("site-a", "true", "apply.Reach", time.Second, errors.New("site-a: true: exit status 1"))
+	end("fail", "site-a: docker compose up -d: exit status 1\nError response from daemon: ports are not available")
+	l.Close()
+
+	out := b.String()
+	for _, want := range []string{
+		"site-a FAILED: docker compose up -d  [apply.runAction]\n" +
+			"                 | Error response from daemon: ports are not available: exposing port TCP 0.0.0.0:80\n",
+		"step  fail  recreate chat: site-a: docker compose up -d: exit status 1 ... (0.00s)\n" +
+			"                 | Error response from daemon: ports are not available\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the log has no %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "apply.Reach]\n                 |") {
+		t.Errorf("a failure with nothing past its first line has a detail line:\n%s", out)
+	}
+}
+
+func TestAFailuresDetailIsBounded(t *testing.T) {
+	var b strings.Builder
+	l := newLog(&b, time.Now)
+	long := "site-a: x: exit status 1"
+	for i := range MaxDetail + 10 {
+		long += fmt.Sprintf("\nline %d", i)
+	}
+	l.SSH("site-a", "x", "apply.runAction", time.Second, errors.New(long))
+	out := b.String()
+	if strings.Contains(out, fmt.Sprintf("line %d\n", MaxDetail)) {
+		t.Errorf("the detail runs past %d lines:\n%s", MaxDetail, out)
+	}
+	if !strings.Contains(out, "| ... 10 more lines\n") {
+		t.Errorf("the detail does not say how much it left out:\n%s", out)
+	}
+}

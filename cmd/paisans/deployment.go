@@ -20,6 +20,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/draft"
+	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/localstore"
 	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -435,6 +436,7 @@ func runDeploymentPublish(args []string, stdin io.Reader, stdout io.Writer) erro
 	configPath := fs.String("config", config.FileName, configHelp)
 	merge := fs.Bool("merge", false, "publish a version whose parents are every head, after merging them by hand")
 	execute := fs.Bool("execute", false, "sign the version and push it to the sites")
+	breakLease := breakLeaseFlag(fs)
 	answers := yesFlag(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -469,6 +471,15 @@ func runDeploymentPublish(args []string, stdin io.Reader, stdout io.Writer) erro
 	r := reporter()
 	r.Section("publish " + *configPath)
 	sites := configTransports(cfg)
+	// publish holds the deployment's lease while it gathers and pushes, so
+	// it never publishes beside a running apply. See internal/lease.
+	if *execute {
+		release, err := takeLease(r, cfg, cfg.SiteNames(), func(name string) apply.Transport { return sites[name] }, "deployment publish", leaseOptions{breakLease: *breakLease, answers: ans, stdin: stdin, stdout: stdout})
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
 	t, err := gatherDeploy(r, d, cfg, sites, raw.Paisans, gatherMode{execute: *execute, answers: ans}, stdin, stdout)
 	defer t.done()
 	if err != nil {
@@ -970,8 +981,60 @@ func runDeploymentLog(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	if len(shas) == 0 {
 		r.Result("no site holds a version yet")
+		return nil
+	}
+	head := ""
+	if len(g.Verdict.Heads) == 1 {
+		head = g.Verdict.Heads[0]
+	}
+	r.Section("what each site applied")
+	for _, line := range appliedBySite(cfg, sites, head) {
+		fmt.Fprintln(stdout, line)
 	}
 	return nil
+}
+
+// appliedBySite is a line per site, in name order, saying which version the
+// site last finished applying, from its grant record, and what its pending
+// record says a stopped apply still owes it. apply publishes a version
+// before it changes any host, so that every site's store holds what is
+// applied even when a run stops part way; the head every site holds is
+// therefore not by itself what runs, and this is what says so. head is the
+// one trusted head, or empty for none or a fork.
+func appliedBySite(cfg *config.Config, sites map[string]apply.Transport, head string) []string {
+	names := slices.Sorted(maps.Keys(sites))
+	lines := make([]string, len(names))
+	d := cfg.Deployment()
+	atOnce(len(names), func(i int) {
+		name := names[i]
+		t := sites[name]
+		rec, _, _, err := grant.Read(t, d)
+		if err != nil {
+			lines[i] = name + "  not read: " + errLine(err)
+			return
+		}
+		owed, err := apply.ReadOwed(t, d)
+		if err != nil {
+			lines[i] = name + "  not read: " + errLine(err)
+			return
+		}
+		line := name + "  no apply has finished here"
+		if c := rec.Config; c != nil {
+			where := "behind the head"
+			switch {
+			case c.Hash == head:
+				where = "the head"
+			case head == "":
+				where = "no single head to compare with"
+			}
+			line = fmt.Sprintf("%s  applied revision %d, %s, %s", name, c.Revision, shortSHA(c.Hash), where)
+		}
+		if !owed.None() {
+			line += "; still owes " + owed.String()
+		}
+		lines[i] = line
+	})
+	return lines
 }
 
 func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) error {
