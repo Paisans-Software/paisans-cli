@@ -432,3 +432,130 @@ func oauthValue(t *testing.T, next, key string) string {
 	}
 	return values[key]
 }
+
+// withDigest is newSelfWorld with an engagement app, digest, on both apps
+// sites, whose MAS admin client secret it shares with chat, the synapse app
+// that provides matrix-homeserver. selfKeysFor holds the digest's key for the
+// test alone, so that every other test's world is as it was.
+func withDigest(t *testing.T) *selfWorld {
+	t.Helper()
+	keys := map[string][]string{"digest": {"mas_admin_client_secret"}}
+	for app, k := range selfKeysFor {
+		keys[app] = k
+	}
+	old := selfKeysFor
+	selfKeysFor = keys
+	t.Cleanup(func() { selfKeysFor = old })
+	w := newSelfWorld(t)
+	w.cfg.Apps["digest"] = config.App{Blueprint: config.BlueprintEngagement, Placement: config.Placement{Mode: config.PlacementCluster}}
+	for _, site := range []string{"home-a", "home-b"} {
+		w.presented[site+"/digest/mas_admin_client_secret"] = "digest-mas_admin_client_secret-old"
+	}
+	return w
+}
+
+// A secret the digest shares with its homeserver reaches the provider's
+// stack first: MAS must know the next secret before the digest presents it.
+func TestSharedSecretReachesTheProviderFirst(t *testing.T) {
+	w := withDigest(t)
+	if blueprint, ok := AppSelfBlueprint("mas_admin_client_secret"); !ok || blueprint != config.BlueprintEngagement {
+		t.Fatalf("mas_admin_client_secret is %v %v, want the engagement blueprint's", blueprint, ok)
+	}
+	r := AppSelf("digest", "mas_admin_client_secret", CostOf(w.cfg, "digest", "mas_admin_client_secret"))
+	if err := r.(Prechecker).Precheck(w.env()); err != nil {
+		t.Fatal(err)
+	}
+	// The provider's stack is a step of its own, gated healthy before any
+	// digest stack is handed the next value, even on the site both run on.
+	if got, want := usesOf(w.env(), r), []string{"home-b:chat", "home-a:digest", "home-b:digest"}; !slices.Equal(got, want) {
+		t.Fatalf("users %v, want %v", got, want)
+	}
+
+	// The provider on a site the digest does not run on is a step of its
+	// own too, before every digest site.
+	pinned := w.cfg.Apps["chat"]
+	pinned.Placement.Site = "home-c"
+	w.cfg.Apps["chat"] = pinned
+	if got, want := usesOf(w.env(), r), []string{"home-c:chat", "home-a:digest", "home-b:digest"}; !slices.Equal(got, want) {
+		t.Fatalf("users with chat on home-c %v, want %v", got, want)
+	}
+	pinned.Placement.Site = "home-b"
+	w.cfg.Apps["chat"] = pinned
+
+	// The synapse stack renders the digest's secret into mas.yaml, so an
+	// apply of chat presents it there.
+	// Each health gate records, in step order, what every stack presents.
+	e := w.env()
+	apply := e.Apply
+	e.Apply = func(site string, s *config.Secrets, stacks []string) error {
+		if slices.Contains(stacks, "chat") {
+			w.presented[site+"/chat/mas_admin_client_secret"], _ = s.Get("apps.digest.mas_admin_client_secret")
+		}
+		return apply(site, s, stacks)
+	}
+	type gate struct {
+		step string
+		seen map[string]string
+	}
+	var gates []gate
+	healthy := e.Healthy
+	e.Healthy = func(site string, stacks []string) error {
+		gates = append(gates, gate{site + ":" + strings.Join(stacks, ","), maps(w.presented)})
+		return healthy(site, stacks)
+	}
+	run, err := Plan(e, []Rotator{r})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Execute(e, signOut); err != nil {
+		t.Fatal(err)
+	}
+	next, _ := w.store.s.Get("apps.digest.mas_admin_client_secret")
+	if next == "" || next == "digest-mas_admin_client_secret-old" {
+		t.Fatalf("the file holds %q", next)
+	}
+	for _, at := range []string{"home-b/chat/mas_admin_client_secret", "home-a/digest/mas_admin_client_secret", "home-b/digest/mas_admin_client_secret"} {
+		if w.presented[at] != next {
+			t.Errorf("%s presents %q, want the next value", at, w.presented[at])
+		}
+	}
+	var steps []string
+	for _, g := range gates {
+		steps = append(steps, g.step)
+	}
+	if want := []string{"home-b:chat", "home-a:digest", "home-b:digest"}; !slices.Equal(steps, want) {
+		t.Fatalf("health gates %v, want %v", steps, want)
+	}
+	// At chat's gate MAS holds the next secret and every digest the old
+	// one, so no digest presents a secret MAS does not yet accept.
+	const old = "digest-mas_admin_client_secret-old"
+	at := gates[0].seen
+	if at["home-b/chat/mas_admin_client_secret"] != next {
+		t.Errorf("at chat's gate chat presents %q, want the next value", at["home-b/chat/mas_admin_client_secret"])
+	}
+	for _, digest := range []string{"home-a/digest/mas_admin_client_secret", "home-b/digest/mas_admin_client_secret"} {
+		if at[digest] != old {
+			t.Errorf("at chat's gate %s presents %q, want the old value", digest, at[digest])
+		}
+	}
+}
+
+func TestSharedSecretWithoutAProviderIsTheConsumersAlone(t *testing.T) {
+	w := withDigest(t)
+	delete(w.cfg.Apps, "chat")
+	r := AppSelf("digest", "mas_admin_client_secret", CostOf(w.cfg, "digest", "mas_admin_client_secret"))
+	if got, want := usesOf(w.env(), r), []string{"home-a:digest", "home-b:digest"}; !slices.Equal(got, want) {
+		t.Fatalf("users %v, want %v", got, want)
+	}
+}
+
+func TestSharedSecretCostNamesBothStacks(t *testing.T) {
+	w := withDigest(t)
+	if got, want := CostOf(w.cfg, "digest", "mas_admin_client_secret").Downtime, "the digest and chat stacks, for one restart on each site in turn"; got != want {
+		t.Errorf("downtime %q, want %q", got, want)
+	}
+	delete(w.cfg.Apps, "chat")
+	if got, want := CostOf(w.cfg, "digest", "mas_admin_client_secret").Downtime, "the digest stack, for one restart on each site in turn"; got != want {
+		t.Errorf("without a provider, downtime %q, want %q", got, want)
+	}
+}

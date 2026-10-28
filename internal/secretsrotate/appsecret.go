@@ -17,6 +17,8 @@ import (
 // nothing to do, and stage 3's scoped apply is the whole of the rotation. It
 // goes one site at a time, each healthy before the next, so with cluster
 // placement the second site runs the old value while the first is checked.
+// A secret shared with a provider is also checked by the provider's stack,
+// which Users hands it to first.
 
 // AppSelfBlueprint is the blueprint whose secret key is, for each key AppSelf
 // rotates, and false for any other key: what `secrets rotate` reads to find, in
@@ -79,7 +81,18 @@ func (r appSelf) Accepts(e Env, next string) (bool, error) { return true, nil }
 // so the window in which it holds a key Pocket ID does not yet accept is
 // seconds. Without them the account service would keep calling with a key
 // Pocket ID no longer accepts.
+//
+// A secret the app's blueprint shares with a linked provider (a consume's
+// shared_secrets) is checked by the provider: the synapse app's MAS reads the
+// engagement app's mas_admin_client_secret from its mas.yaml. So the
+// provider's stack comes first, a step of its own on each of its sites; then
+// the app's stack, a step of its own on each of its sites, including one the
+// provider runs on too. Each step is healthy before the next, so the app never
+// presents a value its provider does not yet accept.
 func (r appSelf) Users(e Env) []Use {
+	if provider, ok := blueprints.SharedSecretProvider(e.Cfg, r.app, r.key); ok {
+		return sharedUses(e, provider, r.app)
+	}
 	uses := appUses(e, r.app)
 	if r.key != "static_api_key" {
 		return uses
@@ -107,6 +120,22 @@ func (r appSelf) Users(e Env) []Use {
 		}
 	}
 	return uses
+}
+
+// sharedUses is every site running provider, its stack alone, followed by
+// every site running app, its stack alone, each in render.AppSites order. A
+// site running both is two steps, so the health gate between them holds the
+// app back until the provider is up with the next value.
+func sharedUses(e Env, provider, app string) []Use {
+	sites := render.AppSites(e.Cfg)
+	var out []Use
+	for _, site := range sites[provider] {
+		out = append(out, Use{Site: site, Stacks: []string{provider}})
+	}
+	for _, site := range sites[app] {
+		out = append(out, Use{Site: site, Stacks: []string{app}})
+	}
+	return out
 }
 
 // appUses is every site running app, as render places it (render.AppSites:

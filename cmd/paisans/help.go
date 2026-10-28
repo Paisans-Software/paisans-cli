@@ -207,7 +207,7 @@ var helpCommands = []helpCommand{
 		name:    "site prepare",
 		summary: "Keep the deployment user's keys, configuration store and daemon settings on an admitted host.",
 		usage:   []string{"paisans site prepare --site <name> [--config " + config.FileName + "] [--ssh <destination>]\n                     [--execute] [--yes]", "paisans site prepare --all [--config " + config.FileName + "] [--execute] [--yes]"},
-		detail: "Run as the deployment's user on a host whose owner has admitted the deployment: check the admission record against " + config.FileName + ", refusing on any difference, read the watchdog site admit set up, and keep the user's daemon.json, its configuration store with the units that serve it, and its authorized keys from ssh.keys. " +
+		detail: "Run as the deployment's user on a host whose owner has admitted the deployment: check the admission record against " + config.FileName + ", refusing on any difference, read the watchdog site admit set up, and keep the user's daemon.json, its configuration store with the units that serve it, its authorized keys from ssh.keys, and its shell: DOCKER_HOST set in ~/.bashrc and ~/deployment linked to the deployment's directory. " +
 			"Installs nothing and writes nothing that is root's. Writes nothing without --execute. " +
 			"--all prepares every site, one at a time in the configuration's order, each with its own review, and stops at the first that fails.",
 	},
@@ -265,7 +265,7 @@ var helpCommands = []helpCommand{
 		summary: "Log in to a site's host as the deployment's user.",
 		usage:   []string{"paisans site ssh <site> [--config " + config.FileName + "] [-- command...]"},
 		detail: "Open your own ssh session on the site's host, logged in as every command logs in there: the site's ssh.user, or the deployment's own user when it names none, at its ssh host and port, offering the keys its ssh.keys lists from your agent. " +
-			"A plain ssh to the host reaches your own account; this one reaches the deployment's, with its rootless Docker.\n\n" +
+			"A plain ssh to the host reaches your own account; this one reaches the deployment's, where site prepare sets DOCKER_HOST and links ~/deployment.\n\n" +
 			"Words after -- run as a command in place of a shell, as for ssh, and its exit status is site ssh's. " +
 			"Reads " + config.FileName + " without validating it; changes nothing itself.",
 	},

@@ -195,6 +195,7 @@ func Check(cfg *config.Config) Result {
 	c.accountSettingInvalid()
 	c.accountSettingUnknown()
 	c.engagement()
+	c.links()
 
 	c.evenVoters()
 	c.oneVoterNoFailover()

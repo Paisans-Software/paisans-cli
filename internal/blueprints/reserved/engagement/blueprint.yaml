@@ -25,6 +25,18 @@ health: {path: "/healthz", status: [200]}
 # member gate would stop them unsubscribing.
 gate: {gateable: false}
 mail: reads
+# The homeserver the Digest Bot runs on. Optional: with homeserver unset the
+# app links to the deployment's one matrix-homeserver, and with none the bot
+# is off. The MAS admin client's secret is shared with the homeserver app,
+# whose mas.yaml declares the client beside this app's .env.
+consumes:
+  - {role: matrix-homeserver, setting: homeserver, optional: true, shared_secrets: [mas_admin_client_secret]}
+settings:
+  # The homeserver's hostname, unset meaning the deployment's one.
+  homeserver: {type: string}
+  # The bot's localpart. A setting because MAS takes members' localparts
+  # from Pocket ID, so a member may already hold the default.
+  bot_localpart: {type: string, default: "digest-bot"}
 secrets:
   required:
     - {key: "digest_signing_key", why: "paisans-engagement-service refuses to start without ENGAGEMENT_SIGNING_KEY"}
@@ -35,4 +47,8 @@ secrets:
     - {name: digest_signing_key, format: password, rotation_cost: restart}
     # The password of the role that reads Mbin's database.
     - source_database_password
-  self_rotated: ["digest_signing_key"]
+    # The secret of the MAS admin client the bot looks members up with. The
+    # homeserver app's mas.yaml declares the client with it, beside this
+    # app's .env, so a rotation re-renders and restarts both.
+    - {name: mas_admin_client_secret, format: password, rotation_cost: restart}
+  self_rotated: ["digest_signing_key", "mas_admin_client_secret"]

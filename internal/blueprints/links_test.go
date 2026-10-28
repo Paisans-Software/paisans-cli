@@ -1,6 +1,7 @@
 package blueprints
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -79,5 +80,150 @@ func TestLinkValuesAreTheProvidersExpressions(t *testing.T) {
 	}
 	if _, err := LinkValuesAt("nothing-provides-this", "x.example.org"); err == nil {
 		t.Error("a role nobody provides was answered")
+	}
+}
+
+// A provider's values may name the mesh address of the site a pinned app
+// runs on; a clustered app has none, and neither has one outside the
+// deployment.
+func TestMeshAddressIsThePinnedSites(t *testing.T) {
+	cfg := &config.Config{
+		Sites: map[string]config.Site{"vm": {Address: "10.44.0.3"}},
+		Apps: map[string]config.App{
+			"chat": {Blueprint: "synapse", Hostname: "chat.example.org", Placement: config.Placement{Mode: config.PlacementPinned, Site: "vm"}},
+		},
+	}
+	got, err := LinkValues(cfg, "chat", "matrix-homeserver")
+	if err != nil || got["mas_admin_url"] != "http://10.44.0.3:18010" {
+		t.Errorf("pinned: %v, %v", got, err)
+	}
+	cfg.Apps["chat"] = config.App{Blueprint: "synapse", Hostname: "chat.example.org", Placement: config.Placement{Mode: config.PlacementCluster}}
+	if got, _ := LinkValues(cfg, "chat", "matrix-homeserver"); got["mas_admin_url"] != "http://:18010" {
+		t.Errorf("clustered: %v", got["mas_admin_url"])
+	}
+	if v := celApp(config.App{Placement: config.Placement{Mode: config.PlacementPinned, Site: "vm"}})["app.mesh_address"]; v != "" {
+		t.Errorf("with no deployment around it: %q", v)
+	}
+}
+
+// A consumer shares only its own self rotated secrets, each once, and reads
+// one link per role.
+func TestASharedSecretMistakeIsRefused(t *testing.T) {
+	secrets := "secrets:\n  generate:\n    - {name: s, format: password}\n  self_rotated: [s]\n"
+	for change, want := range map[string]string{
+		"consumes:\n  - {role: matrix-homeserver, setting: h, optional: true, shared_secrets: [s]}\n" + secrets:  "",
+		"consumes:\n  - {role: matrix-homeserver, setting: h, shared_secrets: [nope]}\n" + secrets:               "consumes[0].shared_secrets[0]: nope is not one of secrets.generate",
+		"consumes:\n  - {role: matrix-homeserver, setting: h, shared_secrets: [s]}\nsecrets:\n  generate: [s]\n": "is not in secrets.self_rotated",
+		"consumes:\n  - {role: matrix-homeserver, setting: h, shared_secrets: [s, s]}\n" + secrets:               "is shared twice",
+		"consumes:\n  - {role: matrix-homeserver, setting: h}\n  - {role: matrix-homeserver, setting: i}\n":      "consumes[1].role: matrix-homeserver is consumed twice",
+	} {
+		_, err := Parse("example", []byte(minimal+change), always)
+		switch {
+		case want == "" && err != nil:
+			t.Errorf("%q: %v", change, err)
+		case want != "" && (err == nil || !strings.Contains(err.Error(), want)):
+			t.Errorf("%q: got %v, want %q", change, err, want)
+		}
+	}
+}
+
+// registerConsumer registers a blueprint that consumes matrix-homeserver
+// optionally and shares its secret s, for the length of the test.
+func registerConsumer(t *testing.T) {
+	t.Helper()
+	d, err := Parse("example", []byte(minimal+"consumes:\n  - {role: matrix-homeserver, setting: homeserver, optional: true, shared_secrets: [s]}\nsecrets:\n  generate:\n    - {name: s, format: password}\n  self_rotated: [s]\n"), always)
+	if err != nil {
+		t.Fatal(err)
+	}
+	register("test/consumer", d, t.TempDir())
+	t.Cleanup(func() {
+		mu.Lock()
+		defer mu.Unlock()
+		delete(defs, "test/consumer")
+		delete(sources, "test/consumer")
+	})
+}
+
+// An optional consume left unset links to the deployment's one provider of
+// its role, or to none; a set one links to the provider at that hostname.
+func TestLinkOfAnOptionalConsume(t *testing.T) {
+	registerConsumer(t)
+	c := Consume{Role: "matrix-homeserver", Setting: "homeserver", Optional: true}
+	digest := config.App{Blueprint: "test/consumer", Hostname: "digest.example.org"}
+	chat := config.App{Blueprint: "synapse", Hostname: "chat.example.org"}
+	chat2 := config.App{Blueprint: "synapse", Hostname: "chat2.example.org"}
+
+	cfg := &config.Config{Apps: map[string]config.App{"digest": digest}}
+	if got, err := LinkOf(cfg, "digest", c); err != nil || got != (Link{Role: "matrix-homeserver"}) {
+		t.Errorf("no provider: %+v, %v", got, err)
+	}
+	cfg.Apps["chat"] = chat
+	if got, err := LinkOf(cfg, "digest", c); err != nil || got != (Link{Role: "matrix-homeserver", Linked: true, Provider: "chat", Hostname: "chat.example.org"}) {
+		t.Errorf("one provider: %+v, %v", got, err)
+	}
+	cfg.Apps["chat2"] = chat2
+	if _, err := LinkOf(cfg, "digest", c); err == nil || err.Error() != "apps.digest.settings.homeserver: unset, and 2 apps provide matrix-homeserver (chat, chat2); name one by its hostname" || !errors.Is(err, ErrLinkAmbiguous) {
+		t.Errorf("two providers: %v", err)
+	}
+	digest.Settings = map[string]any{"homeserver": "chat2.example.org"}
+	cfg.Apps["digest"] = digest
+	if got, err := LinkOf(cfg, "digest", c); err != nil || got != (Link{Role: "matrix-homeserver", Linked: true, Provider: "chat2", Hostname: "chat2.example.org"}) {
+		t.Errorf("named: %+v, %v", got, err)
+	}
+	digest.Settings = map[string]any{"homeserver": "matrix.example.net"}
+	cfg.Apps["digest"] = digest
+	if got, err := LinkOf(cfg, "digest", c); err != nil || got != (Link{Role: "matrix-homeserver", Linked: true, Hostname: "matrix.example.net"}) {
+		t.Errorf("outside the deployment: %+v, %v", got, err)
+	}
+}
+
+// A consume without optional left unset means a provider at the consumer's
+// own hostname, whatever else the deployment runs.
+func TestLinkOfWithoutOptionalIsUnchanged(t *testing.T) {
+	cfg := &config.Config{Apps: map[string]config.App{
+		"web":  {Blueprint: "element", Hostname: "web.example.org"},
+		"chat": {Blueprint: "synapse", Hostname: "chat.example.org"},
+	}}
+	c := Consumes("element")[0]
+	got, err := LinkOf(cfg, "web", c)
+	if err != nil || got != (Link{Role: "matrix-homeserver", Linked: true, Hostname: "web.example.org"}) {
+		t.Errorf("got %+v, %v", got, err)
+	}
+	cfg.Apps["web"] = config.App{Blueprint: "element", Hostname: "web.example.org", Settings: map[string]any{"homeserver": "chat.example.org"}}
+	got, err = LinkOf(cfg, "web", c)
+	if err != nil || got != (Link{Role: "matrix-homeserver", Linked: true, Provider: "chat", Hostname: "chat.example.org"}) {
+		t.Errorf("named: %+v, %v", got, err)
+	}
+}
+
+// A provider's consumers are the apps whose consume links to it, sorted, and
+// a consumer's shared secret is shared with the provider it links to.
+func TestConsumersOfAndSharedSecretProvider(t *testing.T) {
+	registerConsumer(t)
+	cfg := &config.Config{Apps: map[string]config.App{
+		"b":    {Blueprint: "test/consumer", Hostname: "b.example.org"},
+		"a":    {Blueprint: "test/consumer", Hostname: "a.example.org"},
+		"chat": {Blueprint: "synapse", Hostname: "chat.example.org"},
+	}}
+	if got := ConsumersOf(cfg, "chat", "matrix-homeserver"); strings.Join(got, ",") != "a,b" {
+		t.Errorf("consumers: %v", got)
+	}
+	if got := ConsumersOf(cfg, "", "matrix-homeserver"); got != nil {
+		t.Errorf("consumers of no provider: %v", got)
+	}
+	if got, ok := SharedSecretProvider(cfg, "a", "s"); got != "chat" || !ok {
+		t.Errorf("shared: %q, %v", got, ok)
+	}
+	if _, ok := SharedSecretProvider(cfg, "a", "other"); ok {
+		t.Error("a secret the consumer does not share has a provider")
+	}
+	delete(cfg.Apps, "chat")
+	if _, ok := SharedSecretProvider(cfg, "a", "s"); ok {
+		t.Error("a secret is shared with no provider")
+	}
+	// With no provider the optional consumes link nowhere, and they are
+	// nobody's consumers, not the consumers of provider "".
+	if got := ConsumersOf(cfg, "", "matrix-homeserver"); got != nil {
+		t.Errorf("unlinked consumers: %v", got)
 	}
 }

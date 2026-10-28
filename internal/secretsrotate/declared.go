@@ -22,9 +22,13 @@ import (
 // the running app by an in-app action.
 
 // CostOf is what rotating an app's secret costs, as its blueprint says:
-// nothing a member notices, for a secret it says nothing of.
+// nothing a member notices, for a secret it says nothing of. A restart of a
+// secret shared with a linked provider is a restart of both stacks.
 func CostOf(cfg *config.Config, app, key string) Cost {
 	spec, _ := blueprints.SecretOf(cfg.Apps[app].Blueprint, key)
+	if provider, ok := blueprints.SharedSecretProvider(cfg, app, key); ok && spec.RotationCost == blueprints.CostRestart {
+		return Cost{Downtime: "the " + app + " and " + provider + " stacks, for one restart on each site in turn"}
+	}
 	return declaredCost(app, spec.RotationCost)
 }
 

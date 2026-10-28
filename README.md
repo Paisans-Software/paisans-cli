@@ -895,7 +895,18 @@ Mbin. The design is in `docs/specs/2026-10-24-engagement-digest.md`.
   apply, so a Mbin release that changes its schema is noticed here and not in
   a digest that silently misses a week; the failure says to remove the
   engagement app or hold Mbin on its previous release until the list matches.
-* **What the gateway forwards.** `/u/*`, the unsubscribe links, and
+* **On Matrix.** The app consumes the `matrix-homeserver` role, as Element
+  does. With one homeserver in the deployment it links to it; with several,
+  `settings.homeserver` names one by hostname; with none the bot is off and
+  no Matrix variable is rendered. Linked, the service runs a Digest Bot that
+  sends the week as a direct message to each member who has a Matrix account
+  linked to the same Pocket ID subject (`docs/specs/2026-10-27-engagement-matrix.md`).
+  The bot's localpart is `settings.bot_localpart`, `digest-bot` by default.
+  The MAS admin client it looks members up with is declared by the synapse
+  app, with a secret the two apps share. A synapse blueprint that does not
+  offer `mas_admin_url` leaves the bot off.
+* **What the gateway forwards.** `/u/*`, the unsubscribe links, `/d/*`, the
+  web digests the Matrix message links to, and
   `GET /healthz`, which answers ok or 503, for the monitor's public check;
   everything else on the hostname answers 404. The route has no Pocket ID
   gate (`gateable: false`) because a member clicking from an inbox may not be
@@ -930,6 +941,10 @@ app*).
 | `engagement-one-source` | more than one `mbin` app. Refused: it could not tell which community to summarise |
 | `engagement-source-not-clustered` | the `mbin` app is pinned. Refused: the reader role is created in the cluster's Postgres, and a pinned Mbin runs against a Postgres of its own on its site, where no such role exists |
 | `engagement-without-smtp` | the app resolves no SMTP host or `from_address`. Warned: it is an email and cannot send without them |
+| `engagement-bot-localpart-invalid` | `settings.bot_localpart` is not a Matrix localpart, lowercase letters, digits and `._=/-` only. Refused: MAS would not create the bot's account |
+| `link-provider-ambiguous` | an optional link with its setting unset while several apps provide the role. Refused: it could not tell which to use. Applies to any blueprint's link, the engagement app's `homeserver` being one |
+| `link-shared-secret-outside` | a link that shares a secret, leading to a hostname no app in the deployment provides: the one its setting names, or the app's own when a link without `optional` leaves it unset. Refused: the secret can be handed only to an app the deployment renders. Applies to any blueprint's link, the engagement app's being the one that shares a secret |
+| `link-unresolvable` | a link the toolkit cannot resolve for any other reason, reported with that reason. Refused: the app's templates could not read their provider |
 
 **Mbin must have `placement: cluster`.** The one-Mbin rule also keeps the
 source unambiguous: the digest reads one database and one community's title.
@@ -944,6 +959,7 @@ release that publishes one.
 |---|---|---|
 | `apps.<engagement>.source_database_password` | the password of `<app>_reader` | `secrets rotate` alters the role on the Patroni leader and re-applies the engagement stack; Mbin never holds it, so its stack is untouched. Reconnects |
 | `apps.<engagement>.digest_signing_key` | signs every unsubscribe link | the service rotates it itself, with a restart. **Every unsubscribe link in an email already sent stops working**, because it was signed with the old key; the next digest carries links signed with the new one |
+| `apps.<engagement>.mas_admin_client_secret` | the MAS admin client's secret, shared with the synapse app | rotating it re-applies both stacks, the synapse app's first, so MAS knows the new secret before the service uses it |
 
 ## Monitoring
 
@@ -2786,6 +2802,7 @@ Finishing either command first costs nothing but its resume.
 | Pocket ID `operators_heartbeat_token`, `dns_super_admins_heartbeat_token`, `dns_2fa_heartbeat_token` | the monitor | the operators heartbeat on every site the app runs on | its pushes refused while the monitors restart and the pushers switch, normally within the grace before a heartbeat counts as missed |
 | `apps.<app>.heartbeat_token`, for a blueprint that declares a heartbeat | the monitor | the app, on every site it runs on | its pushes refused while the monitors restart and the app switches, normally within the grace before a heartbeat counts as missed |
 | Pocket ID `dns_email_hash_key` | the reconciler | the reconciler, with the hashed mapping rendered under it | a restart of the Pocket ID stack on each site in turn |
+| engagement `mas_admin_client_secret`, and any secret a blueprint shares with its provider | MAS, through the synapse app's `mas.yaml` | the engagement app; the synapse stack is re-applied with it, first | none; a restart of both stacks |
 
 Mbin's `app_secret` signs its four month remember me cookie, not the sessions
 it keeps in Postgres, so an open session lasts until it ends and the next sign
@@ -5816,8 +5833,17 @@ ssh, exactly as `deployment apply` does, and so runs as the deployment's user: i
 installs nothing and writes nothing that is root's. It checks the admission
 record against the configuration first, refusing on any difference with the
 request line the owner needs; reads the watchdog `site admit` set up; and
-keeps the user's `daemon.json`, the configuration store with its units, and
-the user's authorized keys. It probes read only, plans only what is missing,
+keeps the user's `daemon.json`, the configuration store with its units, the
+user's authorized keys, and the user's shell: a block at the top of
+`~/.bashrc` that sets `DOCKER_HOST` at the user's rootless daemon, and
+`~/deployment`, a link to `/srv/paisans/<token>`. A person who logs in as the
+user, or a command sent over ssh, otherwise reaches the system's Docker
+socket, which the deployment does not run on, and starts from a home that
+holds none of the stacks. The block goes first because bash reads
+`~/.bashrc` for a command over ssh too, and the one Debian and Ubuntu give a
+new user returns at once when the shell is not interactive. Only what lies
+between the block's markers is site prepare's; a `~/deployment` that is not a
+link is left alone, with a warning. It probes read only, plans only what is missing,
 and changes nothing without `--execute`; a prepared host plans nothing, so
 re-running it after a failure resumes rather than restarts. It is not part of
 `deployment apply --site` for the same reason `storage init` is not: the user's keys,
@@ -6943,7 +6969,8 @@ the later steps are then checked rather than waiting on init. A missing id,
 subnet or secrets file is still left to `init`, which `--execute` runs first.
 Every host's prepare is checked at the same time, drawn as with `--execute`. A
 prepare line names each kind of change its site's plan makes, in the order
-docker (the user's `daemon.json`), ssh keys, configuration store. Each
+docker (the user's `daemon.json`), ssh keys, configuration store, shell
+(the user's `~/.bashrc` block and `~/deployment` link). Each
 install line is its site's steps' own dry runs together, and the storage line
 its step's: `✓` when every one is up to date, a dim `·` with `after prepare` (or
 `after init`) while a step waits on one that has not run, `○` when there is

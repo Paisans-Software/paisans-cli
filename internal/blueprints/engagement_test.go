@@ -1,6 +1,7 @@
 package blueprints
 
 import (
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -64,6 +65,36 @@ func TestEngagementBlueprintParses(t *testing.T) {
 	}
 	if !slices.ContainsFunc(RequiredSecrets(config.BlueprintEngagement), func(r RequiredSecret) bool { return r.Key == "digest_signing_key" }) {
 		t.Error("digest_signing_key is not required, and the service refuses to start without it")
+	}
+}
+
+// The Digest Bot runs on the deployment's homeserver when it has one: the
+// app consumes matrix-homeserver optionally, shares the MAS admin client's
+// secret with its provider, and names its bot with a setting.
+func TestEngagementBlueprintConsumesAHomeserver(t *testing.T) {
+	want := []Consume{{Role: "matrix-homeserver", Setting: "homeserver", Optional: true, SharedSecrets: []string{"mas_admin_client_secret"}}}
+	if got := Consumes(config.BlueprintEngagement); !reflect.DeepEqual(got, want) {
+		t.Errorf("consumes %#v, want %#v", got, want)
+	}
+	if !slices.Contains(AppSecrets(config.BlueprintEngagement), "mas_admin_client_secret") {
+		t.Errorf("mas_admin_client_secret is not one of its app secrets: %v", AppSecrets(config.BlueprintEngagement))
+	}
+	key, ok := SecretOf(config.BlueprintEngagement, "mas_admin_client_secret")
+	if !ok {
+		t.Fatal("mas_admin_client_secret has no spec")
+	}
+	if key.Format != FormatPassword || key.RotationCost != CostRestart || key.NeverRotate != "" {
+		t.Errorf("mas_admin_client_secret %+v, want a password rotated at the cost of a restart", key)
+	}
+	if !slices.Contains(SelfRotated(config.BlueprintEngagement), "mas_admin_client_secret") {
+		t.Error("mas_admin_client_secret is not self rotated")
+	}
+	settings := SettingsOf(config.BlueprintEngagement)
+	if s, ok := settings["homeserver"]; !ok || s.Type != "string" {
+		t.Errorf("homeserver setting %+v (declared %v), want a string", s, ok)
+	}
+	if s, ok := settings["bot_localpart"]; !ok || s.Type != "string" || s.Default != "digest-bot" {
+		t.Errorf("bot_localpart setting %+v (declared %v), want a string defaulting to digest-bot", s, ok)
 	}
 }
 
