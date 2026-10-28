@@ -5816,8 +5816,17 @@ ssh, exactly as `deployment apply` does, and so runs as the deployment's user: i
 installs nothing and writes nothing that is root's. It checks the admission
 record against the configuration first, refusing on any difference with the
 request line the owner needs; reads the watchdog `site admit` set up; and
-keeps the user's `daemon.json`, the configuration store with its units, and
-the user's authorized keys. It probes read only, plans only what is missing,
+keeps the user's `daemon.json`, the configuration store with its units, the
+user's authorized keys, and the user's shell: a block at the top of
+`~/.bashrc` that sets `DOCKER_HOST` at the user's rootless daemon, and
+`~/deployment`, a link to `/srv/paisans/<token>`. A person who logs in as the
+user, or a command sent over ssh, otherwise reaches the system's Docker
+socket, which the deployment does not run on, and starts from a home that
+holds none of the stacks. The block goes first because bash reads
+`~/.bashrc` for a command over ssh too, and the one Debian and Ubuntu give a
+new user returns at once when the shell is not interactive. Only what lies
+between the block's markers is site prepare's; a `~/deployment` that is not a
+link is left alone, with a warning. It probes read only, plans only what is missing,
 and changes nothing without `--execute`; a prepared host plans nothing, so
 re-running it after a failure resumes rather than restarts. It is not part of
 `deployment apply --site` for the same reason `storage init` is not: the user's keys,
@@ -6943,7 +6952,8 @@ the later steps are then checked rather than waiting on init. A missing id,
 subnet or secrets file is still left to `init`, which `--execute` runs first.
 Every host's prepare is checked at the same time, drawn as with `--execute`. A
 prepare line names each kind of change its site's plan makes, in the order
-docker (the user's `daemon.json`), ssh keys, configuration store. Each
+docker (the user's `daemon.json`), ssh keys, configuration store, shell
+(the user's `~/.bashrc` block and `~/deployment` link). Each
 install line is its site's steps' own dry runs together, and the storage line
 its step's: `✓` when every one is up to date, a dim `·` with `after prepare` (or
 `after init`) while a step waits on one that has not run, `○` when there is

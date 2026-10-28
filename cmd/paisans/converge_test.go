@@ -1606,7 +1606,7 @@ func TestHostPrepareDryRunSaysWhatItWouldChange(t *testing.T) {
 	quietSSH(t)
 	o := convergeOptions{Config: fixtureConfig(), Secrets: fixtureSecretsPath()}
 	for args, want := range map[string]*regexp.Regexp{
-		"site prepare --site home-a": regexp.MustCompile(`^docker, ssh keys, configuration store$`),
+		"site prepare --site home-a": regexp.MustCompile(`^docker, ssh keys, configuration store, shell$`),
 		"storage add":                regexp.MustCompile(`^[1-9][0-9]* [a-z]+s?$`),
 	} {
 		summary, _, err := checkStep(ui.Discard, convergeFlags(strings.Fields(args), o), runStep)

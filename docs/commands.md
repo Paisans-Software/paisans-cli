@@ -1190,7 +1190,7 @@ there. See *A blueprint can come from a catalog* in `README.md`.
 Keeps what is the deployment's user's on a host its owner has admitted the
 deployment to: the user's authorized keys (every key of each operator the
 site's `ssh.keys` names), its configuration store with the units that serve
-it, and its `daemon.json`. It runs as the deployment's user, installs nothing
+it, its `daemon.json`, and its shell. It runs as the deployment's user, installs nothing
 and writes nothing that is root's. Docker, the WireGuard tools, the firewall
 and the watchdog are `site admit`'s.
 
@@ -1243,6 +1243,16 @@ paisans site prepare --all --execute          # every site, one at a time
   it is there; a daemon that stops later is restarted after ten seconds. Every site's `site prepare` is also what makes the
   store `deployment apply` publishes to, so `deployment apply` refuses a version no site could take
   with this command named.
+
+* **Shell:** plans under *shell* a block at the top of the user's
+  `~/.bashrc`, between `# >>> paisans-<token> >>>` and its closing marker,
+  that sets `XDG_RUNTIME_DIR` when the session has none and `DOCKER_HOST` at
+  the user's rootless daemon, so `docker` and `systemctl --user` work in a
+  shell on the host and in a command sent over ssh (`site ssh -- docker ps`).
+  An older block is replaced where it stands, and the rest of the file is
+  left as it is. It also links `~/deployment` to `/srv/paisans/<token>`,
+  where the stacks are; a link elsewhere is pointed back, and a file or
+  directory of that name is left, with a warning.
 
 See *`site prepare` keeps what is the deployment's user's*, *Docker is judged
 by its version, not its source* and *`deployment apply` and `site prepare` review what
@@ -1814,7 +1824,8 @@ deployment's own user when the site names none, at its ssh host and port,
 offering the keys its `ssh.keys` lists from your agent, as every other command
 offers them. A plain `ssh` to the same host logs in as your own account, which
 holds none of the deployment's files and none of its rootless Docker; this one
-lands in the deployment user's home, where its containers are.
+lands in the deployment user's home, where `site prepare` keeps `DOCKER_HOST`
+set at the deployment's Docker and `~/deployment` linked to its stacks.
 
 Words after `--` are run in place of a shell, as `ssh` runs them, and they are
 split off before the flags are read, so a flag of the command is never taken
