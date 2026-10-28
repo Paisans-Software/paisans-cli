@@ -259,6 +259,7 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 		"apps.talk.rabbitmq_password",
 		"apps.auth.dns_email_hash_key",
 		"apps.digest.digest_signing_key",
+		"apps.digest.mas_admin_client_secret",
 		"apps.talk.mercure_jwt_secret",
 		"apps.talk.valkey_password",
 		"storage.garage.admin_token",
@@ -1405,5 +1406,29 @@ func TestSecretsRotateTakesTheDigestsSourceDatabasePassword(t *testing.T) {
 	}
 	if _, err := rotatorFor("apps.wiki.source_database_password", rotateWiring{cfg: cfg}); err == nil {
 		t.Error("a blueprint with no reader was given a reader rotation")
+	}
+}
+
+// The engagement app's MAS admin client secret is one it checks itself
+// through the synapse app, so rotating it hands the homeserver's stack the
+// next secret first and costs a restart of both.
+func TestSecretsRotateHandsTheMASAdminClientSecretToTheHomeserverFirst(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := rotatorFor("apps.digest.mas_admin_client_secret", rotateWiring{cfg: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "the digest and chat stacks, for one restart on each site in turn"; r.Path() != "apps.digest.mas_admin_client_secret" || r.Cost().Downtime != want {
+		t.Errorf("path %q cost %+v", r.Path(), r.Cost())
+	}
+	var users []string
+	for _, u := range r.Users(secretsrotate.Env{Cfg: cfg}) {
+		users = append(users, u.Site+":"+strings.Join(u.Stacks, ","))
+	}
+	if want := []string{"vm:chat", "home-a:digest", "home-b:digest"}; !slices.Equal(users, want) {
+		t.Errorf("users %v, want %v", users, want)
 	}
 }

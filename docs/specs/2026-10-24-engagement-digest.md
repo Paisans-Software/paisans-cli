@@ -49,9 +49,11 @@ Three pieces, each in its own repository:
 * **No push notifications.** Mbin's Web Push fires only for its own
   notifications, and there is no API for a custom one. Push waits until that
   changes.
-* **No web interface.** The service publishes one kind of public URL, the
-  unsubscribe link. Links in the email point straight at Mbin. No admin panel, no preferences
-  page, no landing page, no archive of past digests.
+* **No web interface beyond the web digest.** The service publishes the
+  unsubscribe link and the web digest, the one page a member reads, linked
+  from the Matrix message (`docs/specs/2026-10-27-engagement-matrix.md`,
+  *The web digest*). Links in the email point straight at Mbin. No admin
+  panel, no preferences page, no landing page, no archive of past digests.
 * **No per member settings.** No timezone, no choice of day, no frequency.
   One schedule for the whole deployment.
 * **No reading history.** The service never records which threads a member
@@ -248,6 +250,10 @@ that subject, never an Mbin user id, so a second source that knows the same
 person by the same subject joins without a migration. An Mbin account with
 no subject is not a member for the digest's purposes and gets no email.
 One deployment runs one digest, however many sources it reads.
+
+The same members may also receive the week on Matrix, from the Digest Bot.
+Who qualifies for that is in `docs/specs/2026-10-27-engagement-matrix.md`,
+*Who qualifies for Matrix*.
 
 ## When
 

@@ -2,7 +2,6 @@ package render
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
@@ -199,9 +198,16 @@ type appValues struct {
 	set map[string]any
 	// decl is the app as the configuration declares it.
 	decl config.App
-	// links is what each role the app's blueprint consumes offers, keyed by
-	// role and then by value (Linked).
+	// links is what each linked role the app's blueprint consumes offers,
+	// keyed by role and then by value (Linked).
 	links map[string]map[string]string
+	// linkedTo is where each linked role leads (blueprints.LinkOf): its
+	// provider's name, "" for one outside the deployment, and hostname
+	// (LinkedApp).
+	linkedTo map[string]blueprints.Link
+	// consumers is the apps linked to this one by each role its blueprint
+	// provides, one entry per role even when none is (Consumers).
+	consumers map[string][]Consumer
 }
 
 type s3Values struct {
@@ -448,15 +454,8 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 	if delegated := app.Hostnames[blueprints.WellknownRole]; delegated != "" {
 		v.ServerName = delegated
 	}
-	for _, c := range blueprints.Consumes(planned.Blueprint) {
-		if v.links == nil {
-			v.links = map[string]map[string]string{}
-		}
-		links, err := p.linked(c.Role, v.Setting(c.Setting, planned.Hostname))
-		if err != nil {
-			return appValues{}, fmt.Errorf("%s: %w", planned.Name, err)
-		}
-		v.links[c.Role] = links
+	if err := p.linkValues(&v); err != nil {
+		return appValues{}, fmt.Errorf("%s: %w", planned.Name, err)
 	}
 	v.LocalStorage = blueprints.KeepsFilesLocally(p.cfg, app)
 	if blueprints.InObjectStorage(p.cfg, app) {
@@ -522,35 +521,6 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		v.Databases[extra] = planned.DBName + "_" + extra
 	}
 	return v, nil
-}
-
-// Linked is a value the provider of a role the app's blueprint consumes
-// offers, as the provider's blueprint declares it. A value the provider does
-// not declare, or a role the blueprint does not consume, fails the render,
-// naming it, rather than rendering an empty string.
-func (v appValues) Linked(role, value string) (string, error) {
-	values, ok := v.links[role]
-	if !ok {
-		return "", fmt.Errorf("the blueprint reads .Linked %q, a role it does not consume", role)
-	}
-	got, ok := values[value]
-	if !ok {
-		return "", fmt.Errorf("a provider of %s offers no value %q", role, value)
-	}
-	return got, nil
-}
-
-// linked is what the provider of role at hostname offers. A hostname no
-// declared provider answers on is taken as the provider's own: a consumer
-// pointed at a server outside the deployment still gets its address.
-func (p *planner) linked(role, hostname string) (map[string]string, error) {
-	for _, name := range p.cfg.AppNames() {
-		app := p.cfg.Apps[name]
-		if app.Hostname == hostname && slices.Contains(blueprints.Provides(app.Blueprint), role) {
-			return blueprints.LinkValues(p.cfg, name, role)
-		}
-	}
-	return blueprints.LinkValuesAt(role, hostname)
 }
 
 // dsn is the app's connection URL, empty for a blueprint that uses no Postgres

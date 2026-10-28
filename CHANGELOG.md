@@ -12,6 +12,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Added
 
+- Blueprints may mark a consumed role `optional` and share generated secrets with its provider through `shared_secrets`; templates read `.HasLinked`, `.LinkedApp`, `.LinkedOffers` and `.Consumers`, and `provides` expressions read `app.mesh_address`.
+- The `engagement` blueprint renders the Digest Bot's homeserver, MAS admin client and `bot_localpart` when the deployment runs a `matrix-homeserver`, and the gateway forwards its web digests at `/d/*`.
+- `validate` refuses an optional link with several providers and no setting, a link sharing a secret with a provider outside the deployment, and an engagement `bot_localpart` that is not a Matrix localpart.
+- `secrets rotate` re-applies the linked provider with a consumer's shared secret, so `apps.<engagement>.mas_admin_client_secret` reaches the synapse app before the engagement app.
 - `site prepare`, and so every `deployment apply`, keeps `DOCKER_HOST` set at the deployment's rootless Docker in its user's `~/.bashrc`, and links `~/deployment` to `/srv/paisans/<token>`.
 
 ## [0.3.0-rc.13] - 2026-10-27

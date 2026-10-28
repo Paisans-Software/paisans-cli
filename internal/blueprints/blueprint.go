@@ -165,6 +165,14 @@ var callbackHelpers = template.FuncMap{"stableULID": StableULID}
 // Parse reads one blueprint.yaml, from the directory named name, into a Def.
 // hasTemplate reports whether the blueprint ships a template, so a hostname
 // role whose snippet is missing is refused here rather than at render.
+//
+// Links: `provides: [{role, values}]` names a role the blueprint provides,
+// each value a string CEL expression over the app (app.mesh_address
+// included). `consumes: [{role, setting, optional, shared_secrets}]` names a
+// role it consumes: setting names the provider's hostname, optional means an
+// unset setting links to the deployment's one provider of the role or to
+// none, and shared_secrets names the consumer's own self rotated secrets that
+// its provider's templates read through .Consumers.
 func Parse(name string, content []byte, hasTemplate func(string) bool) (*Def, error) {
 	var s spec
 	dec := yaml.NewDecoder(bytes.NewReader(content))
@@ -351,6 +359,9 @@ func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
 	var generate []string
 	for _, sec := range secrets {
 		generate = append(generate, sec.Name)
+	}
+	if err := checkSharedSecrets(s.Consumes, generate, s.Secrets.SelfRotated); err != nil {
+		return nil, err
 	}
 	locked, err := lockedSettings(s.Config.LockedSettings)
 	if err != nil {
