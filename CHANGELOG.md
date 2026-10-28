@@ -13,6 +13,7 @@ changes share a bullet. Detailed notes are on the corresponding
 ### Added
 
 - `deployment apply` and `deployment publish` hold a deployment lease on every site while they run, refusing a second command until it ends or expires; `--break-lease` takes over a dead one.
+- `site ssh <site>` opens your ssh session on a site's host as the site's ssh user, or the deployment's own user when it names none, or runs a command given after `--`.
 - `deployment log` and `doctor` show the revision each site last finished applying and what a stopped apply still owes it, and a stopped apply says its published revision is not applied everywhere.
 
 ### Fixed

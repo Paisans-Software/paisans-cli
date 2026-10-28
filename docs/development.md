@@ -51,7 +51,8 @@ command: what it does, when it is run on its own rather than through the whole
 code behind each one is laid out.
 
 render, `secrets list` and `site list` touch nothing outside the working
-directory, and
+directory, `site ssh` opens the operator's own session on a site and changes
+nothing itself, and
 create writes one new file there. validate reads only the files, except that
 it tries each app's mail settings from a site running it, and `secrets set`
 tries an SMTP password from this machine before writing it; neither changes a site,

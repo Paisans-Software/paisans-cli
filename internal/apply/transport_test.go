@@ -907,3 +907,14 @@ func TestWriteFileRefusesALinkOrDirectoryTarget(t *testing.T) {
 		t.Errorf("temporary files left behind: %v", left)
 	}
 }
+
+// A session is the section's login with no -T and no shared connection, the
+// destination after --, and the command as written, unwrapped.
+func TestShellArgsForASection(t *testing.T) {
+	tr := apply.SSHTransport{User: "paisans-c111", Host: "vm.example.org", Port: 2222, PublicKeys: []string{keyA}, DefaultUser: true}
+	got := tr.ShellArgs([]string{"k1"}, []string{"docker", "ps", "-a"})
+	want := []string{"-p", "2222", "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=10", "-o", "PreferredAuthentications=publickey", "-i", "k1", "--", "paisans-c111@vm.example.org", "docker", "ps", "-a"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("shell args:\n got %q\nwant %q", got, want)
+	}
+}
