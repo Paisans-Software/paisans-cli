@@ -294,6 +294,16 @@ func (f *fixtureReads) Leftovers(site string) LeftoverProbe {
 	return LeftoverProbe{Site: site}
 }
 
+func (f *fixtureReads) Convergence(site string) ConvergenceProbe {
+	f.asked("convergence " + site)
+	for _, p := range f.in.Convergence {
+		if p.Site == site {
+			return p
+		}
+	}
+	return ConvergenceProbe{Site: site, Applied: 1, Newest: 1}
+}
+
 func (f *fixtureReads) SelfCheck(site string) SelfCheckProbe {
 	f.asked("self-check " + site)
 	for _, p := range f.in.SelfChecks {
@@ -470,7 +480,7 @@ func TestPruningIsReportedOnce(t *testing.T) {
 	if !reflect.DeepEqual(lines, []string{"check reach home-b"}) {
 		t.Errorf("home-b's lines are %v, want reach alone:\n%s", lines, rec.Lines())
 	}
-	want := "Not checked because of this: admission, user, docker, docker engine, docker source mark, linger, sudo rights, swap, memory, mesh, patroni, containers, settings talk, clocks, leftovers on home-b."
+	want := "Not checked because of this: admission, user, docker, docker engine, docker source mark, linger, sudo rights, swap, memory, mesh, patroni, containers, settings talk, clocks, leftovers, convergence on home-b."
 	if !rec.Has("explain", want) {
 		t.Errorf("reach home-b does not say what it kept from running, want %q:\n%s", want, rec.Lines())
 	}
@@ -482,7 +492,7 @@ func TestPruningIsReportedOnce(t *testing.T) {
 			listed += strings.Count(list, ",") + strings.Count(list, ";") + 1
 		}
 	}
-	if report.Pruned != 16 || listed != report.Pruned || report.Count(Skip) != 1 || !strings.Contains(report.Summary(), "17 skipped") {
+	if report.Pruned != 17 || listed != report.Pruned || report.Count(Skip) != 1 || !strings.Contains(report.Summary(), "18 skipped") {
 		t.Errorf("pruned %d, listed %d, summary %q", report.Pruned, listed, report.Summary())
 	}
 	for _, read := range reads.log.list {
@@ -510,7 +520,7 @@ func TestAPendingSiteIsCheckedNoFurther(t *testing.T) {
 	if f.Level != Warn || !strings.Contains(strings.Join(f.More, "\n"), "`paisans site request --site home-b > home-b.admit`") {
 		t.Errorf("home-b: %+v", f)
 	}
-	want := "Not checked because of this: user, docker, docker engine, docker source mark, linger, sudo rights, swap, memory, mesh, patroni, containers, settings talk, clocks, leftovers on home-b."
+	want := "Not checked because of this: user, docker, docker engine, docker source mark, linger, sudo rights, swap, memory, mesh, patroni, containers, settings talk, clocks, leftovers, convergence on home-b."
 	if !rec.Has("explain", want) {
 		t.Errorf("admission home-b does not say what it kept from running, want %q:\n%s", want, rec.Lines())
 	}
@@ -753,6 +763,7 @@ func TestBoundOfOneRunsInOrder(t *testing.T) {
 		"standby auth",
 		"clock home-a", "clock home-b", "clock vm",
 		"leftovers home-a", "leftovers home-b", "leftovers vm",
+		"convergence home-a", "convergence home-b", "convergence vm",
 		"self-check vm",
 	}
 	if !reflect.DeepEqual(reads.log.list, want) {

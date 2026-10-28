@@ -4750,7 +4750,7 @@ and nothing is pruned.
 paisans operator register --execute   # sign an attestation, record your key
 paisans deployment publish --execute      # sign the draft, push to every site
 paisans deployment pull --execute         # merge the sites' newest into the draft
-paisans deployment log                    # every version, signer, holding sites
+paisans deployment log                    # every version, signer, holding sites; what each site applied
 paisans deployment publish --merge --execute   # one version on every head of a fork
 paisans deployment recover --from admin@203.0.113.9 --key ~/.ssh/id_ed25519.pub --execute   # empty workstation
 ```
@@ -4872,7 +4872,73 @@ paisans deployment checkout --id <id> --execute      # the same, with several sy
   what in Paisans sent it, then the commands' time by site and by sender. A
   slow apply is read from it rather than retraced. A command line carries no
   secret, and each is cut to its first line and redacted besides; the file is
-  `0600`.
+  `0600`. A failed command or step keeps what the host said after its first
+  line too, indented under it, at most 40 lines: that output is why a run
+  stopped, and once the terminal has scrolled away the log is the only place
+  it would otherwise be lost from. It is redacted like everything else the
+  log holds.
+
+### A published version is not a deployed one
+
+`deployment apply` publishes the version it applies once every site's store
+exists and before any step changes a host, so that the store holds what is
+applied even when the run stops part way (see *Every site keeps signed copies
+of the configuration*). The cost is that a run which stops after the publish
+leaves a version every site holds and some site does not run: the head, and
+the system copy `deployment list` shows as `verified`, say what was decided,
+not what is deployed. Two records on each host say what is deployed, and the
+toolkit reads them rather than guessing from the head:
+
+* **The grant record's configuration part** names the hash and revision apply
+  last applied on the host, and is written only once every step the run took
+  for the site succeeded (see *`deployment apply` and `site prepare` review what
+  `paisans-stack.yaml` grants*).
+* **The pending record**, `/srv/paisans/<token>/.paisans-pending.json`, lists
+  the stack actions, gateway checks and database grants an apply has written
+  and not yet acted on. It is written before the first change and removed on
+  success, so a host that holds one is owed work; apps held back with
+  `--hold-apps` are owed the same way.
+
+Three places read them. A run that stops after its publish ends by saying the
+revision is published and not applied everywhere, and names `deployment log`.
+`deployment log` lists, under the versions, the revision each site last
+finished applying, whether that is the head, and what it still owes. `doctor`
+has a convergence check that warns about a site behind the workstation's copy
+or owed anything. A site behind is a warning and not a failure: it serves what
+it last applied, and the next `deployment apply --execute` resumes it.
+
+### One command changes a deployment at a time
+
+Two operators running `deployment apply` from one version both pass their
+gathers, so the fork the store refuses is found only by the next command, while
+both runs go on changing hosts. The deployment's lock serialises one write of a
+record and nothing longer. So every command that publishes or changes the
+deployment as a whole, `deployment apply` (with or without `--site`) and
+`deployment publish`, first takes the **deployment lease**:
+
+* **It is a file on every site,** `/srv/paisans/<token>/.paisans/lease`,
+  written under the deployment's lock: a fresh id for the command, who ran it
+  (the workstation's user and host), the command, when it was taken and when it
+  was last renewed. It is taken on every ready site at once, before the gather,
+  which may merge the draft forward, and held to the end of the run; a step the
+  run takes, such as `apply --site` inside `apply`, takes none of its own.
+* **A live lease of another command refuses the run,** naming the command, who
+  ran it and since when, and nothing is changed. A refusal on any site
+  releases the sites already taken, so the two commands never each hold half.
+* **It is renewed every 30 seconds and expires 2 minutes after its last
+  renewal,** judged by the site's own clock against the times it wrote, so two
+  workstations' clocks never need to agree. A command that dies, its
+  workstation lost or its connection cut, stops renewing, and its lease stops
+  blocking within two minutes.
+* **`--break-lease` takes over a live lease** once the operator knows its
+  command is no longer running, after the word `break`, which `--yes` types.
+  The command it was taken from finds the lease lost at its next renewal and
+  says so at its end, naming `deployment log`.
+* **A site that cannot be reached is left out with a warning,** so a site that
+  is down never blocks a run, and at least one site must take it. A command
+  from another workstation that reaches only the sites this one could not is
+  not stopped by it; the store's fork check is still there behind it.
+* **A dry run takes none,** since it changes nothing.
 
 ### A folder holds a draft
 
@@ -10415,6 +10481,7 @@ closing list is usually the cause of those after it:
 | Pocket ID | the same question `deployment apply` asks after acting on a Pocket ID stack on more than one site, asked once | no site, or more than one, has an active instance |
 | Clocks | `date +%s.%N` on each site, against the workstation's clock taken on either side of the call, less half the round trip | never; more than 1 s off is a `WARN` |
 | Leftovers | the host check's inventory (*The host check: what is already on a host decides how much is touched*) on every site that answered, and the manifest; read as the deployment's user, and skipped when the inventory cannot be read. A file is judged against the manifest's own view, which names the sites that were pending when it was rendered, so a file rendered without a pending site is not a leftover | never. Anything of this deployment's the site no longer renders (a compose project by label and name, a manifest entry marked left over) is a `WARN`, with the note that `deployment apply` does not remove it. On the gateway, each `*.caddy` in `/srv/paisans/<token>/caddy.d` is listed as `info`: foreign, and served by this deployment's Caddy. That directory is the only way anything foreign is served by it, since the Caddyfile is this deployment's and Caddy runs in the host's network namespace |
+| Convergence | each site's grant record, `/srv/paisans/<token>/.paisans/granted.json`, for the revision `deployment apply` last finished applying there, and its pending record, `/srv/paisans/<token>/.paisans-pending.json`, for what a stopped apply still owes, against the revision of this workstation's copy | never. A site that still owes a stack, the gateway's checks or a database grant, that no apply has finished on, or whose applied revision is older than the workstation's, is a `WARN` naming `deployment apply --execute` and the run log. See *A published version is not a deployed one* |
 | Self-check | from this workstation, `/.well-known/paisans/<token>` through the public address of each site that runs Paisans' Caddy (the gateway, and a monitor with `web_server.managed_by: paisans`), on 443 and on 80, with the check `deployment apply` runs at the end of the gateway's step. It asks once and never waits for a certificate, and needs no ssh | the site answers as something else, a 443 answering in plain HTTP or another protocol than TLS among them, or does not answer on 443 or 80, naming the port and URL: something else on the host holds the port, which the deployment's user cannot see. A port that gives no answer says how: a refused connection points at the site's Caddy and the forwarding to it, a timeout at the router or firewall on the way. A site with no `public_address` or no hostname of its own is a `WARN`, not asked from outside; so is a pending site, which is not asked since `deployment apply` has not deployed its Caddy, and a down site's failure (a `FAIL` on the gateway), which points at its reach |
 | Caddy certificates | the caddy container's log on every site that runs Paisans' Caddy, `docker compose logs caddy` from the container's start or the last hour, whichever is later, kept to Caddy's `tls.obtain` lines; for each hostname the site serves, the newest outcome | the newest outcome is a failure. Hostnames failing for one cause are one finding naming them all: the provider refusing the token from this server (Cloudflare's `9109`, with the address it judged), its lockout (`10502`), the certificate authority's rate limit with when to retry, or the error's own last clause. It reads no secret and calls no provider, so it runs for every provider |
 | DNS token | from each Caddy site, with the `ACME_DNS_TOKEN` in its `caddy.env`, read there as the site's ssh user and never sent anywhere; and from the workstation, with `external.acme_dns_token` from `--secrets` (`secrets.enc.yaml` beside the configuration by default), opened with the age key as `deployment apply` opens it. Each asks the provider for the zone holding `community.domain`, then verifies the token | the provider refuses the token from that place, does not answer, sees no zone holding the domain, or reports the token not `active`. Secrets that cannot be opened, Eg: no age key on this workstation, skip the workstation's check and the records with the reason, and every other check runs |

@@ -20,7 +20,9 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/doctor"
+	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
+	"github.com/paisans-software/paisans-cli/internal/localstore"
 	"github.com/paisans-software/paisans-cli/internal/mesh"
 	"github.com/paisans-software/paisans-cli/internal/patroni"
 	"github.com/paisans-software/paisans-cli/internal/render"
@@ -569,6 +571,47 @@ func (d doctorReads) Clock(site string) doctor.ClockSample {
 
 func (d doctorReads) Leftovers(site string) doctor.LeftoverProbe {
 	return gatherLeftovers(d.cfg, site, d.transports[site])
+}
+
+// Convergence reads the revision the site's grant record says apply last
+// finished there, and what its pending record says is still owed. Newest is
+// the revision of this workstation's copy of the deployment, which may be
+// behind the sites: deployment log gathers the sites' own newest.
+func (d doctorReads) Convergence(site string) doctor.ConvergenceProbe {
+	p := doctor.ConvergenceProbe{Site: site, Newest: savedRevision(d.cfg.ID)}
+	t := d.transports[site]
+	dep := d.cfg.Deployment()
+	rec, _, _, err := grant.Read(t, dep)
+	if err != nil {
+		p.Err = errLine(err)
+		return p
+	}
+	if rec.Config != nil {
+		p.Applied = rec.Config.Revision
+	}
+	owed, err := apply.ReadOwed(t, dep)
+	if err != nil {
+		p.Err = errLine(err)
+		return p
+	}
+	if !owed.None() {
+		p.Owed = owed.String()
+	}
+	return p
+}
+
+// savedRevision is the revision of the workstation's copy of deployment id,
+// or 0 when it holds none or the copy cannot be read.
+func savedRevision(id string) int {
+	st, err := localstore.Open()
+	if err != nil {
+		return 0
+	}
+	saved, ok, err := st.Load(id)
+	if err != nil || !ok {
+		return 0
+	}
+	return saved.Revision
 }
 
 // doctorSelfCheck asks t from this workstation with the check apply runs at

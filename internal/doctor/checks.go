@@ -57,6 +57,9 @@ type Reads interface {
 	Clock(site string) ClockSample
 	// Leftovers takes the site's inventory and classifies it.
 	Leftovers(site string) LeftoverProbe
+	// Convergence reads the revision the site last applied and what a
+	// stopped apply still owes it.
+	Convergence(site string) ConvergenceProbe
 	// SelfCheck asks a site running the toolkit's Caddy, from the
 	// workstation, through its public address, whether it answers as this
 	// deployment, as apply asks the gateway.
@@ -465,6 +468,16 @@ func Checks(cfg *config.Config, sites []string, reads Reads) *Graph {
 				return func(in *Input) { in.Leftovers = append(in.Leftovers, p) }
 			},
 			Judge: func(in Input) []Finding { return Leftovers(bySite(in.Leftovers, site, LeftoverProbe.site)) },
+		})
+	}
+	for _, site := range sites {
+		g.Add(Node{Name: SectionConvergence + " " + site, Section: SectionConvergence, Site: site, Subject: site,
+			Hard: []Need{Hard(admitted(site))},
+			Gather: func(Input) func(*Input) {
+				p := reads.Convergence(site)
+				return func(in *Input) { in.Convergence = append(in.Convergence, p) }
+			},
+			Judge: func(in Input) []Finding { return Convergence(bySite(in.Convergence, site, ConvergenceProbe.site)) },
 		})
 	}
 	// Each site running the toolkit's Caddy, asked from outside: it needs

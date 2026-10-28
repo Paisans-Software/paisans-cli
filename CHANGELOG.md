@@ -10,6 +10,18 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+## [0.3.0-rc.13] - 2026-10-27
+
+### Added
+
+- `deployment apply` and `deployment publish` hold a deployment lease on every site while they run, refusing a second command until it ends or expires; `--break-lease` takes over a dead one.
+- `site ssh <site>` opens your ssh session on a site's host as the site's ssh user, or the deployment's own user when it names none, or runs a command given after `--`.
+- `deployment log` and `doctor` show the revision each site last finished applying and what a stopped apply still owes it, and a stopped apply says its published revision is not applied everywhere.
+
+### Fixed
+
+- The run log keeps what a host said under a failed command or step, so a stopped apply's cause survives the terminal.
+
 ## [0.3.0-rc.12] - 2026-10-27
 
 ### Changed
@@ -331,7 +343,8 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.
 - The gateway refuses any request to Pocket ID that carries an `X-API-Key` header with 403, so Pocket ID's API keys work only on the mesh.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.12...develop
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.13...develop
+[0.3.0-rc.13]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.12...v0.3.0-rc.13
 [0.3.0-rc.12]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.11...v0.3.0-rc.12
 [0.3.0-rc.11]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.10...v0.3.0-rc.11
 [0.3.0-rc.10]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.9...v0.3.0-rc.10
