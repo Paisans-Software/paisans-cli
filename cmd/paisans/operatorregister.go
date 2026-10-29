@@ -61,6 +61,7 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) (err 
 	root := fs.String("root", "", "pin this version as the root, the version trust starts from")
 	execute := fs.Bool("execute", false, "sign the attestation, push it to the sites, and record the key")
 	answers := yesFlag(fs)
+	breakLease := breakLeaseFlag(fs)
 	invite := fs.String("invite", "", "answer this invite file with a signed request on stdout, instead of registering")
 	inviterKey := fs.String("inviter-key", "", "with --invite: the inviting operator's public key, a .pub file or the key line")
 	name := fs.String("name", "", "with --invite: your full name, first and last; asked for at a terminal when not given")
@@ -107,7 +108,7 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) (err 
 			if *keyPath != "" || *root != "" {
 				return &ui.Problem{Hint: "--key and --root do not apply to a join", Explain: "The pending invite names the key you sign with and the root trust starts from."}
 			}
-			return joinInvite(reporter(), d, invite, *execute, ans, stdin, stdout)
+			return joinInvite(reporter(), d, invite, *execute, *breakLease, ans, stdin, stdout)
 		}
 	}
 	sys, sites, r, done, err := registerSystem(reporter(), *configPath, *id, d, *root, *execute)
@@ -140,7 +141,7 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) (err 
 	}
 	k, _, _ := config.ParseKeyLine(key)
 	r.Section("register " + k.Fingerprint + " for " + *configPath)
-	return attest(r, sys, cfg, key, pin, *execute, ans, stdin, stdout)
+	return attest(r, sys, cfg, key, pin, *execute, *breakLease, ans, stdin, stdout)
 }
 
 // registerSystem is the system copy register attests from, staged, the
@@ -456,7 +457,8 @@ func createdFrom(d draft.Draft, id, root string) *config.Config {
 // with key, once it equals the files l holds (the system copy's, or the
 // join's folder), pushes it to cfg's sites, and
 // records the key. Trust starts from pin and from any version key signed.
-func attest(r ui.Reporter, l configstore.Local, cfg *config.Config, key, pin string, execute bool, ans answerer, stdin io.Reader, stdout io.Writer) error {
+// breakLease is --break-lease: see takeLease.
+func attest(r ui.Reporter, l configstore.Local, cfg *config.Config, key, pin string, execute, breakLease bool, ans answerer, stdin io.Reader, stdout io.Writer) error {
 	k, _, _ := config.ParseKeyLine(key)
 
 	// Trust starts from the pin, and from any version this key signed
@@ -465,9 +467,11 @@ func attest(r ui.Reporter, l configstore.Local, cfg *config.Config, key, pin str
 	sites := configTransports(cfg)
 	// As publish: the attestation is pushed to every site that answers, so
 	// a site a newer paisans last applied refuses it first.
-	if err := refuseNewerToolkit(r, cfg, cfg.SiteNames(), func(name string) apply.Transport { return sites[name] }, "operator register", true); err != nil {
+	release, err := guardSites(r, cfg, cfg.SiteNames(), func(name string) apply.Transport { return sites[name] }, "operator register", guard{execute: execute, skipUnread: true, lease: leaseOptions{breakLease: breakLease, answers: ans, stdin: stdin, stdout: stdout}})
+	if err != nil {
 		return err
 	}
+	defer release()
 	m := gatherMode{
 		execute:  execute,
 		answers:  ans,

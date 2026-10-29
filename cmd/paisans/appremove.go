@@ -53,6 +53,7 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	execute := fs.Bool("execute", false, "actually stop, remove and delete")
 	deleteData := fs.Bool("delete-data", false, "also delete the app's database, Garage bucket and keys, named volumes and data directories; asks for the app's name at a terminal")
 	answers := yesFlag(fs)
+	breakLease := breakLeaseFlag(fs)
 	// The app comes first, as `app remove talk --execute`, or after the flags.
 	app := ""
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
@@ -167,9 +168,11 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	// The removal rewrites each site's manifest, so a site a newer paisans
 	// last applied refuses it before anything changes.
-	if err := refuseNewerToolkit(r, cfg, cfg.SiteNames(), func(name string) apply.Transport { return hosts[name] }, "app remove "+app, false); err != nil {
+	release, err := guardSites(r, cfg, cfg.SiteNames(), func(name string) apply.Transport { return hosts[name] }, "app remove "+app, guard{execute: *execute, lease: leaseOptions{breakLease: *breakLease, answers: ans, stdin: stdin, stdout: stdout}})
+	if err != nil {
 		return err
 	}
+	defer release()
 	// The monitor is reseeded last, from the render without the app, so
 	// its checks of the app go with it. Each monitor site is host checked
 	// as apply would check it.

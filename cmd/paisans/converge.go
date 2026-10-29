@@ -839,7 +839,8 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	runSites = sites
 	showPending(r, declaration, sites)
 	// A site a newer paisans last applied refuses the run before anything
-	// reaches a host for more than this read.
+	// reaches a host for more than this read. --execute checks again once
+	// it holds the lease.
 	r.Section("toolkit")
 	if err := refuseNewerToolkit(r, cfg, readySites(cfg, sites), func(name string) apply.Transport { return convergeHost(name, cfg.Sites[name]) }, "deployment apply", false); err != nil {
 		return err
@@ -915,6 +916,11 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 			return err
 		}
 		defer release()
+		// Checked again under the lease, so no newer apply lands between
+		// the check and this run's last write.
+		if err := refuseNewerToolkit(r, cfg, readySites(cfg, sites), func(name string) apply.Transport { return convergeHost(name, cfg.Sites[name]) }, "deployment apply", false); err != nil {
+			return err
+		}
 	}
 	// The version the run applies is gathered once, before the review, so
 	// a fork or a stale base is refused before the operator is asked

@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -51,6 +52,8 @@ func runOIDCClientCreate(args []string) error {
 	site := fs.String("site", "", "the site whose Pocket ID to call (default: its pinned site, or the apps site whose instance is active)")
 	destination := fs.String("ssh", "", "ssh destination, used verbatim in place of the site's ssh section (its user, host, port and keys are then ignored)")
 	execute := fs.Bool("execute", false, "actually create and record")
+	breakLease := breakLeaseFlag(fs)
+	answers := yesFlag(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -98,9 +101,15 @@ func runOIDCClientCreate(args []string) error {
 		}
 		// The client is the deployment's, which apply makes as this
 		// release knows it; a newer release's is not remade by this one.
-		if err := refuseNewerToolkit(r, cfg, []string{where}, func(string) apply.Transport { return siteTransport(where, cfg.Sites[where], *destination) }, "oidc client create", false); err != nil {
+		ans, err := answers()
+		if err != nil {
 			return err
 		}
+		release, err := guardSites(r, cfg, []string{where}, func(string) apply.Transport { return siteTransport(where, cfg.Sites[where], *destination) }, "oidc client create", guard{execute: true, lease: leaseOptions{breakLease: *breakLease, answers: ans, stdin: os.Stdin, stdout: os.Stdout}})
+		if err != nil {
+			return err
+		}
+		defer release()
 	}
 
 	if *secretsPath == "" {

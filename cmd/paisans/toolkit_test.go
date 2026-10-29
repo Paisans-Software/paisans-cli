@@ -92,13 +92,12 @@ func TestApplyGoesOnWhenNoNewerPaisansAppliedASite(t *testing.T) {
 	}
 }
 
-// publish is refused as apply is, before its lease and its gather, and
-// pushes nothing.
+// publish is refused as apply is: under its lease, before its gather, and
+// it pushes nothing and lets the lease go.
 func TestPublishIsRefusedWhenANewerPaisansLastAppliedASite(t *testing.T) {
 	f := newApplyStore(t, 1)
 	f.based(t)
 	f.editDraft(t, "# next\n")
-	takes := heldBy(t, "bob@desk")
 	appliedByNewer(t, map[string]string{"home-a": "99.0.0"})
 	var out bytes.Buffer
 	var err error
@@ -109,8 +108,8 @@ func TestPublishIsRefusedWhenANewerPaisansLastAppliedASite(t *testing.T) {
 	if err == nil || !strings.Contains(text, "home-a: paisans 99.0.0") || !strings.Contains(text, "run "+progname.Cmd()+" deployment publish again") {
 		t.Fatalf("err = %v", text)
 	}
-	if len(*takes) != 0 {
-		t.Error("a refused publish took the lease")
+	if runLease != nil {
+		t.Error("a refused publish kept the lease")
 	}
 	if h, _ := f.sys.Head(); h != f.shas[0] || f.pushed() {
 		t.Fatalf("a refused publish moved the head to %s, pushed %v", h, f.pushed())

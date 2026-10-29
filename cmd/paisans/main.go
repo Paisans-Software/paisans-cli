@@ -654,30 +654,19 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	// On its own, apply --site holds the deployment's lease on every ready
-	// site, as apply without --site does: it publishes the version it
-	// applies to all of them. As a step of that run, the run holds it.
-	// Before the lease, a site a newer paisans last applied refuses it:
-	// every ready site, since the version is published to all of them. As a
-	// step of the run, the run checked them.
-	readyHost := func(name string) apply.Transport {
+	// On its own, apply --site guards every ready site, as apply without
+	// --site does: it publishes the version it applies to all of them. As
+	// a step of that run, the run guards them.
+	release, err := guardSites(r, cfg, readySites(cfg, sites), func(name string) apply.Transport {
 		if name == *site {
 			return siteTransport(name, cfg.Sites[name], *destination)
 		}
 		return convergeHost(name, cfg.Sites[name])
+	}, "deployment apply --site "+*site, guard{execute: *execute, lease: leaseOptions{breakLease: *breakLease, answers: ans, stdin: stdin, stdout: stdout}})
+	if err != nil {
+		return err
 	}
-	if reviewedByRun == nil {
-		if err := refuseNewerToolkit(r, cfg, readySites(cfg, sites), readyHost, "deployment apply --site "+*site, false); err != nil {
-			return err
-		}
-	}
-	if *execute && reviewedByRun == nil {
-		release, err := takeLease(r, cfg, readySites(cfg, sites), readyHost, "deployment apply --site "+*site, leaseOptions{breakLease: *breakLease, answers: ans, stdin: stdin, stdout: stdout})
-		if err != nil {
-			return err
-		}
-		defer release()
-	}
+	defer release()
 
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
@@ -1314,6 +1303,8 @@ func runStorageInit(args []string) error {
 	site := fs.String("site", "", "the site to provision, by the name it has in the configuration")
 	destination := fs.String("ssh", "", "ssh destination, used verbatim in place of the site's ssh section (its user, host, port and keys are then ignored)")
 	execute := fs.Bool("execute", false, "actually create what is missing")
+	breakLease := breakLeaseFlag(fs)
+	answers := yesFlag(fs)
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -1361,12 +1352,15 @@ func runStorageInit(args []string) error {
 	if _, err := admittedHosts(r, cfg, map[string]registry.Runner{*site: transport}); err != nil {
 		return err
 	}
-	// As a step of apply, the run checked every site already.
-	if reviewedByRun == nil {
-		if err := refuseNewerToolkit(r, cfg, []string{*site}, func(string) apply.Transport { return transport }, "storage init --site "+*site, false); err != nil {
-			return err
-		}
+	ans, err := answers()
+	if err != nil {
+		return err
 	}
+	release, err := guardSites(r, cfg, []string{*site}, func(string) apply.Transport { return transport }, "storage init --site "+*site, guard{execute: *execute, lease: leaseOptions{breakLease: *breakLease, answers: ans, stdin: os.Stdin, stdout: os.Stdout}})
+	if err != nil {
+		return err
+	}
+	defer release()
 	plan, err := ui.Get(r, "read Garage", func() (*garage.Plan, error) {
 		return garage.Build(*site, cfg, secrets, transport)
 	})
@@ -1420,11 +1414,15 @@ func runSitePrepare(args []string) error {
 type hostPrepareOptions struct {
 	config, site, ssh string
 	execute           bool
+	// breakLease is --break-lease: see takeLease.
+	breakLease bool
 	// all prepares every site, one at a time: see hostPrepareAll.
 	all bool
 	// shown is set once a run of --all has shown the configuration's
 	// findings, so each later site does not show them again.
 	shown bool
+	// guarded is set by a run of --all, which guards every site itself.
+	guarded bool
 }
 
 // hostPrepareFlags registers site prepare's own flags on fs.
@@ -1435,6 +1433,7 @@ func hostPrepareFlags(fs *flag.FlagSet) *hostPrepareOptions {
 	fs.BoolVar(&o.all, "all", false, "prepare every site the configuration declares, one at a time, in its order")
 	fs.StringVar(&o.ssh, "ssh", "", "ssh destination, used verbatim in place of the site's ssh section (its user, host, port and keys are then ignored)")
 	fs.BoolVar(&o.execute, "execute", false, "actually write what is missing")
+	fs.BoolVar(&o.breakLease, "break-lease", false, breakLeaseHelp)
 	return o
 }
 
@@ -1508,11 +1507,12 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 		transport.RetryLog = env.retries
 	}
 	r.Section(fmt.Sprintf("%s (%s)", o.site, transport.Describe()))
-	// As a step of apply, the run checked every site already.
-	if reviewedByRun == nil {
-		if err := refuseNewerToolkit(r, cfg, []string{o.site}, func(string) apply.Transport { return transport }, "site prepare --site "+o.site, false); err != nil {
+	if !o.guarded {
+		release, err := guardSites(r, cfg, []string{o.site}, func(string) apply.Transport { return transport }, "site prepare --site "+o.site, guard{execute: o.execute, lease: leaseOptions{breakLease: o.breakLease, answers: env.answers, stdin: env.stdin, stdout: env.stdout}})
+		if err != nil {
 			return err
 		}
+		defer release()
 	}
 	// See runApply: site prepare records its own site's architecture, which
 	// the next apply publishes. As a step of apply without --site, where
@@ -1615,9 +1615,18 @@ func hostPrepareAll(env prepareEnv, o hostPrepareOptions) error {
 		return refused(o.config, len(result.Refusals()), "")
 	}
 	names := cfg.SiteNames()
+	// One lease over every site for the whole run, so nothing else changes
+	// a host between one site's prepare and the next; each site's own
+	// prepare then takes none. A host that does not answer yet is left to
+	// its own prepare to refuse.
+	release, err := guardSites(env.r, cfg, names, func(name string) apply.Transport { return siteTransport(name, cfg.Sites[name], "") }, "site prepare --all", guard{execute: o.execute, skipUnread: true, lease: leaseOptions{breakLease: o.breakLease, answers: env.answers, stdin: env.stdin, stdout: env.stdout}})
+	if err != nil {
+		return err
+	}
+	defer release()
 	for _, name := range names {
 		site := o
-		site.all, site.site, site.shown = false, name, true
+		site.all, site.site, site.shown, site.guarded = false, name, true, true
 		if err := hostPrepare(env, site); err != nil {
 			next := "Run " + progname.Cmd() + " site prepare --all again to resume."
 			if o.execute {

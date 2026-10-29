@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/paisans-software/paisans-cli/internal/ui"
+	"os"
 	"path/filepath"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
@@ -31,7 +32,13 @@ func runStorageAdd(args []string) error {
 	changeReplication := fs.Bool("change-replication", false, "allow Garage's reset for another replication factor: every node stopped, its stored layout set aside, the cluster laid out again. Media is unavailable for about a minute")
 	wait := fs.Duration("wait", 0, "how long a stage waiting on Garage polls before the run exits, Eg: 2h. By default it reads once and exits with status 75")
 	stopTest := fs.Bool("stop-test", false, "in the smoke stage, stop Garage on the last listed site, prove reads and an upload survive, and start it again. Refused unless uploads survive one node down: replication 3 on three sites, or consistency dangerous")
+	breakLease := breakLeaseFlag(fs)
+	answers := yesFlag(fs)
 	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	ans, err := answers()
+	if err != nil {
 		return err
 	}
 	r := reporter()
@@ -85,12 +92,11 @@ func runStorageAdd(args []string) error {
 	if _, err := admittedSites(r, cfg, sites...); err != nil {
 		return err
 	}
-	// As a step of apply, the run checked every site already.
-	if reviewedByRun == nil {
-		if err := refuseNewerToolkit(r, cfg, sites, func(name string) apply.Transport { return transports[name] }, "storage add", false); err != nil {
-			return err
-		}
+	release, err := guardSites(r, cfg, sites, func(name string) apply.Transport { return transports[name] }, "storage add", guard{execute: *execute, lease: leaseOptions{breakLease: *breakLease, answers: ans, stdin: os.Stdin, stdout: os.Stdout}})
+	if err != nil {
+		return err
 	}
+	defer release()
 	plan, err := ui.Get(r, "read every Garage site", func() (*storageadd.Plan, error) {
 		return storageadd.Build(cfg, secrets, transports, storageadd.Options{
 			ChangeReplication: *changeReplication,
