@@ -3,12 +3,28 @@ package validate
 import (
 	"fmt"
 	"regexp"
+	"strings"
+	"unicode"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // matrixLocalpart is the characters a Matrix user ID's localpart may hold.
 var matrixLocalpart = regexp.MustCompile(`^[a-z0-9._=/-]+$`)
+
+// displayName reports whether s is a name to show members: not blank, and one
+// line with no control character.
+func displayName(s string) bool {
+	if strings.TrimSpace(s) == "" {
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
 
 // engagement checks the weekly digest app. Every rule is silent when the
 // deployment has no engagement app. The digest reads one Mbin's database
@@ -36,7 +52,12 @@ func (c *checker) engagement() {
 		if localpart, ok := c.cfg.Apps[name].Settings["bot_localpart"].(string); ok && !matrixLocalpart.MatchString(localpart) {
 			c.refuse("engagement-bot-localpart-invalid", fmt.Sprintf("apps.%s.settings.bot_localpart", name),
 				"the bot's localpart is not a Matrix localpart",
-				"is %q. The Digest Bot's Matrix account takes it as its localpart, which may hold only lowercase letters, digits and . _ = / -. Choose one of those, or leave it unset for digest-bot.", localpart)
+				"is %q. The bot's Matrix account takes it as its localpart, which may hold only lowercase letters, digits and . _ = / -. Choose one of those, or leave it unset for community-bot.", localpart)
+		}
+		if display, ok := c.cfg.Apps[name].Settings["bot_display_name"].(string); ok && !displayName(display) {
+			c.refuse("engagement-bot-display-name-invalid", fmt.Sprintf("apps.%s.settings.bot_display_name", name),
+				"the bot's display name is empty or holds a control character",
+				"is %q. Members see the bot by this name, and it is rendered into one .env line, so it must hold something besides spaces and no line break, tab or other control character. Write one line, or leave it unset for Community Bot.", display)
 		}
 		if !c.cfg.CanMail(name) {
 			c.warn("engagement-without-smtp", fmt.Sprintf("apps.%s", name),
