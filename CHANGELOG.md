@@ -10,6 +10,8 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+## [0.3.0-rc.16] - 2026-10-29
+
 ### Changed
 
 - The `engagement` blueprint names the community in the digest by `community.name`, falling back to Mbin's meta title without one, so the digest reads "This week on Paisans" rather than "Talk · Paisans".
@@ -380,7 +382,8 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.
 - The gateway refuses any request to Pocket ID that carries an `X-API-Key` header with 403, so Pocket ID's API keys work only on the mesh.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.15...develop
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.16...develop
+[0.3.0-rc.16]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.15...v0.3.0-rc.16
 [0.3.0-rc.15]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.14...v0.3.0-rc.15
 [0.3.0-rc.14]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.13...v0.3.0-rc.14
 [0.3.0-rc.13]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.12...v0.3.0-rc.13
