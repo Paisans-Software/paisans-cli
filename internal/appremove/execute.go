@@ -40,6 +40,20 @@ func ContainersCommand(d deployment.Deployment, project string, deleteData bool)
 	return fmt.Sprintf(`set -e; ids=$(docker ps -aq --no-trunc %[1]s); if [ -n "$ids" ]; then docker stop $ids >/dev/null; %[2]s $ids >/dev/null; fi; nets=$(docker network ls -q --no-trunc %[1]s); if [ -n "$nets" ]; then docker network rm $nets >/dev/null; fi`, filters, rm)
 }
 
+// AgentCommand stops and removes the infrastructure stack's Beszel agent,
+// selected by this deployment's label, the infra project's and the
+// service's together, so no other service of the stack is touched. It runs
+// on the host's network, so it has no network of its own to remove. It is a
+// no-op once the agent is gone.
+func AgentCommand(d deployment.Deployment) string {
+	filters := fmt.Sprintf("--filter %s --filter label=%s=%s --filter label=%s=%s", quote(d.LabelFilter()), composeProjectLabel, quote(d.Project(infraStack)), composeServiceLabel, quote(agentService))
+	return fmt.Sprintf(`set -e; ids=$(docker ps -aq --no-trunc %s); if [ -n "$ids" ]; then docker stop $ids >/dev/null; docker rm $ids >/dev/null; fi`, filters)
+}
+
+// composeServiceLabel is the label Compose puts on every container of a
+// service.
+const composeServiceLabel = "com.docker.compose.service"
+
 // VolumesCommand removes the project's named volumes that carry this
 // deployment's label.
 func VolumesCommand(d deployment.Deployment, project string) string {
@@ -202,7 +216,8 @@ func (e *Executor) section(format string, args ...any) {
 
 // Execute runs every step in order: on each site its containers and
 // networks, its files and their manifest entries, its directory and, with
-// --delete-data, its named volumes; then the client at Pocket ID; then,
+// --delete-data, its named volumes; then on each site a Beszel agent left
+// with no hub (AgentFile); then the client at Pocket ID; then,
 // with --delete-data, the database and the Garage buckets and keys; then
 // each monitor's reseed, last, so that a failure there stops nothing of the
 // removal and names the apply that finishes it. Each step reads live state
@@ -222,7 +237,7 @@ func (e *Executor) execute(p *Plan) error {
 	ctx := context.Background()
 	d := p.Deployment
 	for _, s := range p.Sites {
-		if s.Empty() {
+		if s.appEmpty() {
 			continue
 		}
 		h := e.Hosts[s.Site]
@@ -237,7 +252,7 @@ func (e *Executor) execute(p *Plan) error {
 		if err := e.webServer(h, d, s); err != nil {
 			return fmt.Errorf("%s: %w", s.Site, err)
 		}
-		drop, err := e.files(h, s)
+		drop, err := e.files(h, s.Site, s.Files)
 		if err != nil {
 			return fmt.Errorf("%s: %w", s.Site, err)
 		}
@@ -271,6 +286,11 @@ func (e *Executor) execute(p *Plan) error {
 			if out, err := h.Run(VolumesCommand(d, s.Project)); err != nil {
 				return fmt.Errorf("%s: removing %s's volumes: %w: %s", s.Site, s.Project, err, firstLine(out))
 			}
+		}
+	}
+	for _, s := range p.Sites {
+		if err := e.agent(d, s); err != nil {
+			return fmt.Errorf("%s: %w", s.Site, err)
 		}
 	}
 	if c := p.Client.Delete; c != nil {
@@ -340,14 +360,45 @@ func (e *MonitorError) Unwrap() error {
 	return e.Err
 }
 
-// files removes the app's unedited files on one site, and answers the
+// agent stops and removes a site's hubless Beszel agent, then its unedited
+// files, the directories apply made for them once empty, and their manifest
+// entries, in that order, so a run that stops part way finds what is left
+// again.
+func (e *Executor) agent(d deployment.Deployment, s SitePlan) error {
+	if !s.agent() {
+		return nil
+	}
+	h := e.Hosts[s.Site]
+	if h == nil {
+		return fmt.Errorf("no way to reach the host")
+	}
+	e.section("%s (the Beszel agent)", s.Site)
+	e.work("stop the Beszel agent").Detail("%s, whose hub is removed", agentService)
+	if out, err := h.Run(AgentCommand(d)); err != nil {
+		return fmt.Errorf("stopping and removing the Beszel agent: %w: %s", err, firstLine(out))
+	}
+	drop, err := e.files(h, s.Site, s.AgentFiles)
+	if err != nil {
+		return err
+	}
+	infra := d.Dir(infraStack)
+	if dirs := RenderedDirs(infra, s.AgentFiles); len(dirs) > 0 {
+		e.work("remove empty directories")
+		if out, err := h.Run(EmptyDirsCommand(infra, dirs)); err != nil {
+			return fmt.Errorf("%s: %w: %s", infra, err, firstLine(out))
+		}
+	}
+	return dropEntries(h, d, drop)
+}
+
+// files removes the unedited files of one site's plan, and answers the
 // entries of every file removed or already gone, for dropEntries.
-func (e *Executor) files(h Host, s SitePlan) (map[string]bool, error) {
-	if len(s.Files) == 0 {
+func (e *Executor) files(h Host, site string, files []File) (map[string]bool, error) {
+	if len(files) == 0 {
 		return nil, nil
 	}
 	e.work("remove files")
-	out, err := h.Run(FilesCommand(s.Files))
+	out, err := h.Run(FilesCommand(files))
 	if err != nil {
 		return nil, fmt.Errorf("removing files: %w: %s", err, firstLine(out))
 	}
@@ -367,10 +418,10 @@ func (e *Executor) files(h Host, s SitePlan) (map[string]bool, error) {
 				e.open.Detail("%s", p)
 			}
 		case "kept":
-			e.Kept = append(e.Kept, fileEdited(s.Site, p))
+			e.Kept = append(e.Kept, fileEdited(site, p))
 		}
 	}
-	for _, f := range s.Files {
+	for _, f := range files {
 		if !answered[f.Entry.Path] {
 			return nil, fmt.Errorf("removing files: no answer for /%s, so the manifest is left as it was", f.Entry.Path)
 		}

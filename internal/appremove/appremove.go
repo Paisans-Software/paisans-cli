@@ -10,7 +10,9 @@
 // and the paisans-<token>-<app> compose project; a file only with a manifest
 // entry marked left over; a client, database or bucket only by what this
 // deployment recorded or created under the app's name (see each Plan type).
-// Anything else found is reported as kept, with why.
+// Anything else found is reported as kept, with why. The one thing taken
+// that is not the app's own is a Beszel agent once no hub is declared
+// (AgentFile), since every agent is the hub's.
 //
 // The gate is the left over mark. A whole apply marks the files of an app
 // it no longer renders, so a site whose entries for the app are all marked
@@ -137,10 +139,27 @@ type SitePlan struct {
 	// DataEntries are the stack directory's top level entries that hold no
 	// manifest file: what the app wrote, bind mounted data and uploads.
 	DataEntries []string
+	// Agents, AgentFiles and AgentOwed are the site's Beszel agent while
+	// the configuration declares no beszel hub (see AgentFile): the agent's
+	// containers to stop and remove, its left over files, and whether the
+	// site has not been applied since the hub left, so its infra stack
+	// still renders the agent and nothing of it is touched here.
+	Agents     []string
+	AgentFiles []File
+	AgentOwed  bool
 }
+
+// agent reports whether the plan stops the site's agent or removes its
+// files.
+func (s SitePlan) agent() bool { return len(s.Agents) > 0 || len(s.AgentFiles) > 0 }
 
 // Empty reports whether nothing of the app is on the site.
 func (s SitePlan) Empty() bool {
+	return !s.agent() && s.appEmpty()
+}
+
+// appEmpty reports whether nothing of the app's own stack is on the site.
+func (s SitePlan) appEmpty() bool {
 	return len(s.Containers) == 0 && len(s.Networks) == 0 && len(s.Volumes) == 0 && len(s.Files) == 0 && len(s.WebServer) == 0 && !s.Dir.Exists
 }
 
@@ -354,6 +373,27 @@ func AppFile(cfg *config.Config, app, rel string) bool {
 	return true
 }
 
+// agentService is the infrastructure stack's Beszel agent, the compose
+// service and the directory its files are rendered in
+// (internal/render/templates/infra-compose.yaml.tmpl).
+const agentService = "beszel-agent"
+
+// AgentFile reports whether a manifest path is a Beszel agent's file in the
+// infrastructure stack while the configuration declares no beszel hub.
+//
+// Every site runs an agent while a hub is declared, dialling the hub, and
+// the agents are the hub's: once it is gone they dial nothing. A whole
+// apply drops the agent from the infra stack's compose file and marks its
+// files left over, but `docker compose up -d` leaves a service the file no
+// longer names running, so the agent would keep dialling a hub that is gone.
+// app remove takes them off. one-beszel allows a single hub, so with none
+// declared every agent of the deployment is the removed hub's, which is
+// what lets a run of this command resume after the hub's own files are
+// gone.
+func AgentFile(cfg *config.Config, rel string) bool {
+	return cfg.BeszelApp() == "" && strings.HasPrefix(rel, cfg.Deployment().RelPath(infraStack, agentService)+"/")
+}
+
 // Build decides the removal from what the probes read. It refuses when any
 // site still has an entry of the app's that is not marked left over.
 func Build(cfg *config.Config, app string, in Input) (*Plan, error) {
@@ -428,7 +468,8 @@ func planSite(cfg *config.Config, app string, st SiteState) (SitePlan, error) {
 
 	owned := map[string]bool{}
 	for _, e := range inv.ManifestFiles {
-		if !AppFile(cfg, app, e.Path) {
+		agent := AgentFile(cfg, e.Path)
+		if !agent && !AppFile(cfg, app, e.Path) {
 			continue
 		}
 		if strings.ContainsAny(e.Path, "'\n") {
@@ -443,12 +484,32 @@ func planSite(cfg *config.Config, app string, st SiteState) (SitePlan, error) {
 		default:
 			f.State = Edited
 		}
+		if agent {
+			sp.AgentFiles = append(sp.AgentFiles, f)
+			if !e.Leftover {
+				sp.AgentOwed = true
+			}
+			continue
+		}
 		sp.Files = append(sp.Files, f)
 		if _, stack, rest, ok := deployment.SplitRel(e.Path); ok && stack == app {
 			owned[strings.SplitN(rest, "/", 2)[0]] = true
 		}
 	}
 	sort.Slice(sp.Files, func(i, j int) bool { return sp.Files[i].Entry.Path < sp.Files[j].Entry.Path })
+	sort.Slice(sp.AgentFiles, func(i, j int) bool { return sp.AgentFiles[i].Entry.Path < sp.AgentFiles[j].Entry.Path })
+	// A site whose infra stack still renders the agent is the apply's to
+	// change first, so nothing of the agent is planned on it.
+	if sp.AgentOwed {
+		sp.AgentFiles = nil
+	} else if cfg.BeszelApp() == "" {
+		for _, c := range inv.Containers {
+			if c.Deployment == d.ID && c.Project == d.Project(infraStack) && c.Service == agentService {
+				sp.Agents = append(sp.Agents, c.Name)
+			}
+		}
+		sort.Strings(sp.Agents)
+	}
 	for _, e := range inv.ManifestWebServer {
 		if e.App == app {
 			sp.WebServer = append(sp.WebServer, e)

@@ -9514,6 +9514,20 @@ is planned from the render and the monitor's host rather than from the left
 over marks. A failure there comes after everything of the app's is gone and
 names the `deployment apply` that finishes it.
 
+**Removing the Beszel hub stops every agent.** Every site's agent is the
+hub's, and a whole apply after the hub leaves `paisans-stack.yaml` drops the
+agent from the infra stack's compose file and marks its files left over, but
+`docker compose up -d` leaves a service its file no longer names running, so
+the agent would keep dialling a hub that is gone. While no `beszel` app is
+declared, `app remove` stops and removes each site's agent, by this
+deployment's label, the infra project and the `beszel-agent` service
+together, so nothing else in the stack is touched, then its left over files
+and their entries, after the sites' own steps. `one-beszel` allows one hub, so
+with none declared every agent is the removed hub's, and a run after the
+hub's own files are gone still finds them. A site not applied since the hub
+left still renders its agent, so nothing of it is touched there, and it is
+named at the end with the `deployment apply` to run before this command again.
+
 **It leaves three things and says so.** The app's secrets stay in the secrets
 file, which it never edits, so they are listed for removal with `sops`; it does
 take the app, and each Pocket ID group only it named, out of every gateway's
