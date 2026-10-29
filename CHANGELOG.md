@@ -12,6 +12,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Changed
 
+- The `engagement` blueprint's bot defaults to the account `community-bot`, was `digest-bot`, and takes the name members see from a new `bot_display_name` setting, `Community Bot` by default; `validate` refuses a blank or multi-line one.
 - `deployment apply` without `--site` leaves alone a site whose plan has nothing to do, no pull or install steps, recording the version there, unless the run founds, joins or moves the gateway.
 
 ### Fixed
@@ -19,6 +20,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - `site admit` turns on forwarding on the relay, the first site by name dialled on its `public_address` or `endpoint`, and no other site, matching the WireGuard render; apply refuses only a relay without it.
 - A build of `develop`, `X.Y.Z-dev`, meets a blueprint's `requires_toolkit` of any `X.Y.Z` pre-release, so it uses the catalog releases a release candidate would.
 - `site admit` gives a relay `ufw route allow in on psns-<token> out on psns-<token>`, since ufw's default DROP forward policy otherwise drops the mesh traffic it relays, and `site evict` removes it.
+- `dns prune` removes the sender DMARC policy `dns init` writes at a send-only mail name once the configuration no longer sends mail from that name, instead of keeping it forever.
 
 ## [0.3.0-rc.14] - 2026-10-28
 

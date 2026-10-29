@@ -331,6 +331,45 @@ func TestSendOnlyDomainGetsItsDMARCPolicyWritten(t *testing.T) {
 	}
 }
 
+// The sender's policy is kept only while the configuration still gives its
+// name mail. Once nothing sends from the name, it is a no-mail record like
+// any other, and prune removes it.
+func TestPruneRemovesASendersDMARCPolicyOnceItsMailGoes(t *testing.T) {
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{
+		{ID: "dmarc", Type: "TXT", Name: "_dmarc.send.staging.example.org", Content: `"` + dmarcSender + `"`, Comment: comment},
+	}
+	c := fake.serve(t)
+	prune := func(cfg *config.Config) *PrunePlan {
+		t.Helper()
+		wants, err := Desired(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p, err := BuildPrune(context.Background(), c, cfg, wants)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+
+	sending := staged()
+	sending.SMTP = config.SMTP{FromAddress: "noreply@send.staging.example.org"}
+	p := prune(sending)
+	if len(p.Removes()) != 0 {
+		t.Fatalf("prune would delete the policy of a name that still sends mail: %+v", p.Entries)
+	}
+	if len(p.Entries) != 1 || !strings.Contains(strings.Join(p.Entries[0].Reasons, "; "), "still sends mail from it (smtp.from_address)") {
+		t.Errorf("the kept policy should name what sends mail from it: %+v", p.Entries)
+	}
+
+	p = prune(staged())
+	if removes := p.Removes(); len(removes) != 1 || removes[0].ID != "dmarc" {
+		t.Errorf("prune should delete the policy of a name nothing sends mail from: %+v", p.Entries)
+	}
+}
+
 // A send-only domain's existing policy is somebody's: a weak one is still a
 // note, never replaced and never a refusal.
 func TestSendOnlyDomainWithAWeakPolicyIsANote(t *testing.T) {

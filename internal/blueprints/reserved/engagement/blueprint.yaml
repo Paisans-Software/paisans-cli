@@ -35,8 +35,11 @@ settings:
   # The homeserver's hostname, unset meaning the deployment's one.
   homeserver: {type: string}
   # The bot's localpart. A setting because MAS takes members' localparts
-  # from Pocket ID, so a member may already hold the default.
-  bot_localpart: {type: string, default: "digest-bot"}
+  # from Pocket ID, so a member may already hold the default. Changing it
+  # gives the bot a new account and abandons the old one's rooms.
+  bot_localpart: {type: string, default: "community-bot"}
+  # The name members see the bot by, which it sets on its account at start.
+  bot_display_name: {type: string, default: "Community Bot"}
 secrets:
   required:
     - {key: "digest_signing_key", why: "paisans-engagement-service refuses to start without ENGAGEMENT_SIGNING_KEY"}

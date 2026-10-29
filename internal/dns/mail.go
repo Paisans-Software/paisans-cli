@@ -70,7 +70,8 @@ const (
 	dkimLockdown  = "v=DKIM1; p="
 	dmarcLockdown = "v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s;"
 	// dmarcSender is the policy for a domain that sends mail and receives
-	// none. dns prune never deletes it: the domain's mail depends on it.
+	// none. dns prune keeps it while the configuration still gives the
+	// domain mail, since that mail depends on it.
 	dmarcSender = "v=DMARC1; p=reject; sp=reject;"
 	// nullMX is RFC 7505's: preference 0, target the root.
 	nullMX = "."
