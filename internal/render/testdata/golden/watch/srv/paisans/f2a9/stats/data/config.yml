@@ -1,0 +1,20 @@
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
+#
+# One system per site. The hub deletes every system this file does not list.
+systems:
+  - name: home-a
+    host: 10.44.0.1
+    token: b0000000000000000000000000000aaa
+    users: []
+  - name: home-b
+    host: 10.44.0.2
+    token: b1111111111111111111111111111bbb
+    users: []
+  - name: vm
+    host: 10.44.0.3
+    token: b2222222222222222222222222222ccc
+    users: []
+  - name: watch
+    host: 10.44.0.4
+    token: b3333333333333333333333333333ddd
+    users: []

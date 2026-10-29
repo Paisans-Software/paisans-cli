@@ -53,6 +53,8 @@ func externalWatch(t *testing.T) {
 			watch := cfg.Sites["watch"]
 			watch.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480"}
 			cfg.Sites["watch"] = watch
+			// It hosts the uptime app alone.
+			delete(cfg.Apps, "stats")
 		}
 		return cfg, st, err
 	}

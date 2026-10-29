@@ -2733,7 +2733,7 @@ func TestAStorageSiteRendersGarageAlone(t *testing.T) {
 	cfg.Sites["store"] = config.Site{Roles: []config.Role{config.RoleStorage}, Address: "10.44.0.4", Endpoint: "203.0.113.40:51820"}
 	cfg.Storage.Garage.Sites = append(cfg.Storage.Garage.Sites, "store")
 	secrets := fixtureSecrets(t)
-	secrets.Sites["store"] = config.SiteSecrets{WireGuardPrivateKey: "Q0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0M=", HeartbeatToken: "5555555555555555555555555555eeee"}
+	secrets.Sites["store"] = config.SiteSecrets{WireGuardPrivateKey: "Q0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0M=", HeartbeatToken: "5555555555555555555555555555eeee", BeszelToken: "b5555555555555555555555555555eee"}
 	plan, err := render.Build(cfg, secrets)
 	if err != nil {
 		t.Fatal(err)
@@ -2779,6 +2779,10 @@ func TestARolelessSiteRendersItsPinnedAppAndNoInfraStack(t *testing.T) {
 	if _, err := secretsgen.Fill(cfg, secrets); err != nil {
 		t.Fatal(err)
 	}
+	// The fixture's beszel hub lists every site, this one included.
+	mon := secrets.Sites["mon"]
+	mon.BeszelToken = "b9999999999999999999999999999fff"
+	secrets.Sites["mon"] = mon
 	plan, err := render.Build(cfg, secrets)
 	if err != nil {
 		t.Fatal(err)

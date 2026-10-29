@@ -133,6 +133,7 @@ func TestEachBlueprintsConfigFileAndFormat(t *testing.T) {
 		config.BlueprintUptime:          {blueprints.ConfigEnv, ".env"},
 		config.BlueprintAccount:         {blueprints.ConfigEnv, ".env"},
 		config.BlueprintEngagement:      {blueprints.ConfigEnv, ".env"},
+		config.BlueprintBeszel:          {blueprints.ConfigEnv, ".env"},
 	}
 	for _, blueprint := range blueprints.Builtin() {
 		want, known := cases[blueprint]

@@ -165,6 +165,10 @@ type appValues struct {
 	// deployment (uptime.go). Populated only for that blueprint.
 	UptimeSeed string
 
+	// Beszel is the beszel blueprint's systems list, key pair and break glass
+	// address (beszel.go). Populated only for that blueprint.
+	Beszel beszelValues
+
 	// Account is the account blueprint's identity provider, settings and code
 	// of conduct (account.go). Populated only for that blueprint.
 	Account accountValues
@@ -496,6 +500,13 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 			return appValues{}, err
 		}
 		v.UptimeSeed = seed
+	}
+	if planned.Blueprint == config.BlueprintBeszel {
+		beszel, err := p.beszelValues(planned.Name)
+		if err != nil {
+			return appValues{}, err
+		}
+		v.Beszel = beszel
 	}
 	if planned.Blueprint == config.BlueprintAccount {
 		account, err := p.accountValuesFor(planned.Name, planned.Site)

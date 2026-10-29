@@ -233,6 +233,11 @@ func TestTheManifestRecordsTheRunsPending(t *testing.T) {
 	if _, err := secretsgen.Fill(cfg, secrets); err != nil {
 		t.Fatal(err)
 	}
+	// The fixture's Beszel hub lists every site by its token.
+	for name, site := range secrets.Sites {
+		site.BeszelToken = "b0000000000000000000000000000aaa"
+		secrets.Sites[name] = site
+	}
 	rendered, err := render.Build(cfg, secrets)
 	if err != nil {
 		t.Fatal(err)

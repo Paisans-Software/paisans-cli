@@ -13,7 +13,7 @@
     },
     {
       "path": "srv/paisans/f2a9/health/monitors.json",
-      "sha256": "060d95580737b76f5bff9ec6a0377da2bda330b58bcb4cfca7c4211333726d32",
+      "sha256": "dbfcd8345723ce9821f902b3771b72603e30a9701fa1028db02fbc255054ec98",
       "mode": "0600"
     },
     {
@@ -23,12 +23,17 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/etc/Caddyfile",
-      "sha256": "ebbb2a3b50e910ace2faa789f448cc03d6d8421a9277052d94f29a139471a526",
+      "sha256": "2a28639274732cf8b0d211504f94d2905119db7cf4b4d50add84aa8d0f7e0139",
       "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/etc/snippets/health.caddy",
       "sha256": "930505c84ad98ffa49b4e5b7d93a763e36e727252b9134ebec126d9168461c17",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/infra/caddy/etc/snippets/stats.caddy",
+      "sha256": "9ebdf88006786fd597d3938dc7cc6f6def2c8e222e1e82453b26f65771837871",
       "mode": "0644"
     },
     {
@@ -39,6 +44,31 @@
     {
       "path": "srv/paisans/f2a9/psns-f2a9.conf",
       "sha256": "4ba1cede133fa71b48112f99482ce5a560829722c5454723c86e895031fb56d2",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/stats/.env",
+      "sha256": "0640021bb347cfd81400121e0b2e691481fb213fffc3bef8ffada378649fb565",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/stats/compose.yaml",
+      "sha256": "1106173ab895261f69d1d3d581fca1f7f1963b08803d5bc06211d7f300cfbfcd",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/stats/data/config.yml",
+      "sha256": "1c2d3159caa6f1e9e896cf6ef18a0548e904b7cfd8a7f787042c1e0f574bbf15",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/stats/data/id_ed25519",
+      "sha256": "3182712571519c47c5136ae7d18dd3fc538249891962da9bd64fbbe2198773e3",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/stats/setup.sh",
+      "sha256": "4efed9681a8f75e574a15a199174e527f8e0017e4c1f3321b2d107c6dee6b30c",
       "mode": "0600"
     }
   ],

@@ -1,0 +1,14 @@
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
+#
+# Routing for {{ .App.Name }}, imported by the host block for
+# {{ .Hostname }} in the Caddy on the monitor's own site.
+# Everything passes: the UI, its sign in and the OAuth2 callback, and the API
+# and realtime stream the UI reads, all of which the hub authenticates
+# itself. The agents dial the hub on the mesh, never through here.
+reverse_proxy{{ range .Upstreams }} {{ . }}{{ end }} {
+{{- if .UpstreamElsewhere }}
+	# One site, not the gateway's machine; see upstream_single in the Caddyfile.
+	import upstream_single
+{{- end }}
+	header_up X-Forwarded-Proto https
+}

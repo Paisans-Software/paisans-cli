@@ -1,0 +1,10 @@
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
+#
+# Routing for stats, imported by the host block for
+# status.health.example.org in the Caddy on the monitor's own site.
+# Everything passes: the UI, its sign in and the OAuth2 callback, and the API
+# and realtime stream the UI reads, all of which the hub authenticates
+# itself. The agents dial the hub on the mesh, never through here.
+reverse_proxy 10.44.0.4:8084 {
+	header_up X-Forwarded-Proto https
+}
