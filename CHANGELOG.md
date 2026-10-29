@@ -10,6 +10,8 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+## [0.3.0-rc.19] - 2026-10-29
+
 ### Added
 
 - The `ops-notifier` blueprint, beside the homeserver, gives each operator a Matrix room for their own Beszel alerts and deletes a departed operator's Beszel account; the hub makes it a superuser of its own.
@@ -406,7 +408,8 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.
 - The gateway refuses any request to Pocket ID that carries an `X-API-Key` header with 403, so Pocket ID's API keys work only on the mesh.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.18...develop
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.19...develop
+[0.3.0-rc.19]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.18...v0.3.0-rc.19
 [0.3.0-rc.18]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.17...v0.3.0-rc.18
 [0.3.0-rc.17]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.16...v0.3.0-rc.17
 [0.3.0-rc.16]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.15...v0.3.0-rc.16
