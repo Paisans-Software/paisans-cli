@@ -12,6 +12,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Changed
 
+- The `engagement` blueprint names the community in the digest by `community.name`, falling back to Mbin's meta title without one, so the digest reads "This week on Paisans" rather than "Talk · Paisans".
 - The engagement app's front page and `/d/` with no date redirect to the account app, or the community's domain without one; `/d/` before the gate, the front page after it.
 
 ## [0.3.0-rc.15] - 2026-10-29
