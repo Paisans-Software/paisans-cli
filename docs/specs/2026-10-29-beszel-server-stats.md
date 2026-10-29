@@ -99,11 +99,10 @@ refuses the monitor. Its rules, beside the monitor's table in `README.md`,
 |---|---|---|
 | a `beszel` app pinned to a site without `monitor` | refused | `beszel-needs-a-monitor-site` |
 | more than one `beszel` app | refused | `one-beszel` |
-| a `beszel` app on a monitor with `web_server.managed_by: external` | refused | `beszel-behind-external-web-server` |
 
-The last is *provisional*: one `listen` publishes one app
-(`web-server-external-serves-one-app`), and the monitor takes it. Lifting it is
-a change to `listen`, not to this blueprint.
+A monitor with `web_server.managed_by: external` hosts the monitor alone, and
+`web-server-external-serves-one-app` already refuses a second app there, the
+hub included. Lifting that is a change to `listen`, not to this blueprint.
 
 **Its hostname is served like the monitor's.** An app pinned to a monitor site
 already has its hostnames pointed at the monitor's `public_address` by
@@ -134,25 +133,25 @@ everyone else before Beszel sees them. The hub runs with:
   `beszel-admin@<domain>` (*provisional*); nothing is sent to it.
 * `TRUSTED_PROXY_IPS` the address the Caddy in front of it connects from.
 
-OIDC has no variable, so the hub's stack carries a **setup** container
-(*provisional*) that runs after the hub answers `/api/health`: it signs in as
-the superuser and writes the `oidc` provider into the `users` collection's
-OAuth2 settings through the PocketBase API, with Pocket ID's authorize, token
-and userinfo URLs and the client's id and secret. It converges: it writes the
-same settings on every start, so a rotated client secret reaches the hub on the
-next apply. It runs on the foundation's `heartbeat` image (curl and a shell),
-and its script is rendered 0600 because it carries the superuser password. The
-builder may write it in Go in the toolkit instead if apply already has a path
-to the hub's API; what matters is that it converges and needs no UI.
+Two more containers in the hub's stack make the rest of it converge
+(*provisional*):
 
-Rotating `admin_password` changes `USER_PASSWORD`, which Beszel reads on a new
-install only. The setup container also sets the superuser's password to the
-current one (PocketBase's `superuser upsert`, or the API), so a rotation takes
-effect on the next apply. How is left to the builder.
+* **`admin`**, a one shot from the hub's own image, runs `/beszel superuser
+  upsert <email> <password>` (beszel-docs `user-accounts.md`) before the hub
+  starts, and the hub waits for it to complete. `USER_PASSWORD` is read on a
+  new install only, so this is what makes a rotated `admin_password` take
+  effect on the next apply.
+* **`setup`**, on the foundation's `heartbeat` image (curl and a shell), runs
+  once the hub answers `/api/health`: it signs in as the superuser and writes
+  the `oidc` provider into the `users` collection's OAuth2 settings through
+  the PocketBase API, with Pocket ID's authorize, token and userinfo URLs and
+  the client's id and secret. It writes the same settings on every start, so a
+  rotated client secret reaches the hub on the next apply. Its script carries
+  the superuser password and is rendered 0600.
 
-**Its port** is 8090, published on the monitor's mesh address, which is how
-the agents reach it. Check it against every port the infra stack holds; the
-builder publishes another if it collides.
+**Its port.** The hub listens on 8090 in its container and publishes 8084 on
+the monitor's mesh address, which is how the agents reach it: the core
+catalog's Element publishes 8090.
 
 ## The systems list: `config.yml`
 
@@ -190,8 +189,12 @@ declares a `beszel` app, beside the heartbeat:
   `doctor` already warns of that Engine for the infra stack.
 * The deployment user's rootless Docker socket, `/run/user/<uid>/docker.sock`
   (`apply.RootlessDockerHost`), mounted at `/var/run/docker.sock`, read only.
-  Rendering needs the deployment user's UID, which apply resolves already;
-  carrying it into the render is the builder's.
+  The UID is learnt over ssh, after rendering, so the rendered file names
+  `${PAISANS_DOCKER_SOCKET:?...}` and the transport exports
+  `PAISANS_DOCKER_SOCKET` beside the `DOCKER_HOST` it already exports ahead
+  of every command (*provisional*). The rendered file is the same on every
+  site, and a compose run outside the toolkit fails by name rather than
+  mounting nothing.
 * `HUB_URL` the hub's site's mesh address and published port, over plain
   HTTP inside the mesh, as every service talks across sites (*Rule 2*).
 * `TOKEN_FILE` naming `sites.<site>.beszel_token`, and `KEY` the hub's
@@ -218,8 +221,13 @@ lacks it (*provisional*), and `doctor` reports a site whose user session lacks
 I/O is not shown.
 
 **Memory.** `hostmem` counts the agent in `FloorBase` and the hub in a new
-`FloorBeszel` on the monitor, each set from what the builder measures on a
-host at rest.
+`FloorBeszel` on a site a `beszel` app is pinned to, each set from what the
+builder measures on a host at rest.
+
+**Its env file restarts only the agent.** `deployment apply` treats a changed
+infra env file as a change to the gateway's compose, except the heartbeat's;
+the agent's gets the same exemption, so rotating a site's token does not
+reload the gateway.
 
 ## Secrets
 
@@ -235,7 +243,10 @@ private half. Generated with `crypto/ed25519` and written with
 `golang.org/x/crypto/ssh`'s `MarshalPrivateKey` (unencrypted) and
 `MarshalAuthorizedKey`. The site token is generated with the site's other
 secrets, only while the deployment declares a `beszel` app, and listed by
-`secretsgen`'s declared set like `heartbeat_token`.
+`secretsgen`'s declared set like `heartbeat_token`. A site's token rotates
+with `paisans secrets rotate sites.<site>.beszel_token`, which applies that
+site's `infra` and the hub. `site add` and `site remove` re-render the hub
+with the monitor (`apply.PlanMonitorReseeds`).
 
 ## The wizard
 
