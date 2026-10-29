@@ -75,6 +75,32 @@ func TestListenPortFollowsTheDialEndpoint(t *testing.T) {
 
 // A site with only a public address is dialled, so it peers directly with a
 // site that has neither.
+// The relay is the first site in name order that others dial, as the
+// WireGuard render routes the mesh through it, and only once two sites
+// dial nobody's way in: one undialled site peers with every dialled one
+// directly, and nothing passes through a relay.
+func TestRelay(t *testing.T) {
+	public := config.Site{PublicAddress: "203.0.113.10"}
+	written := config.Site{Endpoint: "vm.example.org:51820"}
+	home := config.Site{}
+	for _, c := range []struct {
+		name  string
+		sites map[string]config.Site
+		want  string
+	}{
+		{"two homes and a public address", map[string]config.Site{"home-a": home, "home-b": home, "vm": public}, "vm"},
+		{"the first dialled site by name", map[string]config.Site{"a-home": home, "b-home": home, "monitor": written, "gateway": public}, "gateway"},
+		{"one home", map[string]config.Site{"home-a": home, "vm": public, "watch": written}, ""},
+		{"nobody dialled", map[string]config.Site{"home-a": home, "home-b": home}, ""},
+		{"everybody dialled", map[string]config.Site{"vm": public, "watch": written}, ""},
+	} {
+		cfg := &config.Config{Sites: c.sites}
+		if got := cfg.Relay(); got != c.want {
+			t.Errorf("%s: Relay() = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
 func TestAPublicAddressPeersDirectly(t *testing.T) {
 	public := config.Site{PublicAddress: "203.0.113.10"}
 	home := config.Site{}

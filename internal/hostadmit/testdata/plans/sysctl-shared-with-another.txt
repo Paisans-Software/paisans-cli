@@ -22,9 +22,8 @@ step 19: install the helper's sudoers line
 step 20: allow 22/tcp
 step 21: allow 51820/udp
 step 22: allow all inbound on psns-f2a9
-step 23: allow routed from psns-f2a9 back out psns-f2a9
 
-step 24: write the admission record
+step 23: write the admission record
   record: who the deployment runs as and what you granted, which its own commands read
   write /etc/paisans/admitted.f2a9.json mode 0644:
     | {
@@ -39,13 +38,13 @@ step 24: write the admission record
     |     "watchdog": false,
     |     "public_ports": false
     |   },
-    |   "forwarding": true,
+    |   "forwarding": false,
     |   "ports": {
     |     "ssh": 22,
     |     "wireguard": 51820,
     |     "public": []
     |   },
-    |   "digest": "6j8a-491f-hdde-4j6d",
+    |   "digest": "z7qj-2zby-gnjs-6h5z",
     |   "admitted_at": "2026-10-15T12:00:00Z",
     |   "data_dir": "",
     |   "bridge_netfilter": false,
@@ -58,7 +57,7 @@ step 24: write the admission record
     |   "toolkit_modified": false
     | }
 
-step 25: add the operators' keys
+step 24: add the operators' keys
 
 present: swap: on
 present: docker: Engine 29.9.1
@@ -83,5 +82,3 @@ present: sysctls: low ports kept for deployment 0c0dc4e1-0b7d-4c3a-9e2f-5a6b7c8d
 present: sysctls: forwarding kept for deployment 0c0dc4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
 warning: delegation reaches paisans-f2a9's manager at its next start
   Its manager is running, and restarting it would restart its Docker daemon and every container in it, so admit does not. cpuset and io limits apply after the host's next reboot.
-warning: forwarding: this turns on routing between every interface on this host
-  Other sites dial this one, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's route rule relays the mesh, and its forward policy governs every other route.

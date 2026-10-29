@@ -70,25 +70,28 @@ step 14: remove ufw rule in on psns-f2a9
   run:
     $ ufw delete allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'
 
-step 15: remove ufw rule route in on psns-f2a9 out on psns-f2a9
-  evict: delete `route allow in on psns-f2a9 out on psns-f2a9 comment 'paisans-f2a9: the mesh, relayed between sites that cannot dial each other'`, which site admit added for the deployment
-  run:
-    $ ufw route delete allow in on psns-f2a9 out on psns-f2a9 comment 'paisans-f2a9: the mesh, relayed between sites that cannot dial each other'
-
-step 16: remove ufw rule 80/tcp
+step 15: remove ufw rule 80/tcp
   evict: delete `allow 80/tcp comment 'paisans-f2a9: public ports, HTTP'`, which site admit added for the deployment
   run:
     $ ufw delete allow 80/tcp comment 'paisans-f2a9: public ports, HTTP'
 
-step 17: remove ufw rule 443/tcp
+step 16: remove ufw rule 443/tcp
   evict: delete `allow 443/tcp comment 'paisans-f2a9: public ports, HTTPS'`, which site admit added for the deployment
   run:
     $ ufw delete allow 443/tcp comment 'paisans-f2a9: public ports, HTTPS'
 
-step 18: remove ufw rule 443/udp
+step 17: remove ufw rule 443/udp
   evict: delete `allow 443/udp comment 'paisans-f2a9: public ports, HTTP/3'`, which site admit added for the deployment
   run:
     $ ufw delete allow 443/udp comment 'paisans-f2a9: public ports, HTTP/3'
+
+step 18: rewrite /etc/sysctl.d/60-paisans.conf
+  evict: only what the other admitted deployments need
+  write /etc/sysctl.d/60-paisans.conf mode 0644:
+    | # Written by paisans site admit, for every admitted deployment that needs
+    | # it; paisans site evict restores each value once none does.
+    | net.ipv4.ip_unprivileged_port_start = 80
+    | net.ipv4.ip_forward = 1
 
 step 19: remove the admission record
   evict: /etc/paisans/admitted.f2a9.json

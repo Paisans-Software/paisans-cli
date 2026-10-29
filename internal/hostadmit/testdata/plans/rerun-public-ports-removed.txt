@@ -90,26 +90,20 @@ step 6: remove ufw rule 443/udp
   run:
     $ ufw delete allow 443/udp comment 'paisans-f2a9: public ports, HTTP/3'
 
-step 7: set the host's sysctls
-  sysctls: /etc/sysctl.d/60-paisans.conf, applied with sysctl --system, which applies every sysctl file on the host again, then each key checked, since a file read after it could set one back
-  write /etc/sysctl.d/60-paisans.conf mode 0644:
-    | # Written by paisans site admit, for every admitted deployment that needs
-    | # it; paisans site evict restores each value once none does.
-    | net.ipv4.ip_forward = 1
+step 7: remove /etc/sysctl.d/60-paisans.conf
+  sysctls: no admitted deployment needs it
   run:
-    $ sysctl --system >/dev/null && { [ "$(sysctl -n net.ipv4.ip_forward)" = 1 ] || { echo 'net.ipv4.ip_forward is not 1 after sysctl --system: a file read after /etc/sysctl.d/60-paisans.conf sets it'; exit 1; }; }
+    $ rm -f /etc/sysctl.d/60-paisans.conf
 
 step 8: restore net.ipv4.ip_unprivileged_port_start=1024
   sysctls: no admitted deployment needs them any more; set each back to what it was before admit
   run:
     $ sysctl -w net.ipv4.ip_unprivileged_port_start=1024 >/dev/null
 
-step 9: record the sysctls' values before
-  sysctls: /etc/paisans/sysctl.before, for site evict to restore
-  write /etc/paisans/sysctl.before mode 0644:
-    | # Written by paisans site admit: each value as it was before admit
-    | # first changed it. paisans site evict restores them.
-    | net.ipv4.ip_forward = 0
+step 9: remove /etc/paisans/sysctl.before
+  sysctls: nothing left to restore
+  run:
+    $ rm -f /etc/paisans/sysctl.before
 
 step 10: write the admission record
   record: who the deployment runs as and what you granted, which its own commands read
@@ -126,13 +120,13 @@ step 10: write the admission record
     |     "watchdog": false,
     |     "public_ports": false
     |   },
-    |   "forwarding": true,
+    |   "forwarding": false,
     |   "ports": {
     |     "ssh": 22,
     |     "wireguard": 51821,
     |     "public": []
     |   },
-    |   "digest": "zbtc-mmat-8xf9-t0cg",
+    |   "digest": "evhc-8cpc-edn4-p521",
     |   "admitted_at": "2026-10-15T12:00:00Z",
     |   "data_dir": "",
     |   "bridge_netfilter": false,
@@ -177,8 +171,6 @@ present: wireguard: /etc/sudoers.d/paisans-f2a9 lets paisans-f2a9 run the helper
 present: firewall: 22/tcp allowed
 present: firewall: 51821/udp allowed
 present: firewall: all inbound on psns-f2a9 allowed
-present: firewall: routed from psns-f2a9 back out psns-f2a9 allowed
 present: firewall: ufw active, its default policy left to the owner
+present: forwarding: not needed, this site has no endpoint
 present: keys: every operator's key is in paisans-f2a9's authorized_keys
-warning: forwarding: this turns on routing between every interface on this host
-  Other sites dial this one, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's route rule relays the mesh, and its forward policy governs every other route.
