@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Added
+
+- The `beszel` blueprint writes the hub's SMTP settings and sender from the `smtp` block, so alerts reach the addresses operators add in Beszel; validate checks the sender and warns about unenforceable `starttls`.
+
 ## [0.3.0-rc.18] - 2026-10-29
 
 ### Changed

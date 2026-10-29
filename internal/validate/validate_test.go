@@ -146,6 +146,10 @@ func TestRulesFire(t *testing.T) {
 		{"uptime-needs-a-monitor-site", "uptime-needs-a-monitor-site", validate.Refuse},
 		{"beszel-off-monitor", "beszel-needs-a-monitor-site", validate.Refuse},
 		{"beszel-twice", "one-beszel", validate.Refuse},
+		{"beszel-smtp-without-sender", "beszel-smtp-sender", validate.Refuse},
+		{"beszel-smtp-sender-not-an-email", "beszel-smtp-sender", validate.Refuse},
+		{"beszel-starttls-without-username", "beszel-starttls-not-enforced", validate.Warn},
+		{"beszel-plaintext-with-username", "smtp-plaintext-with-username", validate.Refuse},
 		{"monitor-without-public-address", "monitor-without-public-address", validate.Refuse},
 		{"web-server-outside-monitor", "web-server-outside-monitor", validate.Refuse},
 		{"web-server-listen-managed-by", "web-server-listen-managed-by", validate.Refuse},
@@ -643,6 +647,18 @@ func TestAMonitorHoldingOnlyBeszelIsQuiet(t *testing.T) {
 	result := validate.Check(load(t, "monitor-holds-beszel"))
 	if len(result.Findings) != 0 {
 		t.Fatalf("monitor-holds-beszel produced findings: %v", result.Findings)
+	}
+}
+
+// A beszel app on the valid fixture's mail, starttls with a username and a
+// bare sender address, draws no mail finding: PocketBase sends its
+// credentials only over TLS, so the username enforces the upgrade.
+func TestABeszelAppOnValidMailIsQuiet(t *testing.T) {
+	result := validate.Check(load(t, "monitor-holds-beszel"))
+	for _, rule := range []string{"beszel-smtp-sender", "beszel-starttls-not-enforced", "smtp-plaintext-with-username", "smtp-on-a-blueprint-without-mail"} {
+		if result.Has(rule) {
+			t.Errorf("%s fired: %v", rule, result.Findings)
+		}
 	}
 }
 

@@ -439,7 +439,7 @@ func TestValidateWarnsAboutMail(t *testing.T) {
 	if !rec.Has("warned", "from home-a") || rec.Index("explain", "From home-a the server answered: log in: 535 5.7.8") < 0 {
 		t.Errorf("the refused login is not a warning:\n%s", rec.Lines())
 	}
-	if rec.Index("explain", "watch could not be reached (ssh could not connect), so health's mail was not checked") < 0 {
+	if rec.Index("explain", "watch could not be reached (ssh could not connect), so health and stats's mail was not checked") < 0 {
 		t.Errorf("the unreachable site is not a skipped check:\n%s", rec.Lines())
 	}
 	if !rec.Has("result", "from the mail check") {

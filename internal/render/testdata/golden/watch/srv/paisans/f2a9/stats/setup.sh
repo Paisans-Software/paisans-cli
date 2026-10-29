@@ -9,13 +9,15 @@
 #     deployment's Pocket ID with this app's client;
 #   * the break glass user's password, which USER_PASSWORD sets on a new
 #     install only. The user and the superuser are separate accounts
-#     (beszel-docs user-accounts.md:3-5), and admin sets the superuser's.
+#     (beszel-docs user-accounts.md:3-5), and admin sets the superuser's;
+#   * the hub's SMTP settings and sender, from the deployment's smtp block,
+#     when it names a host.
 #
 # It signs in as the superuser admin has just set, so it carries
-# admin_password and the client secret, and is 0600. Every request body is a
-# quoted here-document, so no value in it passes through the shell. The image
-# has curl and a shell but no jq, so the two values read back are cut out with
-# sed. Success leaves the container running asleep, so `restart: on-failure`
+# admin_password, the client secret and the SMTP password, and is 0600.
+# Every request body is a quoted here-document, so no value in it passes
+# through the shell. The image has curl and a shell but no jq, so the two
+# values read back are cut out with sed. Success leaves the container running asleep, so `restart: on-failure`
 # restarts it only when a step failed.
 set -eu
 
@@ -84,7 +86,23 @@ else
 	echo "setup: no user beszel-admin@example.org to set the password of; the superuser's is set"
 fi
 
-echo "setup: the hub's sign in is written"
+# The settings API takes a superuser's PATCH and binds the body onto the
+# current settings (apis/settings.go:14-16 and :51-59), so only the fields
+# written here change. smtp's fields and meta's sender are
+# core/settings_model.go:363-382 and :529-530. tls is implicit TLS when true;
+# false sends STARTTLS when the server offers it (core/settings_model.go
+# :372-376), and the username makes it required in effect, since the PLAIN
+# auth sends no credentials unencrypted (tools/mailer/smtp.go:65-72);
+# validate warns about starttls with no username
+# (beszel-starttls-not-enforced). localName is left as the hub has it: the
+# toolkit has no setting for it. PocketBase requires a sender name
+# (core/settings_model.go:541), so the community's name stands in for an
+# unset from_name.
+curl -sS --fail-with-body -o /dev/null -X PATCH "$hub/api/settings" \
+	-H "Authorization: $token" -H 'Content-Type: application/json' --data-binary @- <<'JSON'
+{"smtp":{"enabled":true,"host":"smtp.example.org","port":587,"username":"robot@example.org","password":"fixture-not-a-secret-smtp","authMethod":"PLAIN","tls":false},"meta":{"senderName":"Example Community","senderAddress":"hello@example.org"}}
+JSON
+echo "setup: the hub's sign in and mail are written"
 trap 'exit 0' TERM INT
 while :; do
 	sleep 86400 &

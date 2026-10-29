@@ -166,6 +166,7 @@ func Check(cfg *config.Config) Result {
 	c.displayNameWithoutAClient()
 	c.monitorRoles()
 	c.beszel()
+	c.beszelSMTP()
 	c.webServer()
 	c.smtpOnABlueprintWithoutMail()
 	c.smtpPlaintext()
