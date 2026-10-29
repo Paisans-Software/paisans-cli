@@ -162,4 +162,4 @@ compose: `admin` runs `["superuser", "upsert", "${BESZEL_ADMIN_EMAIL}", "${BESZE
 
 The staging run (spec, *Testing*) uses a binary built from a fresh checkout of this branch, with `PAISANS_CORE_CATALOG` pointing at the core catalog's `feat/beszel-images` checkout, before the PR merges. It corrects `FloorBeszel` from what it measures.
 
-Not in this plan: the spec's cgroup `cpu` delegation drop-in at `site admit` and its `doctor` check, for Ubuntu 22.04. The staging hosts are 24.04, which delegates `cpu` already. It is root boundary work and goes in a pull request of its own.
+Not in this plan: a cgroup delegation drop-in or a `doctor` check. `site admit` already writes `Delegate=cpu cpuset io memory pids` for `user@.service` on every host, so the delegation is in place.

@@ -137,8 +137,9 @@ Two more containers in the hub's stack make the rest of it converge
 (*provisional*):
 
 * **`admin`**, a one shot from the hub's own image, runs `/beszel superuser
-  upsert <email> <password>` (beszel-docs `user-accounts.md`) before the hub
-  starts, and the hub waits for it to complete. `USER_PASSWORD` is read on a
+  upsert <email> <password>` (beszel-docs `user-accounts.md`) once the hub is
+  healthy, since a superuser made before the hub's first start collides with
+  the one its migration makes. `USER_PASSWORD` is read on a
   new install only, so this is what makes a rotated `admin_password` take
   effect on the next apply.
 * **`setup`**, on the foundation's `heartbeat` image (curl and a shell), runs
@@ -197,12 +198,13 @@ declares a `beszel` app, beside the heartbeat:
   mounting nothing.
 * `HUB_URL` the hub's site's mesh address and published port, over plain
   HTTP inside the mesh, as every service talks across sites (*Rule 2*).
-* `TOKEN_FILE` naming `sites.<site>.beszel_token`, and `KEY` the hub's
+* `TOKEN`, which is `sites.<site>.beszel_token`, and `KEY`, the hub's
   public key, from `beszel-agent.env`, 0600, as `heartbeat.env` is.
+* `DATA_DIR=/var/lib/beszel-agent`, bound from the infra stack's
+  `beszel-agent/data`, so the fingerprint the hub pins on first connect
+  survives a restart.
 * `SYSTEM_NAME` the site's name. `DISABLE_SSH=true`, so it listens for
   nothing.
-* `EXTRA_FILESYSTEMS` naming the deployment's data directory when it is on
-  another filesystem than `/`, so a full data disk shows.
 
 **The socket is the deployment user's Docker.** Read only on the mount does not
 restrict the API behind it: a process that can talk to that socket can start a
@@ -211,14 +213,12 @@ site. The agent only reads, and it runs from the foundation's pinned digest
 like every infra image, but this is a real widening, and it is stated here and
 in `README.md` so nobody meets it later.
 
-**Per container CPU needs the `cpu` controller delegated** to the deployment
-user's systemd. systemd 255 (Ubuntu 24.04) delegates `cpu memory pids` by
-default, observed on a staging host on 2026-10-29. Ubuntu 22.04's systemd 249
-does not delegate `cpu` by default, *not verified*: `site admit` writes a
-drop-in for `user@<uid>.service` with `Delegate=cpu memory pids` on a host that
-lacks it (*provisional*), and `doctor` reports a site whose user session lacks
-`cpu` in `cgroup.controllers`. `io` is not delegated, so per container disk
-I/O is not shown.
+**Per container CPU, memory and I/O need their controllers delegated** to the
+deployment user's systemd, and `site admit` already does it: it writes
+`Delegate=cpu cpuset io memory pids` for `user@.service` on every host
+(`internal/hostadmit/user.go:352`), and a staging host shows all five
+controllers. So the figures work on Ubuntu 22.04 and 24.04 alike, with no new
+drop-in and no `doctor` check.
 
 **Memory.** `hostmem` counts the agent in `FloorBase` and the hub in a new
 `FloorBeszel` on a site a `beszel` app is pinned to, each set from what the
