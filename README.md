@@ -5272,7 +5272,8 @@ from a request: `paisans site request --site <site> > <site>.admit` writes
 it, and the owner admits the site from that file. The request holds what
 admission needs and nothing secret: the deployment's id, the site's name
 and its roles, sorted, the site's user, its SSH and WireGuard ports, its
-mesh address and the mesh subnet, whether it has an endpoint, the grants
+mesh address and the mesh subnet, whether other sites dial it (a
+`public_address` or an `endpoint`, which makes it a relay), the grants
 its roles need (the watchdog for a data site, ports 80 and 443 for a
 gateway or a monitor running the toolkit's Caddy), the apps a monitor
 behind the owner's web server hands it, and each operator's public keys.

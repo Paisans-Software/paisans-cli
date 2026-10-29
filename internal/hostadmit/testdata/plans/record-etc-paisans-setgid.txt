@@ -41,6 +41,8 @@ present: firewall: 22/tcp allowed
 present: firewall: 51820/udp allowed
 present: firewall: all inbound on psns-f2a9 allowed
 present: firewall: ufw active, its default policy left to the owner
-present: forwarding: not needed, this site has no endpoint
+present: sysctls: /etc/sysctl.d/60-paisans.conf as written and applied
 present: record: /etc/paisans/admitted.f2a9.json as admitted at 2026-10-15T12:00:00Z
 present: keys: every operator's key is in paisans-f2a9's authorized_keys
+warning: forwarding: this turns on routing between every interface on this host
+  The site has an endpoint, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's forward policy governs what is routed.

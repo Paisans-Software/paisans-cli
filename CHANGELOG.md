@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Fixed
+
+- `site admit` turns on forwarding for a site dialled on its `public_address` alone, as the WireGuard render already relays through it, and admission drift checks forwarding the same way.
+
 ## [0.3.0-rc.14] - 2026-10-28
 
 ### Added

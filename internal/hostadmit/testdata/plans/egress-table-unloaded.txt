@@ -2,31 +2,33 @@ admit site vm of f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 as paisans-f2a9 on fake (u
 
 step 1: claim the host
 step 2: create /etc/paisans
-step 3: record what admit installs
-step 4: skip the mesh until its conf exists
-step 5: start paisans-f2a9's manager after the mesh
-step 6: delegate cgroups to users
+step 3: record the sysctls' values before
+step 4: record what admit installs
+step 5: skip the mesh until its conf exists
+step 6: start paisans-f2a9's manager after the mesh
+step 7: delegate cgroups to users
 
-step 7: load the egress table
+step 8: load the egress table
   egress: load paisans_f2a9 now
   run:
     $ systemctl start paisans-f2a9-egress.service && nft -f /etc/paisans/egress.f2a9.nft
 
-step 8: load br_netfilter
-step 9: load br_netfilter at boot
-step 10: write paisans-f2a9's daemon.json
-step 11: install paisans-f2a9's rootless Docker
-step 12: create /srv/paisans
-step 13: create /srv/paisans/f2a9
-step 14: create /etc/wireguard
-step 15: create /usr/local/libexec/paisans
-step 16: install the WireGuard helper
-step 17: install the helper's sudoers line
-step 18: allow 22/tcp
-step 19: allow 51820/udp
-step 20: allow all inbound on psns-f2a9
-step 21: write the admission record
-step 22: add the operators' keys
+step 9: load br_netfilter
+step 10: load br_netfilter at boot
+step 11: write paisans-f2a9's daemon.json
+step 12: install paisans-f2a9's rootless Docker
+step 13: create /srv/paisans
+step 14: create /srv/paisans/f2a9
+step 15: create /etc/wireguard
+step 16: create /usr/local/libexec/paisans
+step 17: install the WireGuard helper
+step 18: install the helper's sudoers line
+step 19: allow 22/tcp
+step 20: allow 51820/udp
+step 21: allow all inbound on psns-f2a9
+step 22: set the host's sysctls
+step 23: write the admission record
+step 24: add the operators' keys
 
 present: swap: on
 present: docker: Engine 29.9.1
@@ -48,6 +50,7 @@ present: br_netfilter: nf_tables, which the host's iptables uses, is loaded
 present: daemon: /home/paisans-f2a9 (ext2/ext3) has 42.9 GB free
 present: mesh: nothing on this host overlaps 10.44.0.0/24
 present: firewall: ufw active, its default policy left to the owner
-present: forwarding: not needed, this site has no endpoint
 warning: delegation reaches paisans-f2a9's manager at its next start
   Its manager is running, and restarting it would restart its Docker daemon and every container in it, so admit does not. cpuset and io limits apply after the host's next reboot.
+warning: forwarding: this turns on routing between every interface on this host
+  The site has an endpoint, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's forward policy governs what is routed.

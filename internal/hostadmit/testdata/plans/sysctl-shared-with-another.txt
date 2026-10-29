@@ -38,13 +38,13 @@ step 23: write the admission record
     |     "watchdog": false,
     |     "public_ports": false
     |   },
-    |   "forwarding": false,
+    |   "forwarding": true,
     |   "ports": {
     |     "ssh": 22,
     |     "wireguard": 51820,
     |     "public": []
     |   },
-    |   "digest": "z7qj-2zby-gnjs-6h5z",
+    |   "digest": "6j8a-491f-hdde-4j6d",
     |   "admitted_at": "2026-10-15T12:00:00Z",
     |   "data_dir": "",
     |   "bridge_netfilter": false,
@@ -82,3 +82,5 @@ present: sysctls: low ports kept for deployment 0c0dc4e1-0b7d-4c3a-9e2f-5a6b7c8d
 present: sysctls: forwarding kept for deployment 0c0dc4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
 warning: delegation reaches paisans-f2a9's manager at its next start
   Its manager is running, and restarting it would restart its Docker daemon and every container in it, so admit does not. cpuset and io limits apply after the host's next reboot.
+warning: forwarding: this turns on routing between every interface on this host
+  The site has an endpoint, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's forward policy governs what is routed.

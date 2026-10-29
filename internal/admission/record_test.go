@@ -110,6 +110,11 @@ func TestNewRecord(t *testing.T) {
 	if store := admission.NewRecord(build(t, "store"), admission.Grants{}, "", at); store.Forwarding || store.Ports.WireGuard != 0 {
 		t.Errorf("store: %+v", store)
 	}
+	// Dialled on its public_address alone, the witness is a relay as the
+	// WireGuard render makes it one, so it forwards.
+	if vm := admission.NewRecord(build(t, "vm"), admission.Grants{}, "", at); !vm.Forwarding {
+		t.Errorf("vm: dialled on its public_address and not forwarding: %+v", vm)
+	}
 }
 
 // Read reads /etc/paisans/admitted.<token>.json through the transport it is
@@ -399,6 +404,22 @@ func TestDifferences(t *testing.T) {
 	}
 	if d := rec.Differences(cfg, "home-b"); len(d) == 0 || !strings.Contains(d[0], "admitted as site home-a") {
 		t.Errorf("another site's record: %q", d)
+	}
+}
+
+// A site dialled on its public_address alone relays the mesh, so a record
+// that admitted it without forwarding differs: its peers route each other
+// through it, and it drops what they route.
+func TestDifferencesForwardingOnAPublicAddress(t *testing.T) {
+	cfg := fixture(t)
+	rec := admission.NewRecord(build(t, "vm"), admission.Grants{}, "", at)
+	if d := rec.Differences(cfg, "vm"); len(d) != 0 {
+		t.Fatalf("an exact admission differs: %v", d)
+	}
+	rec.Forwarding = false
+	want := "forwarding is off on the host, and the site has an endpoint, which relays the mesh"
+	if d := rec.Differences(cfg, "vm"); len(d) != 1 || d[0] != want {
+		t.Errorf("differences %q, want [%q]", d, want)
 	}
 }
 

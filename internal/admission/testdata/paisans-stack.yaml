@@ -40,7 +40,7 @@ sites:
       port: 2222
       keys: [bob]
   # the witness, dialled on its public address with no endpoint: a
-  # WireGuard port, no forwarding, no grant.
+  # WireGuard port and forwarding, since it relays, and no grant.
   vm:
     roles: [witness]
     address: 10.44.0.3

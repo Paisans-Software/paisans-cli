@@ -488,7 +488,7 @@ func (r Record) Differences(cfg *config.Config, site string) []string {
 	if r.MeshSubnet != cfg.Mesh.Subnet {
 		out = append(out, fmt.Sprintf("the host admitted mesh subnet %s, and mesh.subnet is %s", r.MeshSubnet, cfg.Mesh.Subnet))
 	}
-	if want := s.Endpoint != ""; r.Forwarding != want {
+	if want := s.DialEndpoint() != ""; r.Forwarding != want {
 		out = append(out, fmt.Sprintf("forwarding is %s on the host, and the site %s an endpoint, which relays the mesh", onOff(r.Forwarding), map[bool]string{true: "has", false: "has no"}[want]))
 	}
 	for _, g := range Needs(s).Missing(r.Grants) {
