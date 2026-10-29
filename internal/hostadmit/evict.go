@@ -597,7 +597,11 @@ func (e *evictor) firewall() error {
 	}
 	for _, st := range s.Steps {
 		if st.Label == "remove" {
-			e.remove(st.Title, "delete `"+strings.TrimPrefix(st.Command, "ufw delete ")+"`, which site admit added for the deployment", st.Command)
+			rule := strings.TrimPrefix(st.Command, "ufw delete ")
+			if route, ok := strings.CutPrefix(st.Command, "ufw route delete "); ok {
+				rule = "route " + route
+			}
+			e.remove(st.Title, "delete `"+rule+"`, which site admit added for the deployment", st.Command)
 		}
 	}
 	for _, w := range s.Warnings {

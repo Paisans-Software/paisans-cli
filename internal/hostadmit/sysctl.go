@@ -244,7 +244,7 @@ func planSysctls(p *planner) error {
 		p.warn("public ports: every local user on this host may bind ports 80 to 1023", keyLowPorts+" = 80 is host wide: no user's process needs root for a port from 80 up, the deployment's Caddy among them.")
 	}
 	if p.in.Request.Endpoint {
-		p.warn("forwarding: this turns on routing between every interface on this host", "The site has an endpoint, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's forward policy governs what is routed.")
+		p.warn("forwarding: this turns on routing between every interface on this host", "Other sites dial this one, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's route rule relays the mesh, and its forward policy governs every other route.")
 	} else if len(st.fwdFor) == 0 {
 		p.present("forwarding: not needed, this site has no endpoint")
 	}

@@ -34,8 +34,10 @@ type Request struct {
 	ListenPort int    `yaml:"listen_port"`
 	MeshSubnet string `yaml:"mesh_subnet"`
 	Address    string `yaml:"address"`
-	// Endpoint is whether the site has one, so admit plans forwarding: such
-	// a site relays mesh traffic between sites that have none.
+	// Endpoint is whether other sites dial it (config.Site.DialEndpoint: its
+	// public_address, or the endpoint it writes), so admit plans forwarding:
+	// such a site relays mesh traffic between sites that have none, as the
+	// WireGuard render routes it.
 	Endpoint bool   `yaml:"endpoint"`
 	Grants   Grants `yaml:"grants"`
 	// WebServer is each app the owner's web server is handed, for a site
@@ -80,7 +82,7 @@ func Build(cfg *config.Config, site string) (Request, error) {
 		ListenPort: s.ListenPort(),
 		MeshSubnet: cfg.Mesh.Subnet,
 		Address:    s.Address,
-		Endpoint:   s.Endpoint != "",
+		Endpoint:   s.DialEndpoint() != "",
 		Grants:     Needs(s),
 		WebServer:  []WebApp{},
 		Operators:  []Operator{},

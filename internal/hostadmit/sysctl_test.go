@@ -91,9 +91,9 @@ func TestSysctlBeforeFileMustHoldNumbers(t *testing.T) {
 }
 
 // A record admit cannot read turns nothing on: a request needing neither
-// grant changes nothing, and the warning names the record.
+// grant nor forwarding changes nothing, and the warning names the record.
 func TestUnreadableRecordTurnsNothingOn(t *testing.T) {
-	plan, err := hostadmit.Build(withUnreadable(home()), input(t, "vm", hostadmit.Flags{}))
+	plan, err := hostadmit.Build(withUnreadable(home()), input(t, "store", hostadmit.Flags{}))
 	if err != nil {
 		t.Fatal(err)
 	}

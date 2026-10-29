@@ -43,6 +43,9 @@ func ownerTag(d deployment.Deployment) string { return d.Prefix() + ":" }
 
 // ufwSpec is a rule as ufw prints it back, without the comment.
 func ufwSpec(r Rule) string {
+	if r.Route {
+		return fmt.Sprintf("route allow in on %s out on %s", r.Interface, r.Interface)
+	}
 	if r.Interface != "" && r.To != "" {
 		return fmt.Sprintf("allow in on %s to %s port %d proto %s", r.Interface, r.To, r.Port, r.Proto)
 	}
@@ -64,6 +67,7 @@ type addedRule struct {
 	action  string // "allow", "deny", "limit", "reject", with "log"/"log-all"
 	key     string // everything else: what ufw matches rules on
 	comment string
+	route   bool // a `ufw route` rule, which governs forwarded traffic
 }
 
 func (a addedRule) owned(tag string) bool { return strings.HasPrefix(a.comment, tag+" ") }
@@ -74,8 +78,7 @@ var commentSuffix = regexp.MustCompile(`^(.*) comment '([^']*)'$`)
 
 func parseAdded(line string) (addedRule, bool) {
 	line = strings.TrimSpace(line)
-	// Route rules govern forwarded traffic, which nothing here manages.
-	if line == "" || strings.HasPrefix(line, "route ") {
+	if line == "" {
 		return addedRule{}, false
 	}
 	a := addedRule{line: line}
@@ -83,8 +86,30 @@ func parseAdded(line string) (addedRule, bool) {
 	if m := commentSuffix.FindStringSubmatch(line); m != nil {
 		body, a.comment = m[1], m[2]
 	}
-	a.action, a.key = splitAction(body)
+	a.action, a.key, a.route = splitRule(body)
 	return a, true
+}
+
+// splitRule is splitAction for a rule that may be a `ufw route` rule, which
+// governs forwarded traffic. A route rule's key keeps the word, so it never
+// matches the inbound rule of the same interface.
+func splitRule(spec string) (action, key string, route bool) {
+	rest, route := strings.CutPrefix(spec, "route ")
+	action, key = splitAction(rest)
+	if route {
+		key = "route " + key
+	}
+	return action, key, route
+}
+
+// deleteCommand is the ufw command that removes a, exactly as ufw printed
+// it. A route rule is deleted with `ufw route delete`: ufw refuses
+// `ufw delete route`.
+func deleteCommand(a addedRule) string {
+	if a.route {
+		return "ufw route delete " + strings.TrimPrefix(a.line, "route ")
+	}
+	return "ufw delete " + a.line
 }
 
 // splitAction separates the action and log type from the rest of a rule. The
@@ -169,7 +194,7 @@ func planRules(tag string, rules []Rule, added []addedRule) (out Section, remova
 		if strings.Contains(r.Why, "'") {
 			return out, nil, fmt.Errorf("the reason for %s contains a single quote, which ufw refuses in a comment", r)
 		}
-		action, key := splitAction(ufwSpec(r))
+		action, key, _ := splitRule(ufwSpec(r))
 		derived[key] = true
 		a, found := byKey[key]
 		switch {
@@ -248,7 +273,7 @@ func planRules(tag string, rules []Rule, added []addedRule) (out Section, remova
 			Label:    "remove",
 			Title:    "remove ufw rule " + a.key,
 			Describe: fmt.Sprintf("firewall: delete `ufw %s`, which site admit added and this site's roles and configuration no longer give", a.line),
-			Command:  "ufw delete " + a.line,
+			Command:  deleteCommand(a),
 		})
 	}
 	return out, removals, nil

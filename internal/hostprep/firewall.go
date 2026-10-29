@@ -14,6 +14,11 @@ type Rule struct {
 	// To narrows an interface rule to one destination address and Port, for
 	// traffic that should reach one service and nothing else.
 	To string
+	// Route makes an interface rule govern forwarded traffic instead of
+	// inbound: traffic in on Interface and routed back out of it, which is
+	// how a relay passes mesh traffic between two sites that cannot dial
+	// each other.
+	Route bool
 	// Why is printed beside the rule in the plan.
 	Why string
 	// SSH marks the allow for the site's ssh.port. It is the one rule never
@@ -28,6 +33,9 @@ type Rule struct {
 const sshWhy = "ssh, the bootstrap route"
 
 func (r Rule) String() string {
+	if r.Route {
+		return "routed from " + r.Interface + " back out " + r.Interface
+	}
 	if r.Interface != "" && r.To != "" {
 		return fmt.Sprintf("%d/%s on %s to %s", r.Port, r.Proto, r.Interface, r.To)
 	}

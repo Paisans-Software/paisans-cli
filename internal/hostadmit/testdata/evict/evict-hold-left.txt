@@ -70,7 +70,12 @@ step 14: remove ufw rule in on psns-f2a9
   run:
     $ ufw delete allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'
 
-step 15: put back /usr/sbin/policy-rc.d
+step 15: remove ufw rule route in on psns-f2a9 out on psns-f2a9
+  evict: delete `route allow in on psns-f2a9 out on psns-f2a9 comment 'paisans-f2a9: the mesh, relayed between sites that cannot dial each other'`, which site admit added for the deployment
+  run:
+    $ ufw route delete allow in on psns-f2a9 out on psns-f2a9 comment 'paisans-f2a9: the mesh, relayed between sites that cannot dial each other'
+
+step 16: put back /usr/sbin/policy-rc.d
   evict: an admit that stopped while it installed Docker left its hold on Docker's daemons; your own policy-rc.d, if you had one, goes back, and what that install claimed is recorded as installed
   run:
     $ set -e
@@ -118,22 +123,27 @@ step 15: put back /usr/sbin/policy-rc.d
     $ release_docker_hold
     $ if [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ]; then echo '/usr/sbin/policy-rc.d.paisans-owner, a copy of your policy-rc.d admit made while it installed Docker, differs from the /usr/sbin/policy-rc.d there now. Keep the one you want as /usr/sbin/policy-rc.d, remove the other, and run again'; exit 1; fi
 
-step 16: remove the admission record
+step 17: remove the host's paisans sysctls
+  evict: no admitted deployment needs them; set each back to what it was before admit
+  run:
+    $ sysctl -w net.ipv4.ip_forward=0 >/dev/null && rm -f /etc/sysctl.d/60-paisans.conf /etc/paisans/sysctl.before
+
+step 18: remove the admission record
   evict: /etc/paisans/admitted.f2a9.json
   run:
     $ rm -f /etc/paisans/admitted.f2a9.json
 
-step 17: remove /srv/paisans
+step 19: remove /srv/paisans
   evict: it holds nothing once this deployment's files are gone
   run:
     $ rmdir /srv/paisans
 
-step 18: remove /usr/local/libexec/paisans
+step 20: remove /usr/local/libexec/paisans
   evict: it holds nothing once this deployment's files are gone
   run:
     $ rmdir /usr/local/libexec/paisans
 
-step 19: remove the registry entry
+step 21: remove the registry entry
   evict: deployment f2a9 from /var/lib/paisans/registry.json
   run:
     $ set -e; umask 077; [ -f /var/lib/paisans/registry.json ] || exit 0; exec 9>>/var/lib/paisans/registry.lock; flock -w 60 9 || { echo 'paisans: another command holds /var/lib/paisans/registry.lock'; exit 1; }; tmp=$(mktemp /var/lib/paisans/.registry.XXXXXX); trap 'rm -f "$tmp"' EXIT; awk '-v' 'id=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01' '-v' 'header={"version":1,"deployments":{' '-v' 'footer=}}' '-v' 'unreadable=paisans-registry-unreadable' '

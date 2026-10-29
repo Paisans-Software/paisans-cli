@@ -70,42 +70,52 @@ step 14: remove ufw rule in on psns-f2a9
   run:
     $ ufw delete allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'
 
-step 15: remove /etc/systemd/system/user@.service.d/delegate.conf
+step 15: remove ufw rule route in on psns-f2a9 out on psns-f2a9
+  evict: delete `route allow in on psns-f2a9 out on psns-f2a9 comment 'paisans-f2a9: the mesh, relayed between sites that cannot dial each other'`, which site admit added for the deployment
+  run:
+    $ ufw route delete allow in on psns-f2a9 out on psns-f2a9 comment 'paisans-f2a9: the mesh, relayed between sites that cannot dial each other'
+
+step 16: remove /etc/systemd/system/user@.service.d/delegate.conf
   evict: no other deployment is admitted; and its directory, which admit created, once empty
   run:
     $ rm -f /etc/systemd/system/user@.service.d/delegate.conf && rmdir --ignore-fail-on-non-empty /etc/systemd/system/user@.service.d && systemctl daemon-reload
 
-step 16: remove /etc/modules-load.d/paisans.conf
+step 17: remove /etc/modules-load.d/paisans.conf
   evict: no other deployment is admitted; br_netfilter stays loaded until the next boot
   run:
     $ rm -f /etc/modules-load.d/paisans.conf
 
-step 17: remove /etc/paisans/installed
+step 18: remove the host's paisans sysctls
+  evict: no admitted deployment needs them; set each back to what it was before admit
+  run:
+    $ sysctl -w net.ipv4.ip_forward=0 >/dev/null && rm -f /etc/sysctl.d/60-paisans.conf /etc/paisans/sysctl.before
+
+step 19: remove /etc/paisans/installed
   evict: the list of what admit created here
   run:
     $ rm -f /etc/paisans/installed
 
-step 18: remove the admission record
+step 20: remove the admission record
   evict: /etc/paisans/admitted.f2a9.json
   run:
     $ rm -f /etc/paisans/admitted.f2a9.json
 
-step 19: remove /etc/paisans
+step 21: remove /etc/paisans
   evict: it holds nothing once this deployment's files are gone
   run:
     $ rmdir /etc/paisans
 
-step 20: remove /srv/paisans
+step 22: remove /srv/paisans
   evict: it holds nothing once this deployment's files are gone
   run:
     $ rmdir /srv/paisans
 
-step 21: remove /usr/local/libexec/paisans
+step 23: remove /usr/local/libexec/paisans
   evict: it holds nothing once this deployment's files are gone
   run:
     $ rmdir /usr/local/libexec/paisans
 
-step 22: remove the registry entry
+step 24: remove the registry entry
   evict: deployment f2a9 from /var/lib/paisans/registry.json
   run:
     $ set -e; umask 077; [ -f /var/lib/paisans/registry.json ] || exit 0; exec 9>>/var/lib/paisans/registry.lock; flock -w 60 9 || { echo 'paisans: another command holds /var/lib/paisans/registry.lock'; exit 1; }; tmp=$(mktemp /var/lib/paisans/.registry.XXXXXX); trap 'rm -f "$tmp"' EXIT; awk '-v' 'id=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01' '-v' 'header={"version":1,"deployments":{' '-v' 'footer=}}' '-v' 'unreadable=paisans-registry-unreadable' '

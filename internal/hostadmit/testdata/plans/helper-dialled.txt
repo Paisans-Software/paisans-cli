@@ -701,27 +701,32 @@ step 23: allow all inbound on psns-f2a9
   run:
     $ ufw allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'
 
-step 24: allow 80/tcp
+step 24: allow routed from psns-f2a9 back out psns-f2a9
+  firewall: allow routed from psns-f2a9 back out psns-f2a9 (the mesh, relayed between sites that cannot dial each other)
+  run:
+    $ ufw route allow in on psns-f2a9 out on psns-f2a9 comment 'paisans-f2a9: the mesh, relayed between sites that cannot dial each other'
+
+step 25: allow 80/tcp
   firewall: allow 80/tcp (public ports, HTTP)
   run:
     $ ufw allow 80/tcp comment 'paisans-f2a9: public ports, HTTP'
 
-step 25: allow 443/tcp
+step 26: allow 443/tcp
   firewall: allow 443/tcp (public ports, HTTPS)
   run:
     $ ufw allow 443/tcp comment 'paisans-f2a9: public ports, HTTPS'
 
-step 26: allow 443/udp
+step 27: allow 443/udp
   firewall: allow 443/udp (public ports, HTTP/3)
   run:
     $ ufw allow 443/udp comment 'paisans-f2a9: public ports, HTTP/3'
 
-step 27: load softdog
+step 28: load softdog
   watchdog: load softdog now
   run:
     $ modprobe softdog
 
-step 28: load softdog at boot
+step 29: load softdog at boot
   watchdog: load softdog at every boot (paisans-f2a9-watchdog.service)
   write /etc/systemd/system/paisans-f2a9-watchdog.service mode 0644:
     | # Written by paisans site admit. Loads softdog at boot, before
@@ -746,7 +751,7 @@ step 28: load softdog at boot
   run:
     $ systemctl daemon-reload && systemctl enable paisans-f2a9-watchdog.service
 
-step 29: give the watchdog to paisans-f2a9
+step 30: give the watchdog to paisans-f2a9
   watchdog: /etc/udev/rules.d/60-paisans-f2a9-watchdog.rules makes /dev/watchdog and /dev/watchdog0 paisans-f2a9's, owner and group, mode 600
   write /etc/udev/rules.d/60-paisans-f2a9-watchdog.rules mode 0644:
     | # Written by paisans site admit: the watchdog is paisans-f2a9's, for its
@@ -755,7 +760,7 @@ step 29: give the watchdog to paisans-f2a9
   run:
     $ udevadm control --reload && udevadm trigger --subsystem-match=watchdog --subsystem-match=misc
 
-step 30: set the host's sysctls
+step 31: set the host's sysctls
   sysctls: /etc/sysctl.d/60-paisans.conf, applied with sysctl --system, which applies every sysctl file on the host again, then each key checked, since a file read after it could set one back
   write /etc/sysctl.d/60-paisans.conf mode 0644:
     | # Written by paisans site admit, for every admitted deployment that needs
@@ -765,7 +770,7 @@ step 30: set the host's sysctls
   run:
     $ sysctl --system >/dev/null && { [ "$(sysctl -n net.ipv4.ip_unprivileged_port_start)" = 80 ] || { echo 'net.ipv4.ip_unprivileged_port_start is not 80 after sysctl --system: a file read after /etc/sysctl.d/60-paisans.conf sets it'; exit 1; }; } && { [ "$(sysctl -n net.ipv4.ip_forward)" = 1 ] || { echo 'net.ipv4.ip_forward is not 1 after sysctl --system: a file read after /etc/sysctl.d/60-paisans.conf sets it'; exit 1; }; }
 
-step 31: write the admission record
+step 32: write the admission record
   record: who the deployment runs as and what you granted, which its own commands read
   write /etc/paisans/admitted.f2a9.json mode 0644:
     | {
@@ -804,7 +809,7 @@ step 31: write the admission record
     |   "toolkit_modified": false
     | }
 
-step 32: add the operators' keys
+step 33: add the operators' keys
   keys: 3 operator keys into paisans-f2a9's authorized_keys, written as paisans-f2a9, and recorded in /srv/paisans/f2a9/.paisans/authorized_keys.owned for site prepare
   run:
     $ runuser -u paisans-f2a9 -- env -i HOME='/home/paisans-f2a9' PATH=/usr/bin:/bin:/usr/sbin:/sbin XDG_RUNTIME_DIR=/run/user/1001 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus DOCKER_HOST=unix:///run/user/1001/docker.sock sh -c 'umask 077; if [ -L '\''/srv/paisans/f2a9/.paisans'\'' ]; then echo '\''paisans: the state directory is a link, so the keys is not written'\''; exit 1; fi; [ -d '\''/srv/paisans/f2a9/.paisans'\'' ] || install -d -m 700 '\''/srv/paisans/f2a9/.paisans'\''; exec 9>>'\''/srv/paisans/f2a9/.paisans/lock'\''; flock -w 60 9 || { echo '\''paisans: another command holds the deployment lock'\''; exit 1; }; set -e; umask 077; mkdir -p "$HOME/.ssh"; chmod go-w "$HOME/.ssh"
@@ -854,4 +859,4 @@ warning: watchdog: paisans-f2a9's Patroni can reboot this machine
 warning: public ports: every local user on this host may bind ports 80 to 1023
   net.ipv4.ip_unprivileged_port_start = 80 is host wide: no user's process needs root for a port from 80 up, the deployment's Caddy among them.
 warning: forwarding: this turns on routing between every interface on this host
-  The site has an endpoint, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's forward policy governs what is routed.
+  Other sites dial this one, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's route rule relays the mesh, and its forward policy governs every other route.

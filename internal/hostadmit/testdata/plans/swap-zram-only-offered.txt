@@ -34,9 +34,12 @@ present: wireguard: /etc/sudoers.d/paisans-f2a9 lets paisans-f2a9 run the helper
 present: firewall: 22/tcp allowed
 present: firewall: 51820/udp allowed
 present: firewall: all inbound on psns-f2a9 allowed
+present: firewall: routed from psns-f2a9 back out psns-f2a9 allowed
 present: firewall: ufw active, its default policy left to the owner
-present: forwarding: not needed, this site has no endpoint
+present: sysctls: /etc/sysctl.d/60-paisans.conf as written and applied
 present: record: /etc/paisans/admitted.f2a9.json as admitted at 2026-10-15T12:00:00Z
 present: keys: every operator's key is in paisans-f2a9's authorized_keys
 warning: swap: only zram on this host; --swapfile makes a swapfile of 8 GiB
   Without swap, a host that runs short of memory has the kernel kill a process, which may be the database, instead of slowing down. zram swap compresses what it holds into RAM, so it stretches the host's memory rather than adding to it. --swapfile makes it at /swapfile, twice the host's RAM up to 16 GiB, and admit asks at a terminal with --execute.
+warning: forwarding: this turns on routing between every interface on this host
+  Other sites dial this one, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's route rule relays the mesh, and its forward policy governs every other route.
