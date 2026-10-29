@@ -147,6 +147,12 @@ func TestEngagementWithoutMbinRendersEmpty(t *testing.T) {
 			t.Errorf("%s=%s with no Mbin app, want empty", key, got)
 		}
 	}
+	// No forum, so no agent client and the Mbin welcomes stay off.
+	for _, key := range []string{"ENGAGEMENT_MBIN_API_URL=", "ENGAGEMENT_MBIN_AGENT_CLIENT_ID=", "ENGAGEMENT_MBIN_AGENT_CLIENT_SECRET="} {
+		if strings.Contains(env, key) {
+			t.Errorf("the .env with no Mbin app renders %s", key)
+		}
+	}
 }
 
 // The fixture's digest links to its one homeserver, chat on vm, whose
@@ -212,8 +218,9 @@ func TestEngagementWithoutHomeserverRendersNoMatrix(t *testing.T) {
 	delete(cfg.Apps, "chat")
 	delete(cfg.Apps, "web")
 	env, _ := digestAndTalkEnv(t, cfg)
-	// The linked render with its Matrix block taken out, the block's comment
-	// and every ENGAGEMENT_MATRIX_ and ENGAGEMENT_MAS_ line, is the unlinked
+	// The linked render with its Matrix block taken out, the block's comments
+	// and every ENGAGEMENT_MATRIX_, ENGAGEMENT_MAS_ and
+	// ENGAGEMENT_COMMUNITY_ROOM_ line, is the unlinked
 	// render byte for byte.
 	lines := strings.Split(with, "\n")
 	start := slices.Index(lines, "# The homeserver the bot runs on, and the MAS admin client it looks")
@@ -221,7 +228,7 @@ func TestEngagementWithoutHomeserverRendersNoMatrix(t *testing.T) {
 		t.Fatalf("the linked .env has no Matrix block:\n%s", with)
 	}
 	end := start
-	for end < len(lines) && (strings.HasPrefix(lines[end], "#") || strings.HasPrefix(lines[end], "ENGAGEMENT_MATRIX_") || strings.HasPrefix(lines[end], "ENGAGEMENT_MAS_")) {
+	for end < len(lines) && (strings.HasPrefix(lines[end], "#") || strings.HasPrefix(lines[end], "ENGAGEMENT_MATRIX_") || strings.HasPrefix(lines[end], "ENGAGEMENT_MAS_") || strings.HasPrefix(lines[end], "ENGAGEMENT_COMMUNITY_ROOM_")) {
 		end++
 	}
 	want := strings.Join(slices.Delete(lines, start, end), "\n")
@@ -248,5 +255,55 @@ func TestEngagementRedirectsHome(t *testing.T) {
 	snippet = planFiles(plan)["vm/srv/paisans/f2a9/infra/caddy/etc/snippets/digest.caddy"]
 	if !strings.Contains(snippet, "redir https://example.org 302") {
 		t.Errorf("with no account app, digest.caddy does not redirect to the community's domain:\n%s", snippet)
+	}
+}
+
+// The welcome loop's variables: the forum's API on the mesh and the agent
+// client, the community room, the daily limit and the operators.
+func TestEngagementWelcomeEnv(t *testing.T) {
+	env := planFiles(build(t))[digestEnvA]
+	for key, want := range map[string]string{
+		"ENGAGEMENT_MBIN_AGENT_CLIENT_ID":     "engagement-agent",
+		"ENGAGEMENT_MBIN_AGENT_CLIENT_SECRET": "fixture-not-a-secret-digest-mbin-agent",
+		"ENGAGEMENT_COMMUNITY_ROOM_NAME":      "Fixture Community",
+		"ENGAGEMENT_COMMUNITY_ROOM_ALIAS":     "fixture-community",
+		"ENGAGEMENT_WELCOME_DAILY_LIMIT":      "50",
+		"ENGAGEMENT_OPERATOR_EMAILS":          "alice@example.org,bob@example.org",
+	} {
+		if got := envValue(env, key); got != want {
+			t.Errorf("%s=%s, want %s", key, got, want)
+		}
+	}
+	if got := envValue(env, "ENGAGEMENT_MBIN_API_URL"); !regexp.MustCompile(`^http://10\.44\.0\.\d+:8080$`).MatchString(got) {
+		t.Errorf("ENGAGEMENT_MBIN_API_URL=%s, want Mbin's mesh address on 8080", got)
+	}
+}
+
+func TestEngagementWelcomeSettings(t *testing.T) {
+	cfg := fixture(t)
+	app := cfg.Apps["digest"]
+	app.Settings = map[string]any{"community_room_name": "Riverside Hall", "welcome_email_daily_limit": 12}
+	cfg.Apps["digest"] = app
+	digest, _ := digestAndTalkEnv(t, cfg)
+	for key, want := range map[string]string{
+		"ENGAGEMENT_COMMUNITY_ROOM_NAME":  "Riverside Hall",
+		"ENGAGEMENT_COMMUNITY_ROOM_ALIAS": "riverside-hall",
+		"ENGAGEMENT_WELCOME_DAILY_LIMIT":  "12",
+	} {
+		if got := envValue(digest, key); got != want {
+			t.Errorf("%s=%s, want %s", key, got, want)
+		}
+	}
+}
+
+// Without a community name the room is named for what the digest calls the
+// community: Mbin's meta title.
+func TestEngagementRoomWithoutCommunityName(t *testing.T) {
+	cfg := fixture(t)
+	cfg.Community.Name = ""
+	digest, _ := digestAndTalkEnv(t, cfg)
+	meta := envValue(digest, "ENGAGEMENT_META_TITLE")
+	if got, want := envValue(digest, "ENGAGEMENT_COMMUNITY_ROOM_NAME"), render.CommunityRoomName(meta); got != want {
+		t.Errorf("ENGAGEMENT_COMMUNITY_ROOM_NAME=%s, want %s", got, want)
 	}
 }

@@ -8,11 +8,13 @@ import (
 )
 
 // Consumer is one app linked to this one by a role its blueprint provides:
-// the app's name, and each of its shared_secrets for that role that is set,
-// keyed by the secret's name.
+// the app's name, each of its shared_secrets for that role that is set,
+// keyed by the secret's name, and the values it shows its providers
+// (consumerValues).
 type Consumer struct {
 	Name    string
 	Secrets map[string]string
+	Values  map[string]string
 }
 
 // linkValues fills v's links, linkedTo and consumers: where each role the
@@ -43,7 +45,7 @@ func (p *planner) linkValues(v *appValues) error {
 		}
 		consumers := []Consumer{}
 		for _, name := range blueprints.ConsumersOf(p.cfg, v.App.Name, role) {
-			consumers = append(consumers, Consumer{Name: name, Secrets: p.sharedSecrets(name, role)})
+			consumers = append(consumers, Consumer{Name: name, Secrets: p.sharedSecrets(name, role), Values: p.consumerValues(name)})
 		}
 		v.consumers[role] = consumers
 	}

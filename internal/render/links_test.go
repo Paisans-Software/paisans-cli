@@ -81,12 +81,36 @@ func TestConsumersCarryTheSharedSecret(t *testing.T) {
 		t.Fatalf(`Consumers("matrix-homeserver"): %v`, err)
 	}
 	want := []Consumer{
-		{Name: "digest", Secrets: map[string]string{"mas_admin_client_secret": "fixture-not-a-secret-digest-mas-admin"}},
-		{Name: "notify", Secrets: map[string]string{"mas_admin_client_secret": "fixture-not-a-secret-notify-mas-admin"}},
-		{Name: "web", Secrets: map[string]string{}},
+		{Name: "digest", Secrets: map[string]string{"mas_admin_client_secret": "fixture-not-a-secret-digest-mas-admin"}, Values: digestValues},
+		{Name: "notify", Secrets: map[string]string{"mas_admin_client_secret": "fixture-not-a-secret-notify-mas-admin"}, Values: map[string]string{}},
+		{Name: "web", Secrets: map[string]string{}, Values: map[string]string{}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf(`Consumers("matrix-homeserver") = %#v, want %#v`, got, want)
+	}
+}
+
+// digestValues is what the fixture's engagement app shows its providers.
+var digestValues = map[string]string{
+	"community_room_alias": "fixture-community",
+	"mbin_agent_client_id": "engagement-agent",
+	"mbin_agent_username":  "community-bot",
+}
+
+// The forum sees the engagement app with the Mbin agent client's secret,
+// which the mbin app declares the client with.
+func TestForumConsumersCarryTheMbinSecret(t *testing.T) {
+	cfg, secrets := linksFixture(t)
+	v := valuesOf(t, cfg, secrets, "talk")
+	got, err := v.Consumers("forum")
+	if err != nil {
+		t.Fatalf(`Consumers("forum"): %v`, err)
+	}
+	want := []Consumer{
+		{Name: "digest", Secrets: map[string]string{"mbin_agent_client_secret": "fixture-not-a-secret-digest-mbin-agent"}, Values: digestValues},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf(`Consumers("forum") = %#v, want %#v`, got, want)
 	}
 }
 
