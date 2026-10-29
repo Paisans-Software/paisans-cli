@@ -1625,6 +1625,10 @@ images it superseded* in `README.md`).
   ready site before its gather and holds it to its end; another command's live
   lease refuses it, and `--break-lease` takes one over after the word `break`
   (see *One command changes a deployment at a time* in `README.md`).
+* **Newer paisans:** a site a newer release last applied refuses the run
+  before anything changes, and again under the lease, naming the release to
+  upgrade to (see *A site a newer paisans applied is left to it* in
+  `README.md`). Every other command that changes a site does the same.
 * **Stopped after the publish:** the stop says the revision is published and
   not applied on every site, and names `deployment log`, which shows what each
   site runs (see *A published version is not a deployed one* in `README.md`).

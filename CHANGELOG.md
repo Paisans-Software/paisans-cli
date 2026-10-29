@@ -12,6 +12,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Added
 
+- Every command that changes sites, not only `deployment apply` and `deployment publish`, holds the deployment lease on them with `--execute`, and checks for a newer paisans under it.
 - `deployment apply`, `deployment publish` and every other command that changes a site refuse, before changing anything, when a newer paisans release last applied any of its sites, naming each and the release to upgrade to.
 - `site admit` refuses a host any deployment of which a newer paisans claimed, as `site evict` already does.
 

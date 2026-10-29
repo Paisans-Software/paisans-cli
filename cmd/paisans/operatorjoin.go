@@ -166,7 +166,7 @@ func joinInvite(r ui.Reporter, d draft.Draft, invite operatorinvite.Invite, exec
 	if err != nil {
 		return done(err)
 	}
-	return done(attest(staged, sys, cfg, invite.Key, invite.Root, execute, ans, stdin, stdout))
+	return done(attest(staged, sys, cfg, invite.Key, invite.Root, execute, false, ans, stdin, stdout))
 }
 
 // notAppliedProblem is a join refused because the inviter's acceptance has

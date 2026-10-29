@@ -53,8 +53,11 @@ type leaseOptions struct {
 
 // breakLeaseFlag adds --break-lease to fs.
 func breakLeaseFlag(fs *flag.FlagSet) *bool {
-	return fs.Bool("break-lease", false, "take over the deployment lease another command holds, once you know it is no longer running; asks for the word "+breakWord)
+	return fs.Bool("break-lease", false, breakLeaseHelp)
 }
+
+// breakLeaseHelp is --break-lease's help.
+const breakLeaseHelp = "take over the deployment lease another command holds, once you know it is no longer running; asks for the word " + breakWord
 
 // takeLease takes the deployment's lease for command on every site in
 // names, before the command publishes or changes anything, and returns what
@@ -126,4 +129,4 @@ func sitesCovered(l *lease.Lease, names []string) map[string]bool {
 }
 
 // leaseTopic is the lease, as the help of each command that takes it says.
-var leaseTopic = "With --execute it first takes the deployment lease on every site it reaches and holds it to its end, renewing it every " + lease.Heartbeat.String() + ", so no other apply or publish changes the deployment while it runs. Another command's live lease refuses it, naming who holds it and since when; a lease not renewed for " + lease.TTL.String() + " has expired and is taken. --break-lease takes over a live one once you know its command is no longer running, and asks for the word " + breakWord + "; --yes types it. A dry run takes none."
+var leaseTopic = "With --execute it first takes the deployment lease on every site it reaches and holds it to its end, renewing it every " + lease.Heartbeat.String() + ", so no other command changes the deployment while it runs, and then refuses a site a newer paisans last applied. Another command's live lease refuses it, naming who holds it and since when; a lease not renewed for " + lease.TTL.String() + " has expired and is taken. --break-lease takes over a live one once you know its command is no longer running, and asks for the word " + breakWord + "; --yes types it. A dry run takes none."

@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
@@ -29,7 +30,13 @@ func runPrune(args []string) error {
 	site := fs.String("site", "", "the site to prune, by the name it has in the configuration")
 	destination := fs.String("ssh", "", "ssh destination, used verbatim in place of the site's ssh section (its user, host, port and keys are then ignored)")
 	execute := fs.Bool("execute", false, "actually remove the volumes marked remove")
+	breakLease := breakLeaseFlag(fs)
+	answers := yesFlag(fs)
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	ans, err := answers()
+	if err != nil {
 		return err
 	}
 	r := reporter()
@@ -60,9 +67,11 @@ func runPrune(args []string) error {
 	}
 	// Which volumes are dangling is this release's reading of their
 	// labels, so a newer one's volumes are not judged by it.
-	if err := refuseNewerToolkit(r, cfg, []string{*site}, func(string) apply.Transport { return transport }, "prune --site "+*site, false); err != nil {
+	release, err := guardSites(r, cfg, []string{*site}, func(string) apply.Transport { return transport }, "prune --site "+*site, guard{execute: *execute, lease: leaseOptions{breakLease: *breakLease, answers: ans, stdin: os.Stdin, stdout: os.Stdout}})
+	if err != nil {
 		return err
 	}
+	defer release()
 	plan, err := ui.Get(r, "read volumes", func() (*apply.VolumePrune, error) {
 		return apply.BuildVolumePrune(cfg.Deployment(), *site, transport)
 	})
