@@ -168,6 +168,16 @@ apps:
       # Only members of this group may sign in: the operators, who run the
       # machines it watches.
       admin_group: operators
+  stats:
+    blueprint: beszel
+    hostname: status.health.example.org
+    placement: { pinned: health }
+    # Server and container stats, on the monitor's machine. Every machine
+    # reports to it through an agent the toolkit declares.
+    settings:
+      # Only members of this group may sign in: the operators, who run the
+      # machines it watches.
+      admin_group: operators
 
 # How the apps send mail: sign in links and codes, alerts, notifications and
 # account mail. The password is a secret, set with
