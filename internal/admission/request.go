@@ -92,6 +92,11 @@ func Build(cfg *config.Config, site string) (Request, error) {
 	slices.Sort(r.Roles)
 	if s.Has(config.RoleMonitor) && s.WebServerManagedBy() == config.ManagedByExternal && s.WebServer != nil {
 		for _, app := range cfg.PinnedTo(site) {
+			// An app with no hostname is not the web server's: nothing
+			// routes it, so it is no part of the request's hand off.
+			if cfg.Apps[app].Hostname == "" {
+				continue
+			}
 			r.WebServer = append(r.WebServer, WebApp{App: app, Hostname: cfg.Apps[app].Hostname, Listen: s.WebServer.Listen})
 		}
 	}

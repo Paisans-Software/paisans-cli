@@ -5,6 +5,7 @@ import (
 	"net"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
@@ -213,7 +214,7 @@ func (c *checker) webServer() {
 					"puts the app on the compose network %s, which this toolkit pins so that the address your web server's connections arrive from is known, and mesh.subnet %s overlaps it. The mesh would be routed into a Docker bridge. Declare a mesh outside %s.", render.WebServerNetwork, c.cfg.Mesh.Subnet, render.WebServerNetwork)
 			}
 		}
-		if pinned := c.cfg.PinnedTo(name); len(pinned) > 1 {
+		if pinned := servedApps(c.cfg, c.cfg.PinnedTo(name)); len(pinned) > 1 {
 			c.refuse("web-server-external-serves-one-app", key+".listen",
 				"an external web server serves one app but several are pinned",
 				"publishes one app, but %s are pinned to %s. With managed_by: external nothing but your own web server is in front of the site, and it is handed the monitor alone, so the others would be routed by nothing. Pin them elsewhere, or use managed_by: paisans.", strings.Join(pinned, ", "), name)
@@ -229,4 +230,16 @@ func (c *checker) webServer() {
 				"is %s, which is not loopback. The firewall lets the mesh in whole, so anything that can reach %s over the mesh, every site of this deployment, can reach the app around your web server. Prefer 127.0.0.1.", listen, site.Address)
 		}
 	}
+}
+
+// servedApps is apps without those whose blueprint says hostname: none,
+// which no web server serves, so an external one is handed none of them.
+func servedApps(cfg *config.Config, apps []string) []string {
+	var out []string
+	for _, app := range apps {
+		if !blueprints.Hostless(cfg.Apps[app].Blueprint) {
+			out = append(out, app)
+		}
+	}
+	return out
 }

@@ -970,13 +970,16 @@ func (p *planner) relays() []string {
 // routesFor is a Caddy site's inventory: one host block per hostname, each
 // importing the snippet for that hostname's role. A gateway routes every app
 // that no other site's monitor serves; a monitor that is not a gateway routes
-// only the apps pinned to it.
+// only the apps pinned to it. An app whose blueprint says hostname: none has
+// no name to route, and no route.
 func (p *planner) routesFor(site *siteView) []route {
 	var out []route
 	for _, name := range p.cfg.AppNames() {
 		app := p.cfg.Apps[name]
 		monitor, onMonitor := ServedBy(p.cfg, name)
 		switch {
+		case blueprints.Hostless(app.Blueprint):
+			continue
 		case site.IsGateway && onMonitor && monitor != site.Name:
 			continue
 		case !site.IsGateway && (!onMonitor || monitor != site.Name):

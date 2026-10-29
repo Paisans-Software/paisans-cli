@@ -26,6 +26,18 @@ type engagementValues struct {
 	// read: the account app's public URL, the first by name, or the
 	// community's domain in a deployment without one.
 	HomeURL string
+	// CommunityRoomName is the Matrix room the bot announces newcomers in,
+	// and CommunityRoomAlias its alias's localpart (communityRoom).
+	CommunityRoomName  string
+	CommunityRoomAlias string
+	// WelcomeDailyLimit is how many members the daily welcome email reaches
+	// at most.
+	WelcomeDailyLimit int
+	// OperatorEmails is the operators' addresses, comma separated, in the
+	// order of their names: who hears about it when the bot cannot post.
+	OperatorEmails string
+	// AgentClientID is the Mbin agent client's id, AgentClientID.
+	AgentClientID string
 }
 
 // ReaderRole is the Postgres role the engagement app reads Mbin's database
@@ -44,9 +56,16 @@ func (p *planner) engagementValuesFor(planned plannedApp, host string, port int)
 			break
 		}
 	}
+	welcome := engagementValues{
+		HomeURL:           home,
+		WelcomeDailyLimit: welcomeDailyLimit(p.cfg.Apps[planned.Name]),
+		OperatorEmails:    operatorEmails(p.cfg),
+		AgentClientID:     AgentClientID,
+	}
+	welcome.CommunityRoomName, welcome.CommunityRoomAlias, _ = CommunityRoom(p.cfg, planned.Name)
 	mbin, ok := p.cfg.EngagementSource()
 	if !ok {
-		return engagementValues{HomeURL: home}
+		return welcome
 	}
 	reader := planned
 	reader.DBUser, reader.DBName = ReaderRole(planned.Name), DBIdentifier(mbin)
@@ -56,13 +75,10 @@ func (p *planner) engagementValuesFor(planned plannedApp, host string, port int)
 	}
 	// A missing source_database_password renders an empty one here, and
 	// never reaches a host: apply refuses it before any stack starts.
-	return engagementValues{
-		SourceDSN:     dsn(reader, p.appSecret(planned.Name, "source_database_password"), host, port),
-		SourceURL:     "https://" + p.cfg.Apps[mbin].Hostname,
-		InstanceTitle: instance,
-		MetaTitle:     meta,
-		HomeURL:       home,
-	}
+	welcome.SourceDSN = dsn(reader, p.appSecret(planned.Name, "source_database_password"), host, port)
+	welcome.SourceURL = "https://" + p.cfg.Apps[mbin].Hostname
+	welcome.InstanceTitle, welcome.MetaTitle = instance, meta
+	return welcome
 }
 
 // mbinTitles is the instance and meta titles the Mbin app renders, from

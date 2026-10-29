@@ -98,7 +98,10 @@ func (c *checker) colocated(app string, link blueprints.Link) {
 func (c *checker) providerHostnames(role string) []string {
 	var out []string
 	for _, p := range blueprints.ProvidersOf(c.cfg, role) {
-		out = append(out, c.cfg.Apps[p].Hostname)
+		// One with no hostname cannot be named by one.
+		if h := c.cfg.Apps[p].Hostname; h != "" {
+			out = append(out, h)
+		}
 	}
 	return out
 }

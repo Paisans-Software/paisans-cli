@@ -13,14 +13,16 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
-// APIVersion is the newest blueprint format this toolkit reads, APIVersionV4,
-// and APIVersionV3, APIVersionV2 and APIVersionV1 the ones before it, read as
-// well. v2 is v1 with heartbeat, v3 is v2 whose templates may read
-// .DisplayName and .CommunityName, and v4 is v3 with a consume's colocate. A
-// blueprint that uses any of them names its format, so a toolkit that cannot
-// read it refuses the format by name and uses an older catalog release.
+// APIVersion is the newest blueprint format this toolkit reads, APIVersionV5,
+// and APIVersionV4, APIVersionV3, APIVersionV2 and APIVersionV1 the ones
+// before it, read as well. v2 is v1 with heartbeat, v3 is v2 whose templates
+// may read .DisplayName and .CommunityName, v4 is v3 with a consume's
+// colocate, and v5 is v4 with hostname: none. A blueprint that uses any of
+// them names its format, so a toolkit that cannot read it refuses the format
+// by name and uses an older catalog release.
 const (
-	APIVersion   = APIVersionV4
+	APIVersion   = APIVersionV5
+	APIVersionV5 = "paisans.blueprint/v5"
 	APIVersionV4 = "paisans.blueprint/v4"
 	APIVersionV3 = "paisans.blueprint/v3"
 	APIVersionV2 = "paisans.blueprint/v2"
@@ -42,6 +44,7 @@ type spec struct {
 	Health          healthSpec             `yaml:"health"`
 	Gate            gateSpec               `yaml:"gate"`
 	Federation      federation             `yaml:"federation"`
+	Hostname        string                 `yaml:"hostname"`
 	HostnameRoles   []string               `yaml:"hostname_roles"`
 	Storage         storageSpec            `yaml:"storage"`
 	Mail            string                 `yaml:"mail"`
@@ -213,8 +216,8 @@ func publishable(port int) error {
 }
 
 func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
-	if s.APIVersion != APIVersion && s.APIVersion != APIVersionV3 && s.APIVersion != APIVersionV2 && s.APIVersion != APIVersionV1 {
-		return nil, fmt.Errorf("apiVersion: is %q, and this toolkit reads %s, %s, %s and %s", s.APIVersion, APIVersionV1, APIVersionV2, APIVersionV3, APIVersion)
+	if s.APIVersion != APIVersion && s.APIVersion != APIVersionV4 && s.APIVersion != APIVersionV3 && s.APIVersion != APIVersionV2 && s.APIVersion != APIVersionV1 {
+		return nil, fmt.Errorf("apiVersion: is %q, and this toolkit reads %s, %s, %s, %s and %s", s.APIVersion, APIVersionV1, APIVersionV2, APIVersionV3, APIVersionV4, APIVersion)
 	}
 	if s.Name != name {
 		return nil, fmt.Errorf("name: is %q, but the blueprint's directory is %s", s.Name, name)
@@ -345,6 +348,9 @@ func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
 			return nil, fmt.Errorf("hostname_roles: %s needs a template %s, which the blueprint does not ship", role, SnippetFor(role))
 		}
 	}
+	if err := s.checkHostless(hasTemplate); err != nil {
+		return nil, err
+	}
 	provides, err := checkLinks(s.APIVersion, s.Provides, s.Consumes)
 	if err != nil {
 		return nil, err
@@ -396,6 +402,7 @@ func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
 		GateSettings:    settings,
 		LiveSettings:    live,
 		Federates:       s.Federation.Federates,
+		Hostless:        s.Hostname == HostnameNone,
 		HostnameRoles:   s.HostnameRoles,
 		ObjectStorage:   s.Storage.S3,
 		PublicObjects:   s.Storage.PublicReads,

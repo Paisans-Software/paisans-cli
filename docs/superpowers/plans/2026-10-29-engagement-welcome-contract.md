@@ -80,8 +80,8 @@ see; for engagement the toolkit computes them in Go.
 
 | Setting | Type | Default | Refused when |
 |---------|------|---------|--------------|
-| `community_room_name` | string | derived from `community.name` (spec, *The community room*) | blank, or holds a control character (`engagement-community-room-name-invalid`) |
-| `welcome_email_daily_limit` | integer | `50` | not a whole number of at least 1 (`engagement-welcome-limit-invalid`) |
+| `community_room_name` | string | derived from `community.name` (spec, *The community room*) | blank, holds a control character, or has no letter or digit (`engagement-community-room-name-invalid`); unset, the derived name is refused at `community.name` when it holds a control character |
+| `welcome_email_daily_limit` | integer | `50` | not an integer (`blueprint-setting-invalid`, e.g. `"12"` or `2.5`), or less than 1 (`engagement-welcome-limit-invalid`) |
 
 **Room alias localpart** computed once, in Go: lowercase, every run of
 characters outside `a-z0-9` replaced by one `-`, leading and trailing `-`

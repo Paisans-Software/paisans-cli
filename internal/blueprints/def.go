@@ -85,6 +85,10 @@ type Def struct {
 	Federates         bool
 	FederationSetting string
 
+	// Hostless is whether the app serves no website and so takes no
+	// hostname: hostname: none (HostnameNone).
+	Hostless bool
+
 	// HostnameRoles are the hostname roles the blueprint understands beyond the
 	// primary. The set is closed: a role selects which Caddy snippet that
 	// hostname gets, so a role the blueprint ships no snippet for would render

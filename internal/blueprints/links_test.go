@@ -78,8 +78,8 @@ func TestColocateNeedsV4(t *testing.T) {
 	}
 	for _, doc := range []string{minimal, minimalV2, minimalV3} {
 		_, err := Parse("example", []byte(doc+consume), always)
-		if err == nil || !strings.Contains(err.Error(), "consumes[0].colocate") || !strings.Contains(err.Error(), APIVersion) {
-			t.Errorf("%v, want a refusal naming consumes[0].colocate and %s", err, APIVersion)
+		if err == nil || !strings.Contains(err.Error(), "consumes[0].colocate") || !strings.Contains(err.Error(), APIVersionV4) {
+			t.Errorf("%v, want a refusal naming consumes[0].colocate and %s", err, APIVersionV4)
 		}
 	}
 }

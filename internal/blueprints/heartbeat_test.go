@@ -5,12 +5,13 @@ import (
 	"testing"
 )
 
-// minimalV2 is minimal in the format that reads heartbeat, and minimalV3 in
-// the newest.
+// minimalV2 is minimal in the format that reads heartbeat, minimalV3 to
+// minimalV5 in each format after it, minimalV5 the newest.
 var (
 	minimalV2 = strings.Replace(minimal, APIVersionV1, APIVersionV2, 1)
 	minimalV3 = strings.Replace(minimal, APIVersionV1, APIVersionV3, 1)
-	minimalV4 = strings.Replace(minimal, APIVersionV1, APIVersion, 1)
+	minimalV4 = strings.Replace(minimal, APIVersionV1, APIVersionV4, 1)
+	minimalV5 = strings.Replace(minimal, APIVersionV1, APIVersion, 1)
 )
 
 // A blueprint that declares a heartbeat gets the monitor's name and a

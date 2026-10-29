@@ -4,9 +4,9 @@
 # paisans-ops-notifier-service: Beszel alerts in Matrix. It keeps one bot,
 # one direct room per operator and one matrix:// URL in each operator's
 # Beszel notification settings, and deletes the Beszel account of anyone no
-# longer an operator (docs/specs/2026-10-29-ops-notifier.md). Format v4 for
-# colocate.
-apiVersion: paisans.blueprint/v4
+# longer an operator (docs/specs/2026-10-29-ops-notifier.md). Format v5, for
+# colocate (v4) and hostname: none.
+apiVersion: paisans.blueprint/v5
 name: ops-notifier
 services:
   # Its image is the core catalog's foundation.yaml's.
@@ -17,12 +17,15 @@ database: {engine: none}
 # 8085: the engagement service publishes 8083 and Beszel's hub 8084, and the
 # apps pinned to one site share its mesh address. It serves /healthz alone.
 port: 8085
+# It serves no website: it dials out to MAS, the homeserver and the hub, and
+# its one route, /healthz, is for the monitor, which reads it over the mesh.
+# So it has no hostname, DNS record, certificate or gateway route.
+hostname: none
 config:
   format: env
   file: ".env"
 health: {path: "/healthz", status: [200]}
-# Not gateable: it serves nothing but its health route, which the monitor
-# reads through the gateway.
+# Not gateable: the gate stands in front of a hostname, and it has none.
 gate: {gateable: false}
 storage:
   local_only: true

@@ -10,6 +10,19 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+## [0.3.0-rc.20] - 2026-10-29
+
+### Added
+
+- Blueprint format `paisans.blueprint/v5` adds `hostname: none` for an app serving no website: it takes no hostname, DNS record, certificate or gateway route, and is checked over the mesh; `ops-notifier` uses it.
+- The `engagement` blueprint links to a `forum` provider, sharing an Mbin agent client secret, and renders the welcome variables and the operators' addresses.
+- The `engagement` blueprint takes `community_room_name` and `welcome_email_daily_limit`; validate refuses a blank or letterless room name, a derived name with a control character, a limit under 1, and a pinned forum.
+- A provider's templates read a consumer's `.Values`; the `engagement` app offers its community room alias and Mbin agent client there.
+
+### Changed
+
+- The engagement app's reader is also granted `"user".application_status`, `entry_vote.created_at` and `post_vote.created_at`, which the welcome loop and its activity ranking read.
+
 ## [0.3.0-rc.19] - 2026-10-29
 
 ### Added
@@ -408,7 +421,8 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.
 - The gateway refuses any request to Pocket ID that carries an `X-API-Key` header with 403, so Pocket ID's API keys work only on the mesh.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.19...develop
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.20...develop
+[0.3.0-rc.20]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.19...v0.3.0-rc.20
 [0.3.0-rc.19]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.18...v0.3.0-rc.19
 [0.3.0-rc.18]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.17...v0.3.0-rc.18
 [0.3.0-rc.17]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.16...v0.3.0-rc.17

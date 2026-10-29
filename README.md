@@ -911,6 +911,23 @@ Mbin. The design is in `docs/specs/2026-10-24-engagement-digest.md`.
   The MAS admin client it looks members up with is declared by the synapse
   app, with a secret the two apps share. A synapse blueprint that does not
   offer `mas_admin_url` leaves the bot off.
+* **Welcoming newcomers** (`docs/specs/2026-10-29-engagement-welcome.md`).
+  The app also consumes the `forum` role, which the mbin blueprint provides,
+  with `settings.forum` naming one by hostname when there are several. Linked,
+  it renders an Mbin agent client, `engagement-agent`, whose secret
+  `mbin_agent_client_secret` it shares with the mbin app, which declares the
+  client; the service calls Mbin's API on its own site's mesh address, since
+  both apps are clustered. With the bot on, the service announces newcomers
+  in a community room named by `settings.community_room_name`. Unset, that is
+  the community's name plus " Community" ("Community" for no name), unless a
+  word of the name, a run of letters and digits, is already one of Community, Communities, Collective, Commons, Club, Society,
+  Guild, Circle, Network, Group, Hub or Crew. The room's alias is made from
+  the name, lowercased, with each run of other characters than letters and
+  digits replaced by one `-`, and the synapse app reads it from the app's
+  consumer values to auto-join new accounts to it. A daily welcome email
+  reaches at most `settings.welcome_email_daily_limit` members, 50 by
+  default, and the operators' addresses, in the order of their names, are
+  rendered so the service can tell them when the bot cannot post.
 * **What the gateway forwards.** `/u/*`, the unsubscribe links, `/d/*`, the
   web digests the Matrix message links to, and
   `GET /healthz`, which answers ok or 503, for the monitor's public check.
@@ -943,8 +960,9 @@ apps:
     gated: true
 ```
 
-The service's own database, in the cluster's Postgres, holds only
-unsubscribes and the record of what was sent to each member each week. A
+The service's own database, in the cluster's Postgres, holds the
+unsubscribes, the record of what was sent to each member each week, and the
+welcome loop's records, which it deletes after 21 days. A
 member is identified in it, and in every token, by Mbin's `oauth_oidc_id`,
 the member's Pocket ID subject. It reads the deployment's `smtp:` block like
 any other app that sends mail (see *Mail is declared once and overridden per
@@ -961,6 +979,9 @@ app*).
 | `engagement-source-not-clustered` | the `mbin` app is pinned. Refused: the reader role is created in the cluster's Postgres, and a pinned Mbin runs against a Postgres of its own on its site, where no such role exists |
 | `engagement-without-smtp` | the app resolves no SMTP host or `from_address`. Warned: it is an email and cannot send without them |
 | `engagement-bot-localpart-invalid` | `settings.bot_localpart` is not a Matrix localpart, lowercase letters, digits and `._=/-` only. Refused: MAS would not create the bot's account |
+| `engagement-community-room-name-invalid` | `settings.community_room_name` is blank, holds a control character, or has no letter or digit; or, with it unset, `community.name` holds a control character, since the room is then named after it. Refused: it is rendered into one `.env` line and the room's alias is made from its letters and digits |
+| `engagement-forum-not-clustered` | the app links to a forum that is pinned. Refused: the service calls the forum's API on its own site's mesh address, where only a clustered forum runs beside it |
+| `engagement-welcome-limit-invalid` | `settings.welcome_email_daily_limit` is less than 1. Refused: the daily welcome email would reach nobody |
 | `engagement-not-gated` | the app links to a Matrix homeserver and is not `gated`. Warned: the bot's links to the web digest, which names the member by the gate's header, all answer not found |
 | `engagement-bot-display-name-invalid` | `settings.bot_display_name` is blank or holds a line break, tab or other control character. Refused: it is rendered into one `.env` line |
 | `link-provider-ambiguous` | an optional link with its setting unset while several apps provide the role. Refused: it could not tell which to use. Applies to any blueprint's link, the engagement app's `homeserver` being one |
@@ -1685,7 +1706,7 @@ decision):
   through Pocket ID, is never touched.
 
 **It runs beside the homeserver** (`colocate: true` on its
-`matrix-homeserver` consume, blueprint format v4). The MAS admin client
+`matrix-homeserver` consume, blueprint format v5). The MAS admin client
 secret it shares with the homeserver can make a token for any Matrix user, so
 it stays on the host that already runs MAS, which a takeover of the gateway
 does not reach.
@@ -1708,7 +1729,10 @@ reached over the mesh, where the notifier is.
 | more than one `ops-notifier` app | refused | `one-ops-notifier` |
 | an `ops-notifier` app placed unlike its homeserver | refused | `colocated-app-elsewhere` |
 
-Its hostname serves `GET /healthz` alone. Its state is one file in its data
+**It takes no hostname** (`hostname: none`): it serves no website, and its
+one route, `GET /healthz`, is for the monitor, which reads it over the mesh.
+The app declares no `hostname`, and validate refuses one. Its state is one
+file in its data
 directory, what it wrote in each operator's settings, which is what makes an
 opt out readable; losing it gives every operator the URL again. Its image
 track, `ops-notifier`, is optional in the core catalog's foundation.
@@ -3764,10 +3788,36 @@ silently, so the placement in `paisans-stack.yaml` stays the one that runs. A
 colocated consume that links to no app in the deployment, an optional one
 with no provider or one naming a server the deployment does not run, has
 nothing to be placed beside and holds the app to nothing. `colocate` is read
-only from `apiVersion: paisans.blueprint/v4`, which is
+only from `apiVersion: paisans.blueprint/v4` on, which is
 `paisans.blueprint/v3` with that one key, so a toolkit that cannot read it
 refuses the format by name and uses an older catalog release, rather than
 placing the app away from its provider.
+
+**A blueprint whose app serves no website says `hostname: none`**, Eg: a
+service that only dials out to other apps and answers a health route:
+
+```yaml
+apiVersion: paisans.blueprint/v5
+hostname: none
+health: {path: "/healthz", status: [200]}
+```
+
+Such an app takes no `hostname` in `paisans-stack.yaml`, and validate refuses
+one, because nothing would route that name or hold a certificate for it.
+Every other app still needs one. It is given no public name, no DNS record, no
+certificate and no route at the gateway or a monitor's web server, and the
+monitor checks it over the mesh: its health route on each site it runs on,
+sent no `Host` header, where every app publishes its port. What lives on a
+hostname is refused in the same blueprint when it is read: a
+`caddy.snippet.tmpl`, `oidc`, `hostname_roles`, a gateable gate, `storage.s3`
+(stored objects are served on a media hostname derived from the app's),
+`federation`, a consume that is not optional (an unset setting links by the
+app's own hostname), and a provided value that reads `app.hostname`. A
+template that reads `.PublicURL` gets an empty one. `hostname` is read only
+from `apiVersion: paisans.blueprint/v5`, which is `paisans.blueprint/v4` with
+that one key, so a toolkit that cannot read it refuses the format by name and
+uses an older catalog release, rather than requiring a hostname of an app that
+has nothing to serve on it.
 
 #### A blueprint ships a template set, not a single `.env`
 

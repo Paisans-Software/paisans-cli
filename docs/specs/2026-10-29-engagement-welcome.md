@@ -1,6 +1,6 @@
 # Welcoming new members, on Mbin, on Matrix and by email
 
-Status: draft, 2026-10-29, awaiting the founder's approval of the whole.
+Status: approved by the founder, 2026-10-29.
 The founder settled the scope, the agent role, operators as the alert
 audience, the Matrix room's audience and the digest exclusion in session
 the same day. It
@@ -201,21 +201,18 @@ the bot stops posting there.
 The `synapse` blueprint renders Synapse's `auto_join_rooms` with the
 community room's alias whenever an engagement app with Matrix on consumes
 the homeserver, so every new account is joined to the room at registration.
-A rename re-renders it.
-
-A provider's templates today see each consumer's `Name` and `Secrets` only
-(`internal/render/links.go`), so the toolkit grows a way to hand a provider
-a value its consumer declares: here, the engagement app's community room
-alias, computed by the toolkit from `community_room_name`. The `synapse`
-blueprint then requires that toolkit release. *Provisional* mechanism; the
-builder may pick another that keeps the alias computed in one place. `autocreate_auto_join_rooms` is off: the bot creates
+A rename re-renders it. `autocreate_auto_join_rooms` is off: the bot creates
 the room, not Synapse.
 
-The builder must confirm that Synapse runs auto-join for accounts MAS
-provisions (`/_synapse/mas/` provisioning) on the Synapse version the
-catalog tracks. If it does not, the bot instead invites each newcomer as
-part of the batch, before the announcement, and this section changes to
-say so.
+Synapse joins accounts MAS provisions at registration: MAS provisions an
+account through `synapse/rest/synapse/mas/users.py:155-161`, which calls
+`register_user`, and `register_user` auto-joins every account that is not
+a guest (`synapse/handlers/register.py:384-396`, at tag `v1.164.1`).
+
+The alias reaches the `synapse` blueprint as a consumer value: each entry of
+`.Consumers` carries the consumer's `Values` beside its `Secrets`, and an
+engagement consumer's `community_room_alias` is computed by the toolkit from
+`community_room_name`, in one place (`internal/render/welcome.go`).
 
 ### The announcement
 

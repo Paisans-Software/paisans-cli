@@ -80,8 +80,11 @@ func TestEngagementBlueprintParses(t *testing.T) {
 // The Digest Bot runs on the deployment's homeserver when it has one: the
 // app consumes matrix-homeserver optionally, shares the MAS admin client's
 // secret with its provider, and names its bot with a setting.
-func TestEngagementBlueprintConsumesAHomeserver(t *testing.T) {
-	want := []Consume{{Role: "matrix-homeserver", Setting: "homeserver", Optional: true, SharedSecrets: []string{"mas_admin_client_secret"}}}
+func TestEngagementBlueprintConsumes(t *testing.T) {
+	want := []Consume{
+		{Role: "matrix-homeserver", Setting: "homeserver", Optional: true, SharedSecrets: []string{"mas_admin_client_secret"}},
+		{Role: "forum", Setting: "forum", Optional: true, SharedSecrets: []string{"mbin_agent_client_secret"}},
+	}
 	if got := Consumes(config.BlueprintEngagement); !reflect.DeepEqual(got, want) {
 		t.Errorf("consumes %#v, want %#v", got, want)
 	}
@@ -107,6 +110,25 @@ func TestEngagementBlueprintConsumesAHomeserver(t *testing.T) {
 	}
 	if s, ok := settings["bot_display_name"]; !ok || s.Type != "string" || s.Default != "Community Bot" {
 		t.Errorf("bot_display_name setting %+v (declared %v), want a string defaulting to Community Bot", s, ok)
+	}
+	if s, ok := settings["forum"]; !ok || s.Type != "string" {
+		t.Errorf("forum setting %+v (declared %v), want a string", s, ok)
+	}
+	if s, ok := settings["community_room_name"]; !ok || s.Type != "string" || s.Default != nil {
+		t.Errorf("community_room_name setting %+v (declared %v), want a string with no default", s, ok)
+	}
+	if s, ok := settings["welcome_email_daily_limit"]; !ok || s.Type != "int" || s.Default != 50 {
+		t.Errorf("welcome_email_daily_limit setting %+v (declared %v), want an int defaulting to 50", s, ok)
+	}
+	agent, ok := SecretOf(config.BlueprintEngagement, "mbin_agent_client_secret")
+	if !ok {
+		t.Fatal("mbin_agent_client_secret has no spec")
+	}
+	if agent.Format != FormatPassword || agent.RotationCost != CostRestart || agent.NeverRotate != "" {
+		t.Errorf("mbin_agent_client_secret %+v, want a password rotated at the cost of a restart", agent)
+	}
+	if !slices.Contains(SelfRotated(config.BlueprintEngagement), "mbin_agent_client_secret") {
+		t.Error("mbin_agent_client_secret is not self rotated")
 	}
 }
 
