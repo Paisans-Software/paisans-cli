@@ -127,7 +127,8 @@ func TestFillCoversWhatWasAddedLater(t *testing.T) {
 	if secrets.Sites["home-c"].HeartbeatToken == "" {
 		t.Fatal("a site added later got no heartbeat token")
 	}
-	if want := []string{"sites.home-c.heartbeat_token", "sites.home-c.wireguard_private_key"}; strings.Join(filled.Generated, ",") != strings.Join(want, ",") {
+	// The fixture declares a beszel app, so the new site gets its token too.
+	if want := []string{"sites.home-c.beszel_token", "sites.home-c.heartbeat_token", "sites.home-c.wireguard_private_key"}; strings.Join(filled.Generated, ",") != strings.Join(want, ",") {
 		t.Fatalf("expected exactly the new site's secrets %v, got %v", want, filled.Generated)
 	}
 }

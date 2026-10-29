@@ -369,7 +369,7 @@ func TestStorageAddGrowsToThreeWithAStorageSite(t *testing.T) {
 	cfg.Mesh.Subnet = sub
 	addresses := map[string]string{"home-a": "10.48.0.1", "home-b": "10.48.0.2", "vm": "10.48.0.3", "store": "10.48.0.4"}
 	cfg.Sites["store"] = config.Site{Roles: []config.Role{config.RoleStorage}, Endpoint: "203.0.113.40:51820"}
-	secrets.Sites["store"] = config.SiteSecrets{WireGuardPrivateKey: "Q0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0M=", HeartbeatToken: "5555555555555555555555555555eeee"}
+	secrets.Sites["store"] = config.SiteSecrets{WireGuardPrivateKey: "Q0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0M=", HeartbeatToken: "5555555555555555555555555555eeee", BeszelToken: "b555555555555555555555555555eeeeb555555555555555555555555555eeee"}
 	for name, addr := range addresses {
 		s := cfg.Sites[name]
 		s.Address = addr

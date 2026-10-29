@@ -82,6 +82,21 @@ monitor's public hostname as a visitor would, and in `managed_by` `external`
 both read the monitor's web server over ssh, `show` always and `check` when a
 check fails.
 
+The Beszel hub and its agents add no command. The hub is the reserved
+blueprint in `internal/blueprints/reserved/beszel/`; `internal/render/beszel.go`
+renders its `config.yml` (one system per site), its key and each site's agent
+service and `beszel-agent.env` in the `infra` stack, and `apply.PlanMonitorReseeds`
+re-renders the hub on `site add` and `site remove`, so the hub's start drops a
+removed site's system. `internal/secretsgen` generates the two Ed25519 formats
+(`ed25519-openssh` and `ed25519-public`) and `sites.<site>.beszel_token`, only
+while a hub is declared; `internal/secretsrotate/beszel.go` rotates
+`admin_password`. The agent's socket path is exported as `PAISANS_DOCKER_SOCKET`
+by `internal/apply/transport.go` and by `site prepare`'s bashrc block
+(`internal/hostprep/shell.go`). `internal/apply/health.go` and `stopped.go` count
+a `restart: "no"` service that exited 0 as done, which the hub's `admin` one
+shot needs. The behaviour is described in `README.md`, *Server and container
+stats*.
+
 `deployment publish`, `deployment pull`, `deployment log`, `deployment recover` and `operator
 register` read every site's configuration store over ssh and change a host only
 with `--execute`, and then only by starting each site's sync and, for `publish`

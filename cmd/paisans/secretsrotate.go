@@ -591,6 +591,8 @@ func rotatorFor(path string, w rotateWiring) (secretsrotate.Rotator, error) {
 		return secretsrotate.ClusterRole(strings.TrimSuffix(last, "_password")), nil
 	case len(parts) == 3 && parts[0] == "sites" && last == "heartbeat_token":
 		return secretsrotate.Heartbeat(parts[1]), nil
+	case len(parts) == 3 && parts[0] == "sites" && last == "beszel_token":
+		return secretsrotate.BeszelToken(parts[1]), nil
 	case len(parts) == 3 && parts[0] == "oidc_clients" && last == "client_secret":
 		return secretsrotate.OIDCClient(parts[1], w.oidcRun, w.oidcRetire), nil
 	case len(parts) == 3 && parts[0] == "apps":
@@ -608,6 +610,11 @@ func rotatorFor(path string, w rotateWiring) (secretsrotate.Rotator, error) {
 				return secretsrotate.SourceReader(app), nil
 			}
 		case "admin_password":
+			// Beszel's hub sets its own from its stack's apply; every
+			// other admin_password is the uptime fork's.
+			if w.cfg != nil && w.cfg.Apps[app].Blueprint == config.BlueprintBeszel {
+				return secretsrotate.BeszelAdmin(app), nil
+			}
 			return secretsrotate.UptimeAdmin(app), nil
 		case "operators_heartbeat_token", "dns_super_admins_heartbeat_token", "dns_2fa_heartbeat_token":
 			return secretsrotate.ContinuityHeartbeat(app, last), nil
@@ -635,7 +642,7 @@ func declaredRotator(cfg *config.Config, path, app, key string) (secretsrotate.R
 	}
 	blueprint := cfg.Apps[app].Blueprint
 	if slices.Contains(blueprints.SecretGroups(blueprint), key) {
-		return secretsrotate.AppGroup(cfg, app, key), nil, true
+		return groupRotator(cfg, app, key), nil, true
 	}
 	spec, ok := blueprints.SecretOf(blueprint, key)
 	switch {
@@ -649,6 +656,16 @@ func declaredRotator(cfg *config.Config, path, app, key string) (secretsrotate.R
 		return secretsrotate.InApp(cfg, app, key), nil, true
 	}
 	return nil, nil, false
+}
+
+// groupRotator is the rotation of the unit of secrets an app's blueprint
+// groups as group: a beszel hub's key pair reaches every site's agent as well
+// as the hub, and every other unit only the app's own stack.
+func groupRotator(cfg *config.Config, app, group string) secretsrotate.Rotator {
+	if secretsrotate.IsBeszelKey(cfg, app, group) {
+		return secretsrotate.BeszelKey(cfg, app)
+	}
+	return secretsrotate.AppGroup(cfg, app, group)
 }
 
 // costOf is what rotating an app's own secret costs, read through its
@@ -745,7 +762,7 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 		groups := blueprints.SecretGroups(cfg.Apps[app].Blueprint)
 		for _, group := range groups {
 			if members := blueprints.SecretGroup(cfg.Apps[app].Blueprint, group); has("apps." + app + "." + members[0].Name) {
-				rs = append(rs, secretsrotate.AppGroup(cfg, app, group))
+				rs = append(rs, groupRotator(cfg, app, group))
 			}
 		}
 	}
@@ -759,6 +776,11 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 	for _, app := range appsOf(config.BlueprintUptime) {
 		if has("apps." + app + ".admin_password") {
 			rs = append(rs, secretsrotate.UptimeAdmin(app))
+		}
+	}
+	for _, app := range appsOf(config.BlueprintBeszel) {
+		if has("apps." + app + ".admin_password") {
+			rs = append(rs, secretsrotate.BeszelAdmin(app))
 		}
 	}
 	if len(cfg.Cluster.Sites) > 0 {
@@ -801,6 +823,14 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 	for _, site := range cfg.SiteNames() {
 		if has("sites." + site + ".heartbeat_token") {
 			rs = append(rs, secretsrotate.Heartbeat(site))
+		}
+	}
+	// A token outlives the hub until secrets prune, and nothing reads it.
+	if cfg.BeszelApp() != "" {
+		for _, site := range cfg.SiteNames() {
+			if has("sites." + site + ".beszel_token") {
+				rs = append(rs, secretsrotate.BeszelToken(site))
+			}
 		}
 	}
 	for _, app := range appsOf(config.BlueprintPocketID) {

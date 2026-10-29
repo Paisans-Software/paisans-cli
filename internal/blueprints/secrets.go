@@ -30,9 +30,14 @@ const (
 	// the keypair secret it is Of.
 	FormatRSAKeypair = "rsa-keypair"
 	FormatRSAPublic  = "rsa-public"
+	// FormatEd25519OpenSSH is an Ed25519 private key in OpenSSH's PEM form,
+	// with no passphrase; FormatEd25519Public is the authorized_keys line of
+	// the key secret it is Of.
+	FormatEd25519OpenSSH = "ed25519-openssh"
+	FormatEd25519Public  = "ed25519-public"
 )
 
-var secretFormats = map[string]bool{FormatPassword: true, FormatHex16: true, FormatHex32: true, FormatRSAPEM: true, FormatRSAKeypair: true, FormatRSAPublic: true}
+var secretFormats = map[string]bool{FormatPassword: true, FormatHex16: true, FormatHex32: true, FormatRSAPEM: true, FormatRSAKeypair: true, FormatRSAPublic: true, FormatEd25519OpenSSH: true, FormatEd25519Public: true}
 
 // Rotation costs a blueprint may name.
 const (
@@ -50,7 +55,7 @@ type SecretSpec struct {
 	// none, which is a password.
 	Format string
 	// Passphrase is the secret an rsa-keypair key is encrypted under, and Of
-	// the rsa-keypair secret an rsa-public one is the half of.
+	// the rsa-keypair or ed25519-openssh secret a public one is the half of.
 	Passphrase, Of string
 	// RotationCost is CostSignsOut, CostRestart or empty for neither.
 	RotationCost string
@@ -139,15 +144,17 @@ func secretSpecs(specs []secretSpec, services []Service) ([]SecretSpec, error) {
 			format = FormatPassword
 		}
 		if !secretFormats[format] {
-			return nil, fmt.Errorf("%s.format: is %q; it must be password, hex16, hex32, rsa-pem, rsa-keypair or rsa-public", at, s.Format)
+			return nil, fmt.Errorf("%s.format: is %q; it must be password, hex16, hex32, rsa-pem, rsa-keypair, rsa-public, ed25519-openssh or ed25519-public", at, s.Format)
 		}
 		switch {
 		case format == FormatRSAKeypair && byName[s.Passphrase].Name == "":
 			return nil, fmt.Errorf("%s.passphrase: an rsa-keypair secret names the secret it is encrypted under, one this blueprint generates", at)
 		case format == FormatRSAPublic && (byName[s.Of].Name == "" || byName[s.Of].Format != FormatRSAKeypair):
 			return nil, fmt.Errorf("%s.of: an rsa-public secret names the rsa-keypair secret it is the half of", at)
-		case format != FormatRSAKeypair && s.Passphrase != "", format != FormatRSAPublic && s.Of != "":
-			return nil, fmt.Errorf("%s: passphrase goes with rsa-keypair, and of with rsa-public", at)
+		case format == FormatEd25519Public && (byName[s.Of].Name == "" || byName[s.Of].Format != FormatEd25519OpenSSH):
+			return nil, fmt.Errorf("%s.of: an ed25519-public secret names the ed25519-openssh secret it is the half of", at)
+		case format != FormatRSAKeypair && s.Passphrase != "", format != FormatRSAPublic && format != FormatEd25519Public && s.Of != "":
+			return nil, fmt.Errorf("%s: passphrase goes with rsa-keypair, and of with rsa-public or ed25519-public", at)
 		}
 		// A keypair and what it depends on change together, or the app
 		// holds a private key its passphrase does not open.

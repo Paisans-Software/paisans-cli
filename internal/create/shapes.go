@@ -91,7 +91,10 @@ type capability struct {
 	// collide with other roles' ports, so each goes where its on and avoid
 	// let it.
 	separateSites bool
-	apps          []appSpec
+	// needs is the key of an app that must be declared before the capability
+	// is offered, since the capability only extends it.
+	needs string
+	apps  []appSpec
 }
 
 // appSpec is how a capability's app is declared: its key, its blueprint, the
@@ -114,8 +117,14 @@ var health = capability{question: "A health page (uptime monitor)?", def: true, 
 	{key: healthApp, blueprint: config.BlueprintUptime, sub: "health", what: "health page"},
 }}
 
+// stats is Beszel, offered only beside the health page: the hub is pinned to
+// the monitor site, so without a monitor it has nowhere to run.
+var stats = capability{question: "Server and container stats (Beszel)?", def: true, needs: healthApp, apps: []appSpec{
+	{key: statsApp, blueprint: config.BlueprintBeszel, sub: "status.health", what: "server and container stats"},
+}}
+
 // capabilities is what the wizard offers: the core catalog's menu, then the
-// health page.
+// health page and the stats that sit beside it.
 func capabilities() ([]capability, error) {
 	entries, err := blueprints.Wizard()
 	if err != nil {
@@ -133,7 +142,7 @@ func capabilities() ([]capability, error) {
 		}
 		out = append(out, c)
 	}
-	return append(out, health), nil
+	return append(out, health, stats), nil
 }
 
 // specFor is the capability app declared under key, false for one the
@@ -161,5 +170,6 @@ const (
 	// accountApp is the account app, declared under management paisans.
 	accountApp  = "account"
 	healthApp   = "health"
+	statsApp    = "stats"
 	monitorSite = "health"
 )

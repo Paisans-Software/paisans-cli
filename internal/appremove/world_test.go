@@ -92,6 +92,7 @@ func (h *host) WriteFile(path, content string, mode uint32) error {
 
 var (
 	projectFilter = regexp.MustCompile(`label=com\.docker\.compose\.project='([^']+)'`)
+	serviceFilter = regexp.MustCompile(`label=com\.docker\.compose\.service='([^']+)'`)
 	labelFilter   = regexp.MustCompile(`'label=community\.paisans\.deployment=([^']+)'`)
 	fileLine      = regexp.MustCompile(`^f='([^']+)'; .* = '([0-9a-f]+)' \]`)
 )
@@ -142,6 +143,18 @@ func (h *host) Run(command string) (string, error) {
 	case strings.HasPrefix(command, "d='") && strings.Contains(command, "du -sb"):
 		dir := strings.TrimSuffix(strings.TrimPrefix(strings.SplitN(command, ";", 2)[0], "d='"), "'")
 		return h.dirAnswer(dir), nil
+	case strings.Contains(command, "docker ps -aq") && serviceFilter.MatchString(command):
+		id, project, service := labelFilter.FindStringSubmatch(command)[1], projectFilter.FindStringSubmatch(command)[1], serviceFilter.FindStringSubmatch(command)[1]
+		var keep []hostcheck.Container
+		for _, c := range h.containers {
+			if c.Deployment != id || c.Project != project || c.Service != service {
+				keep = append(keep, c)
+			}
+		}
+		h.containers = keep
+		return "", nil
+	case strings.HasPrefix(command, "(t='"):
+		return "", nil
 	case strings.Contains(command, "docker ps -aq"):
 		id, project := labelFilter.FindStringSubmatch(command)[1], projectFilter.FindStringSubmatch(command)[1]
 		var keep []hostcheck.Container
@@ -398,7 +411,7 @@ func state(t *testing.T, cfg *config.Config, app, site string, h *host) SiteStat
 	}
 	st := SiteState{Site: site, Inventory: inv, Hashes: map[string]string{}}
 	for _, e := range inv.ManifestFiles {
-		if !AppFile(cfg, app, e.Path) {
+		if !AppFile(cfg, app, e.Path) && !AgentFile(cfg, e.Path) {
 			continue
 		}
 		if c, ok, _ := h.ReadFile("/" + e.Path); ok {

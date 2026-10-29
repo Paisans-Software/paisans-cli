@@ -102,6 +102,7 @@ func TestNoMonitorSiteSkipsTheReseed(t *testing.T) {
 	cfg, secrets := fixture(t)
 	cfg.Storage.Garage.Replication = 1
 	delete(cfg.Sites, "watch")
+	delete(cfg.Apps, "stats")
 	delete(cfg.Apps, "health")
 	w := newWorld(t, cfg, secrets)
 	w.provisioned(1, "home-a")

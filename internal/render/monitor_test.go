@@ -17,6 +17,11 @@ func monitorConfig(t *testing.T, webServer *config.WebServer) *config.Config {
 	watch := cfg.Sites["watch"]
 	watch.WebServer = webServer
 	cfg.Sites["watch"] = watch
+	if webServer != nil && webServer.ManagedBy == config.ManagedByExternal {
+		// An external web server is handed the uptime app alone
+		// (web-server-external-serves-one-app), so the hub goes.
+		delete(cfg.Apps, "stats")
+	}
 	if refusals := validate.Check(cfg).Refusals(); len(refusals) > 0 {
 		t.Fatalf("the monitor configuration is refused: %v", refusals)
 	}
@@ -103,10 +108,20 @@ func TestMonitorAppsLeaveTheGatewayCaddyfile(t *testing.T) {
 	if !strings.Contains(monitor, "health.example.org {") || strings.Contains(monitor, "talk.example.org") {
 		t.Fatalf("the monitor's Caddyfile:\n%s", monitor)
 	}
+	// The Beszel hub is pinned to the monitor too, and served by it alike.
+	if strings.Contains(gateway, "status.health.example.org") {
+		t.Fatalf("the gateway routes the Beszel hub:\n%s", gateway)
+	}
+	if !strings.Contains(monitor, "status.health.example.org {") {
+		t.Fatalf("the monitor's Caddyfile does not serve the Beszel hub:\n%s", monitor)
+	}
 	for path := range files {
-		if strings.HasPrefix(path, "watch/srv/paisans/f2a9/infra/caddy/etc/snippets/") && path != "watch/srv/paisans/f2a9/infra/caddy/etc/snippets/health.caddy" {
+		if strings.HasPrefix(path, "watch/srv/paisans/f2a9/infra/caddy/etc/snippets/") && path != "watch/srv/paisans/f2a9/infra/caddy/etc/snippets/health.caddy" && path != "watch/srv/paisans/f2a9/infra/caddy/etc/snippets/stats.caddy" {
 			t.Errorf("the monitor carries %s", path)
 		}
+	}
+	if !strings.Contains(files["watch/srv/paisans/f2a9/infra/caddy/etc/snippets/stats.caddy"], "reverse_proxy 10.44.0.4:8084") {
+		t.Errorf("the hub's snippet does not reach it on the monitor's mesh address at 8084:\n%s", files["watch/srv/paisans/f2a9/infra/caddy/etc/snippets/stats.caddy"])
 	}
 	snippet := files["watch/srv/paisans/f2a9/infra/caddy/etc/snippets/health.caddy"]
 	if !strings.Contains(snippet, "reverse_proxy 10.44.0.4:3001") {
@@ -245,6 +260,7 @@ func monitorOnGateway(t *testing.T) *config.Config {
 	t.Helper()
 	cfg := fixture(t)
 	delete(cfg.Sites, "watch")
+	delete(cfg.Apps, "stats")
 	vm := cfg.Sites["vm"]
 	vm.Roles = append(vm.Roles, config.RoleMonitor)
 	vm.PublicAddress = "203.0.113.10"
@@ -288,6 +304,7 @@ func TestAMonitorOnTheGatewayIsServedByTheGatewaysCaddy(t *testing.T) {
 func TestAMonitorOnTheGatewayPingsEveryOtherSite(t *testing.T) {
 	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
 	delete(cfg.Sites, "watch")
+	delete(cfg.Apps, "stats")
 	vm := cfg.Sites["vm"]
 	vm.Roles = append(vm.Roles, config.RoleMonitor)
 	vm.PublicAddress = "203.0.113.10"

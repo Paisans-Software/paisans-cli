@@ -162,7 +162,7 @@ func build(a Answers, id string) view {
 			}
 		}
 		switch {
-		case app.Blueprint == config.BlueprintUptime && monitor != "":
+		case (app.Blueprint == config.BlueprintUptime || app.Blueprint == config.BlueprintBeszel) && monitor != "":
 			av.Placement = pinned(monitor)
 		case placedApart(app.Key):
 			av.Placement = pinned(siteFor(app.Key, sites, pinTo))

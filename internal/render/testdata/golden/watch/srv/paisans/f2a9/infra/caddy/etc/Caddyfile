@@ -116,3 +116,17 @@ health.example.org {
 		import /etc/caddy/snippets/health.caddy
 	}
 }
+
+
+status.health.example.org {
+	import paisans_self
+	import upstream_unavailable
+	# Stripped here as on a gated hostname: nothing that reaches an app may
+	# name a user unless the gate put the name there, and an ungated app that
+	# trusted the header would otherwise trust whoever sent the request.
+	request_header -X-Auth-Request-*
+
+	handle {
+		import /etc/caddy/snippets/stats.caddy
+	}
+}

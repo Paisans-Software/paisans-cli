@@ -111,3 +111,37 @@ func TestAHeldStoppedStackIsNotStarted(t *testing.T) {
 		t.Errorf("a stack not held was not: %v", p.Actions)
 	}
 }
+
+// The beszel hub's admin service is a one shot, restart "no": exited with code
+// 0 it finished, and the hub's stack is owed nothing, so a monitor site with
+// nothing else to do stays idle. Exited 1, it is owed an `up -d` as any
+// stopped service is, and so is a service of any other policy that exited 0.
+func TestAFinishedOneShotIsNotOwed(t *testing.T) {
+	host := applied(t, "watch")
+	host.stopped = map[string]string{"stats/admin": "exited Exited (0) 3 minutes ago"}
+	p, err := apply.Build("watch", plan(t), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Actions) != 0 {
+		t.Errorf("a finished one shot planned %v", p.Actions)
+	}
+
+	host.stopped = map[string]string{"stats/admin": "exited Exited (1) 3 minutes ago"}
+	p, err = apply.Build("watch", plan(t), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a, ok := actionFor(p, "stats"); !ok || !a.Recreate || !strings.Contains(a.Reason, "admin stopped") {
+		t.Errorf("a one shot that exited 1 is not owed an up -d: %+v", p.Actions)
+	}
+
+	host.stopped = map[string]string{"stats/app": "exited Exited (0) 3 minutes ago"}
+	p, err = apply.Build("watch", plan(t), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a, ok := actionFor(p, "stats"); !ok || !a.Recreate || !strings.Contains(a.Reason, "app stopped") {
+		t.Errorf("an unless-stopped service that exited 0 is not owed an up -d: %+v", p.Actions)
+	}
+}

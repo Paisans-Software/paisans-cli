@@ -202,6 +202,12 @@ apps:
     # One field overridden, so the golden seed shows the merge.
     smtp:
       from_name: Example Health
+  # Beszel's hub, beside the monitor and on its site for the monitor's
+  # reason: it is what an operator opens when the rest is failing.
+  stats:
+    blueprint: beszel
+    hostname: status.health.example.org
+    placement: { pinned: watch }
 
 # The deployment's mail server. The uptime app above inherits every field but
 # the one it overrides, and talk inherits all of them.

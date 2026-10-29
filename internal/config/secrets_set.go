@@ -40,6 +40,7 @@ func (s *Secrets) Get(key string) (string, bool) {
 		value = map[string]string{
 			"wireguard_private_key": s.Sites[parts[1]].WireGuardPrivateKey,
 			"heartbeat_token":       s.Sites[parts[1]].HeartbeatToken,
+			"beszel_token":          s.Sites[parts[1]].BeszelToken,
 		}[parts[2]]
 	case len(parts) == 3 && parts[0] == "apps":
 		value, _ = s.Apps[parts[1]][parts[2]].(string)
@@ -108,14 +109,17 @@ func (s *Secrets) Set(key, value string) error {
 			return fmt.Errorf("%s: a backup destination has access_key_id and secret_access_key, not %q", key, parts[3])
 		}
 		s.Backup.Destinations[parts[2]] = d
-	case len(parts) == 3 && parts[0] == "sites" && (parts[2] == "wireguard_private_key" || parts[2] == "heartbeat_token"):
+	case len(parts) == 3 && parts[0] == "sites" && (parts[2] == "wireguard_private_key" || parts[2] == "heartbeat_token" || parts[2] == "beszel_token"):
 		if s.Sites == nil {
 			s.Sites = map[string]SiteSecrets{}
 		}
 		site := s.Sites[parts[1]]
-		if parts[2] == "heartbeat_token" {
+		switch parts[2] {
+		case "heartbeat_token":
 			site.HeartbeatToken = value
-		} else {
+		case "beszel_token":
+			site.BeszelToken = value
+		default:
 			site.WireGuardPrivateKey = value
 		}
 		s.Sites[parts[1]] = site

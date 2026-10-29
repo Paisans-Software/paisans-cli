@@ -88,10 +88,11 @@ func TestSwap(t *testing.T) {
 
 // Each site's memory is judged against its own roles' floor in the
 // fixture: home-a and home-b are data and apps (3.0 GiB), vm gateway and
-// witness (960 MiB), watch a monitor (896 MiB). Swap that is on counts up
-// to a quarter of the floor.
+// witness (960 MiB), watch a monitor (896 MiB) with the fixture's Beszel
+// hub left out. Swap that is on counts up to a quarter of the floor.
 func TestMemory(t *testing.T) {
 	cfg := fixture(t)
+	delete(cfg.Apps, "stats")
 	for _, c := range []struct {
 		name  string
 		probe MemoryProbe
@@ -164,6 +165,8 @@ func TestMemoryFollowsPlacement(t *testing.T) {
 	watch := cfg.Sites["watch"]
 	watch.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal}
 	cfg.Sites["watch"] = watch
+	// It hosts the uptime app alone (web-server-external-serves-one-app).
+	delete(cfg.Apps, "stats")
 	f = Memory(cfg, []MemoryProbe{{Site: "watch", Out: memOut(gib3, "0", false)}})
 	if len(f) != 1 || !strings.Contains(f[0].Line, "at least its 768 MiB floor for what it runs") {
 		t.Errorf("monitor behind its owner's web server:\n%s", dump(f))

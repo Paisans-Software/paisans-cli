@@ -1,0 +1,33 @@
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
+#
+# Routing for {{ .App.Name }}, imported by the host block for
+# {{ .Hostname }} in the Caddy on the monitor's own site.
+# The UI, its sign in and the OAuth2 callback, and the API and realtime
+# stream the UI reads pass, all of which the hub authenticates itself. The
+# agents dial the hub on the mesh, never through here.
+#
+# Refused here: PocketBase's superuser panel, /_/ and everything under it,
+# and the superuser API it signs in through, the _superusers collection and
+# everything under it, auth-with-password, the OTP routes and the records
+# among them. Both sign in with the superuser's password alone, and nothing
+# an operator does day to day needs either from the internet. PocketBase
+# finds a collection by its name or by its id (core/collection_query.go,
+# FindCachedCollectionByNameOrId, at v0.40.5), and the id of _superusers is
+# pbc_3142635823 on every hub, "pbc_" and the CRC-32 of "auth_superusers"
+# (core/collection_model.go, idChecksum), so both are refused. They stay
+# reachable over the mesh, on the hub's port {{ .App.Port }} at the
+# monitor's mesh address, which is where an operator turns password sign in
+# back on for the break glass user while the identity provider is down.
+# Everything else passes. Caddy's path matcher already ignores
+# case, as PocketBase does a collection's name, and /_/* matches /_/ itself.
+@superuser_panel path /_ /_/*
+respond @superuser_panel 404
+@superuser_api path /api/collections/_superusers /api/collections/_superusers/* /api/collections/pbc_3142635823 /api/collections/pbc_3142635823/*
+respond @superuser_api 404
+reverse_proxy{{ range .Upstreams }} {{ . }}{{ end }} {
+{{- if .UpstreamElsewhere }}
+	# One site, not the gateway's machine; see upstream_single in the Caddyfile.
+	import upstream_single
+{{- end }}
+	header_up X-Forwarded-Proto https
+}

@@ -101,10 +101,14 @@ func (o imageOrigin) origin(setting string) string {
 	return OriginFoundation
 }
 
+// foundationImage is blueprints.FoundationImage, which a test replaces with
+// a foundation lacking a track.
+var foundationImage = blueprints.FoundationImage
+
 // declaredOr is the reference the configuration declares, when it does, and
 // otherwise the foundation's image of that name.
 func declaredOr(declared, name string) (imageOrigin, error) {
-	def, err := blueprints.FoundationImage(name)
+	def, err := foundationImage(name)
 	if err != nil {
 		return imageOrigin{}, err
 	}
@@ -309,7 +313,7 @@ func (p *planner) listImages(files []File) (map[string][]ComposeImage, error) {
 
 // infraServices are the services the infrastructure template,
 // templates/infra-compose.yaml.tmpl, writes.
-var infraServices = map[string]bool{"etcd": true, "patroni": true, "haproxy": true, "garage": true, "caddy": true, "heartbeat": true}
+var infraServices = map[string]bool{"etcd": true, "patroni": true, "haproxy": true, "garage": true, "caddy": true, "heartbeat": true, "beszel-agent": true}
 
 // infraImageOrigins is infraOrigins and the gateway's Caddy: acme.image when
 // it declares one, the foundation's otherwise.
@@ -318,7 +322,7 @@ func (p *planner) infraImageOrigins() (map[string]imageOrigin, error) {
 	if err != nil {
 		return nil, err
 	}
-	caddy, err := blueprints.FoundationImage(blueprints.FoundationCaddy)
+	caddy, err := foundationImage(blueprints.FoundationCaddy)
 	if err != nil {
 		return nil, err
 	}

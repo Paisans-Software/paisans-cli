@@ -191,6 +191,14 @@ apps:
       # machines it watches.
       admin_group: operators
 {{- end}}
+{{- if eq .Blueprint "beszel"}}
+    # Server and container stats, on the monitor's machine. Every machine
+    # reports to it through an agent the toolkit declares.
+    settings:
+      # Only members of this group may sign in: the operators, who run the
+      # machines it watches.
+      admin_group: operators
+{{- end}}
 {{- end}}
 
 {{- if .SMTP.Host}}

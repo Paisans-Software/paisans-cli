@@ -40,6 +40,12 @@ images:
   account: "ghcr.io/paisans-software/paisans-account-service:0.6.*"
   # 0.1, the first engagement digest.
   engagement: "ghcr.io/paisans-software/paisans-engagement-service:0.1.*"
+  # Beszel's hub and the agent every site runs beside it. 0.21 only:
+  # Beszel is 0.x, and a minor may change what the agent and the hub
+  # say to each other, so both move together, in a release of this
+  # catalog. Neither tag has a `v`, the same metadata-action pattern.
+  beszel: "ghcr.io/henrygd/beszel/beszel:0.21.*"
+  beszel-agent: "ghcr.io/henrygd/beszel/beszel-agent:0.21.*"
 # By Postgres major. A major is data, so a deployment's
 # cluster.postgres_version chooses it and no track moves it. Spilo
 # publishes one repository per major, each on its own release line.

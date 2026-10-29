@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Added
+
+- The `beszel` blueprint runs Beszel's hub on the monitor site, signed in through Pocket ID only, and an agent in every site's infra stack; `paisans create` offers it; run `site prepare` on hosts prepared earlier.
+
 ## [0.3.0-rc.16] - 2026-10-29
 
 ### Changed
