@@ -1771,7 +1771,9 @@ pointed at a provider outside the deployment gets the values any blueprint
 providing the role says of that hostname (`blueprints.LinkValuesAt`). A
 consume marked `optional` with its setting unset links to the deployment's
 one provider of the role, or to none; its `shared_secrets` are the
-consumer's own self rotated secrets that the provider reads too. Templates
+consumer's own self rotated secrets that the provider reads too; and
+`colocate` holds the consumer to its provider's placement, which validate
+checks (`colocated-app-elsewhere`, `internal/validate/links.go`). Templates
 ask `.HasLinked "<role>"` before reading `.Linked` on an optional role,
 `.LinkedApp "<role>"` for the providing app's name, `.LinkedOffers "<role>"
 "<value>"` for whether the provider declares a value, and, on the provider,
@@ -1784,9 +1786,11 @@ A change to the catalog that an older binary cannot read changes the
 `apiVersion` of what it changes, a blueprint's or the foundation's: an older
 binary then skips that release for the newest it reads. A new key counts,
 since both are decoded strictly, and so does a new value a template reads.
-Blueprints are read in three formats, `paisans.blueprint/v1`,
-`paisans.blueprint/v2` and `paisans.blueprint/v3` (`blueprints.APIVersionV1`,
-`blueprints.APIVersionV2` and `blueprints.APIVersion`). v2 adds `heartbeat`,
+Blueprints are read in four formats, `paisans.blueprint/v1`,
+`paisans.blueprint/v2`, `paisans.blueprint/v3` and `paisans.blueprint/v4`
+(`blueprints.APIVersionV1` to `blueprints.APIVersionV4`, the newest also
+`blueprints.APIVersion`). v4 adds a consume's `colocate`, which `Parse`
+refuses in an older format. v2 adds `heartbeat`,
 and `Parse` refuses that key in a v1 blueprint, so a blueprint that declares
 one also names the format an older binary skips. v3 adds two template values,
 `.DisplayName` (the app's client name at the identity provider,

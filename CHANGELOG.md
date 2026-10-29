@@ -12,6 +12,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Added
 
+- Blueprint format `paisans.blueprint/v4` lets a consume declare `colocate: true`; validate's `colocated-app-elsewhere` then refuses the app placed anywhere but where its provider runs.
 - The `beszel` blueprint writes the hub's SMTP settings and sender from the `smtp` block, so alerts reach the addresses operators add in Beszel; validate checks the sender and warns about unenforceable `starttls`.
 
 ## [0.3.0-rc.18] - 2026-10-29

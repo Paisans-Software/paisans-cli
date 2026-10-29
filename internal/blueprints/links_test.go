@@ -65,6 +65,25 @@ func TestALinkMistakeIsRefused(t *testing.T) {
 	}
 }
 
+// colocate is a v4 key: a blueprint that declares it names the format an
+// older toolkit skips, and an older format declaring it is refused by name.
+func TestColocateNeedsV4(t *testing.T) {
+	consume := "consumes:\n  - {role: matrix-homeserver, setting: homeserver, optional: true, colocate: true}\n"
+	d, err := Parse("example", []byte(minimalV4+consume), always)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Consumes) != 1 || !d.Consumes[0].Colocate {
+		t.Fatalf("consumes %+v, want one colocated", d.Consumes)
+	}
+	for _, doc := range []string{minimal, minimalV2, minimalV3} {
+		_, err := Parse("example", []byte(doc+consume), always)
+		if err == nil || !strings.Contains(err.Error(), "consumes[0].colocate") || !strings.Contains(err.Error(), APIVersion) {
+			t.Errorf("%v, want a refusal naming consumes[0].colocate and %s", err, APIVersion)
+		}
+	}
+}
+
 // A provider's values are its blueprint's expressions over the app, and one
 // outside the deployment offers what any provider of the role says of its
 // hostname alone.

@@ -966,6 +966,7 @@ app*).
 | `link-provider-ambiguous` | an optional link with its setting unset while several apps provide the role. Refused: it could not tell which to use. Applies to any blueprint's link, the engagement app's `homeserver` being one |
 | `link-shared-secret-outside` | a link that shares a secret, leading to a hostname no app in the deployment provides: the one its setting names, or the app's own when a link without `optional` leaves it unset. Refused: the secret can be handed only to an app the deployment renders. Applies to any blueprint's link, the engagement app's being the one that shares a secret |
 | `link-unresolvable` | a link the toolkit cannot resolve for any other reason, reported with that reason. Refused: the app's templates could not read their provider |
+| `colocated-app-elsewhere` | an app whose blueprint colocates a consume, placed other than as the app it links to: pinned to another site, pinned beside a clustered provider, or clustered beside a pinned one. Refused: the app holds what opens its provider, which stays on the host that already holds the provider |
 
 **Mbin must have `placement: cluster`.** The one-Mbin rule also keeps the
 source unambiguous: the digest reads one database and one community's title.
@@ -3680,6 +3681,34 @@ the format by name and uses the newest catalog release it can read, rather
 than rendering the app without its monitor. `secrets rotate` replaces the
 token, by name or with `--all` (*A heartbeat token reaches the monitors before
 the pusher*).
+
+**A consume may be colocated with its provider**, for an app that reaches
+what its provider keeps on its own host, Eg: an admin API published only on the
+provider's mesh address, and the secret that opens it:
+
+```yaml
+apiVersion: paisans.blueprint/v4
+consumes:
+  - role: matrix-homeserver
+    setting: homeserver
+    optional: true
+    shared_secrets: [mas_admin_client_secret]
+    colocate: true
+```
+
+Such an app runs where its provider does: pinned to the provider's site, or
+clustered beside a clustered provider. A secret that opens the provider is
+then held only on the host that already holds the provider, so taking over
+any other site does not hand it over. validate refuses any other placement
+(`colocated-app-elsewhere`) and names the one to write; nothing places the app
+silently, so the placement in `paisans-stack.yaml` stays the one that runs. A
+colocated consume that links to no app in the deployment, an optional one
+with no provider or one naming a server the deployment does not run, has
+nothing to be placed beside and holds the app to nothing. `colocate` is read
+only from `apiVersion: paisans.blueprint/v4`, which is
+`paisans.blueprint/v3` with that one key, so a toolkit that cannot read it
+refuses the format by name and uses an older catalog release, rather than
+placing the app away from its provider.
 
 #### A blueprint ships a template set, not a single `.env`
 
