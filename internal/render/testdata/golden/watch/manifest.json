@@ -13,7 +13,17 @@
     },
     {
       "path": "srv/paisans/f2a9/health/monitors.json",
-      "sha256": "060d95580737b76f5bff9ec6a0377da2bda330b58bcb4cfca7c4211333726d32",
+      "sha256": "dbfcd8345723ce9821f902b3771b72603e30a9701fa1028db02fbc255054ec98",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/infra/beszel-agent/beszel-agent.env",
+      "sha256": "f2e571fee8ad808aa36a5e86fe539ff19c8cfa8dad0d9dac87c0a11feaf6a490",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/infra/beszel-agent/data/fingerprint",
+      "sha256": "2b6f36ac77d3404281817007f80b38cc633b41509f40b0a5035f878394c1f40b",
       "mode": "0600"
     },
     {
@@ -23,7 +33,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/etc/Caddyfile",
-      "sha256": "ebbb2a3b50e910ace2faa789f448cc03d6d8421a9277052d94f29a139471a526",
+      "sha256": "2a28639274732cf8b0d211504f94d2905119db7cf4b4d50add84aa8d0f7e0139",
       "mode": "0644"
     },
     {
@@ -32,13 +42,43 @@
       "mode": "0644"
     },
     {
+      "path": "srv/paisans/f2a9/infra/caddy/etc/snippets/stats.caddy",
+      "sha256": "e187c46f8fa5d9f640cbef4fd0d76ad94193fb63628a581450585d2d1e6b2463",
+      "mode": "0644"
+    },
+    {
       "path": "srv/paisans/f2a9/infra/compose.yaml",
-      "sha256": "389eeaced497203fb46450468ac62b27794591ce9a4a29e328839fb7f86ebf70",
+      "sha256": "7a2a2e70967bbe049d1637284a9a04759a0ba5f7f5fa78ed9a46da51e7e9b3f2",
       "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/psns-f2a9.conf",
       "sha256": "4ba1cede133fa71b48112f99482ce5a560829722c5454723c86e895031fb56d2",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/stats/.env",
+      "sha256": "a78c19e942203a135630c6a4c3dea0417e1dae925085e491bd275ec270080c99",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/stats/compose.yaml",
+      "sha256": "bf7ec03ebcab6621641267cbfabb784a0080a694bea06184a643f05962aed2b4",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/stats/data/config.yml",
+      "sha256": "fde9a43b3e9398b2a959ea300aaf27de55092fee0f7ca2a8f22351f053639567",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/stats/data/id_ed25519",
+      "sha256": "3182712571519c47c5136ae7d18dd3fc538249891962da9bd64fbbe2198773e3",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/stats/setup.sh",
+      "sha256": "7578850fa86d789f47835f4bb03a6cadf6cc9e51d1e916efc54ed89e28e1cfda",
       "mode": "0600"
     }
   ],

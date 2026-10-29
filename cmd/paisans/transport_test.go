@@ -130,7 +130,7 @@ func TestASiteCommandRunsAgainstTheUsersDaemon(t *testing.T) {
 		t.Fatalf("want two commands, got %q", sent)
 	}
 	for _, c := range sent {
-		if !strings.HasPrefix(c, "export DOCKER_HOST='unix:///run/user/1000/docker.sock'\n") || !strings.HasSuffix(c, "\ndocker ps") {
+		if !strings.HasPrefix(c, "export DOCKER_HOST='unix:///run/user/1000/docker.sock' PAISANS_DOCKER_SOCKET='/run/user/1000/docker.sock'\n") || !strings.HasSuffix(c, "\ndocker ps") {
 			t.Errorf("a site command was sent as %q", c)
 		}
 	}

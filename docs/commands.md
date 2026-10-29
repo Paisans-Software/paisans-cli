@@ -76,8 +76,9 @@ Every command that asks for a confirmation takes `--yes`: `deployment apply`,
 `deployment apply --site`, `site prepare`, `site admit`, `site evict`, `site add`,
 `site remove`, `gateway move`, `deployment publish`, `deployment pull`,
 `deployment recover`, `operator register`, `secrets prune`, `secrets rotate`,
-`app remove`, `mesh rekey`, `prune`, `storage init`, `storage add`,
-`storage rotate-key` and `oidc client create`. No other command takes it.
+`app remove`, `mesh rekey`, `site prune`, `deployment prune`, `storage init`,
+`storage add`, `storage rotate-key` and `oidc client create`. No other command
+takes it.
 
 * **What it answers:** every word a command asks to have typed (`approve`,
   `create`, `rollback`, `prune`, `sign out`, `revoked`,
@@ -112,8 +113,8 @@ steps, and `gateway move` to its hand-off's `deployment apply`.
 Every command that changes sites takes the deployment lease with `--execute`
 and takes `--break-lease`: `deployment apply`, with or without `--site`,
 `deployment publish`, `operator register`, `site add`, `site prepare`,
-`site remove`, `app remove`, `gateway move`, `mesh rekey`, `prune`,
-`storage init`, `storage add`, `storage rotate-key`, `secrets rotate` and
+`site remove`, `app remove`, `gateway move`, `mesh rekey`, `site prune`,
+`deployment prune`, `storage init`, `storage add`, `storage rotate-key`, `secrets rotate` and
 `oidc client create`. `--break-lease` takes over another command's live lease
 once you know that command is no longer running, after the word `break`,
 which `--yes` types. Under the lease each refuses a site a newer paisans last
@@ -221,10 +222,10 @@ paisans validate --offline   # the file alone; no site is reached
   naming the fix. It reads the file without decrypting it, so it needs no age
   key.
 * **Images:** an `infra` override is refused under a key the infrastructure
-  stack does not run (`infra.images` takes etcd, haproxy, garage and
-  heartbeat), for a Postgres major the toolkit does not run, with a floating
+  stack does not run (`infra.images` takes etcd, haproxy, garage, heartbeat
+  and beszel-agent), for a Postgres major the toolkit does not run, with a floating
   tag (`latest`, or none), and outside the versions the toolkit is written
-  against (etcd v3, HAProxy 3, Garage v1, Zalando Spilo 3 and 4); an etcd,
+  against (etcd v3, HAProxy 3, Garage v1, Zalando Spilo 3 and 4, Beszel 0.21); an etcd,
   HAProxy, Garage or Zalando Spilo override is refused with a digest and no
   tag. It is warned about for a Postgres major the deployment does not run,
   for a Spilo from another provider, which the toolkit cannot check, and for
@@ -241,6 +242,10 @@ the questions it came from again, every question, writing the file as it
 stands to fix by hand, or quitting. A file refused nothing is written at once,
 to `--config` or `paisans-stack.yaml` in the current directory, and is not
 printed. It then names `init`, `site request`, `secrets set` and `deployment apply`.
+
+After a yes to the health page it asks `Server and container stats (Beszel)?`,
+and a yes declares an app `stats` of blueprint `beszel` at `status.health.<domain>`
+on the monitor's site.
 
 Each operator's keys are checked as they are pasted: a key another operator
 gave, one listed twice, and one the loader refuses are refused there.
@@ -471,6 +476,7 @@ paisans secrets rotate --all                               # dry run: every secr
 paisans secrets rotate --all --execute
 paisans secrets rotate cluster.standby_password --execute
 paisans secrets rotate apps.talk.oauth --execute           # Mbin's OAuth2 keys, as one unit
+paisans secrets rotate sites.site-a.beszel_token --execute # the hub's stack, then site-a's infra
 paisans secrets rotate external.acme_dns_token --execute   # asks for the new token, then hands it to every site using it
 security find-generic-password -s acme -w | paisans secrets set external.acme_dns_token
 paisans secrets rotate external.acme_dns_token --execute   # without a terminal: hands on the token set above
@@ -1575,21 +1581,43 @@ paisans site evict --site home-a --ssh owner@home-a.example.org --execute
 
 See *A host's owner admits a site from a request* in `README.md`.
 
-### `paisans prune`
+### `paisans site prune`
 
-Lists one site's dangling Docker volumes, with size and top level entries, and
-says which carry this deployment's label.
+Lists what one site holds that the deployment no longer runs there, and with
+`--execute` removes it: the containers of each left over service, then the
+dangling volumes carrying this deployment's label.
 
-* **Alone:** always, for volumes that accumulated before `deployment apply` removed its
-  own. Sizes are Docker's own accounting (`docker system df -v`), since the
-  deployment's user cannot read a directory a container's user owns.
-* **Flags:** `--site <name>` (required), `--config`, `--ssh`, `--execute`.
+```sh
+paisans site prune home-b             # lists remove and keep, with reasons
+paisans site prune home-b --execute   # removes the containers, then the volumes
+```
+
+* **Alone:** always. `deployment apply` lists left over services and never
+  removes them.
+* **Flags:** the site (required), `--config`, `--ssh`, `--break-lease`,
+  `--execute`, `--yes`.
 * **Hosts:** the one site's.
-* **`--execute`:** removes the volumes labelled with this deployment's id;
-  every other volume is kept.
+* **Judged against:** each stack's compose file on the host, as the last apply
+  wrote it, so it needs no secrets. A container of this deployment's whose
+  service that file no longer declares is left over, and every container of an
+  infrastructure stack the manifest marks left over.
+* **Kept:** etcd, Patroni and Garage, each listed with why: `site remove`
+  takes a site out of them. An app's whole stack is `app remove`'s. Every
+  volume without this deployment's label. Volume sizes are Docker's own
+  accounting (`docker system df -v`), since the deployment's user cannot read a
+  directory a container's user owns.
 
-See *Every volume an image declares is mounted, and `deployment apply` checks it* in
-`README.md`.
+See *`site prune` removes what a site no longer runs* and *Every volume an
+image declares is mounted, and `deployment apply` checks it* in `README.md`.
+
+### `paisans deployment prune`
+
+`site prune` on every site `paisans-stack.yaml` declares.
+
+* **Alone:** always.
+* **Flags:** `--config`, `--break-lease`, `--execute`, `--yes`.
+* **Hosts:** every site's. Each is checked and leased before any is changed; a
+  site that fails does not stop the others, and the run fails naming it.
 
 ## Applying
 

@@ -33,29 +33,32 @@ type MonitorReseed struct {
 	// reads it, so a caller may set it after planning.
 	KeepImages bool
 
-	plan     *Plan
-	rendered *render.Plan
-	acme     string
-	t        Transport
+	blueprint config.Blueprint
+	plan      *Plan
+	rendered  *render.Plan
+	acme      string
+	t         Transport
 }
 
-// PlanMonitorReseeds plans the reseed of every uptime app pinned to a site
-// holding the monitor role, reading each monitor site and changing none. A
-// deployment with no monitor site plans none. Every monitor site must have a
-// transport: the monitor is written to, so a command that cannot reach it
-// cannot finish.
+// PlanMonitorReseeds plans the reseed of every uptime app and the beszel hub
+// pinned to a site holding the monitor role, reading each monitor site and
+// changing none. The hub renders data/config.yml from the sites the same way
+// the monitor renders its seed, one system per site, so a site that joins or
+// leaves moves it too. A deployment with no monitor site plans none. Every
+// monitor site must have a transport: the monitor is written to, so a command
+// that cannot reach it cannot finish.
 func PlanMonitorReseeds(cfg *config.Config, rendered *render.Plan, acmeModule string, transports map[string]Transport) ([]*MonitorReseed, error) {
 	var out []*MonitorReseed
 	for _, site := range cfg.MonitorSites() {
 		for _, app := range cfg.PinnedTo(site) {
-			if cfg.Apps[app].Blueprint != config.BlueprintUptime {
+			if !Reseeded(cfg.Apps[app].Blueprint) {
 				continue
 			}
 			t, ok := transports[site]
 			if !ok {
 				return nil, fmt.Errorf("no way to reach the monitor site %s, whose %s is reseeded with the sites and apps as they are after this change", site, app)
 			}
-			m := &MonitorReseed{Site: site, App: app, rendered: rendered, acme: acmeModule, t: t}
+			m := &MonitorReseed{Site: site, App: app, blueprint: cfg.Apps[app].Blueprint, rendered: rendered, acme: acmeModule, t: t}
 			if err := m.build(); err != nil {
 				return nil, err
 			}
@@ -63,6 +66,12 @@ func PlanMonitorReseeds(cfg *config.Config, rendered *render.Plan, acmeModule st
 		}
 	}
 	return out, nil
+}
+
+// Reseeded reports whether a blueprint's stack is rendered from the whole
+// deployment's sites, and so applied again after a topology change.
+func Reseeded(b config.Blueprint) bool {
+	return b == config.BlueprintUptime || b == config.BlueprintBeszel
 }
 
 // build plans the stack's apply as it stands now.
@@ -85,7 +94,16 @@ func (m *MonitorReseed) build() error {
 func (m *MonitorReseed) dep() deployment.Deployment { return m.rendered.Deployment }
 
 // Seed is the seed file's path on the host.
-func (m *MonitorReseed) Seed() string { return m.dep().Path(m.App, "monitors.json") }
+func (m *MonitorReseed) Seed() string { return m.dep().Path(m.App, m.seedRel()) }
+
+// seedRel is the seed's path inside the app's directory: the monitor's
+// monitors.json, or the hub's data/config.yml.
+func (m *MonitorReseed) seedRel() string {
+	if m.blueprint == config.BlueprintBeszel {
+		return "data/config.yml"
+	}
+	return "monitors.json"
+}
 
 // Pending reports whether the reseed has anything to write or run.
 func (m *MonitorReseed) Pending() bool {
@@ -107,7 +125,11 @@ func (m *MonitorReseed) Steps() []MonitorStep {
 		if a.Recreate {
 			verb = "recreate"
 		}
-		out = append(out, MonitorStep{verb, fmt.Sprintf("%s, so the monitor reconciles its managed monitors from the seed, adding what is new and deleting what is gone: %s", m.App, a.Command(m.dep()))})
+		why := "so the monitor reconciles its managed monitors from the seed, adding what is new and deleting what is gone"
+		if m.blueprint == config.BlueprintBeszel {
+			why = "so the hub reads the systems the sites now make"
+		}
+		out = append(out, MonitorStep{verb, fmt.Sprintf("%s, %s: %s", m.App, why, a.Command(m.dep()))})
 	}
 	if len(out) > 0 {
 		out = append(out, MonitorStep{"check", fmt.Sprintf("%s runs and is healthy, as apply's gate, and %s matches the render", m.App, m.Seed())})
@@ -135,7 +157,7 @@ func (m *MonitorReseed) Execute() error {
 func (m *MonitorReseed) Gate() error {
 	want := ""
 	for _, f := range m.rendered.Files {
-		if f.Path == m.Site+"/"+m.dep().RelPath(m.App, "monitors.json") {
+		if f.Path == m.Site+"/"+m.dep().RelPath(m.App, m.seedRel()) {
 			want = f.Content
 		}
 	}

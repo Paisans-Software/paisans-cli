@@ -49,7 +49,7 @@ func (p *Plan) Show(r ui.Reporter) {
 		last = ""
 	}
 	for _, s := range p.Sites {
-		if s.Empty() {
+		if s.appEmpty() {
 			if r.Verbose() {
 				r.Step(fmt.Sprintf("%s: nothing of %s", s.Site, p.App)).End(ui.OK, "")
 			}
@@ -96,6 +96,25 @@ func (p *Plan) Show(r ui.Reporter) {
 				line("delete volumes", "volume %s", v)
 			} else {
 				kept("keep volumes", "volume %s. --delete-data deletes it", v)
+			}
+		}
+	}
+	for _, s := range p.Sites {
+		if !s.agent() {
+			continue
+		}
+		section("%s (the Beszel agent)", s.Site)
+		for _, name := range s.Agents {
+			line("stop the Beszel agent", "stop %s, whose hub is removed: `up -d` leaves a service its compose file dropped running", name)
+		}
+		for _, f := range s.AgentFiles {
+			switch f.State {
+			case Remove:
+				line("remove the agent's files", "/%s", f.Entry.Path)
+			case Gone:
+				line("drop manifest entries", "the manifest entry for /%s, whose file is gone", f.Entry.Path)
+			case Edited:
+				edited("keep /%s and its manifest entry: edited on the host since apply wrote it", f.Entry.Path)
 			}
 		}
 	}
@@ -163,6 +182,11 @@ func Remains(p *Plan, secrets *config.Secrets, kept []string) []string {
 		}
 		if len(keys) > 0 {
 			out = append(out, secretsLeft(p.App, strings.Join(keys, ", ")))
+		}
+	}
+	for _, s := range p.Sites {
+		if s.AgentOwed {
+			out = append(out, agentOwed(s.Site))
 		}
 	}
 	out = append(out, dnsLeft())

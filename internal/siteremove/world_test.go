@@ -531,7 +531,7 @@ func (h *host) Run(command string) (string, error) {
 		return b.String(), nil
 	case command == "docker image ls --no-trunc --format json":
 		return "", nil
-	case strings.HasSuffix(command, root+"/health/compose.yaml restart"):
+	case strings.HasSuffix(command, root+"/health/compose.yaml restart"), strings.HasSuffix(command, root+"/stats/compose.yaml restart"):
 		return "", nil
 
 	// patroni.env on a replica, and the witness's etcd container
@@ -1486,10 +1486,10 @@ func worldConfig(t *testing.T, edits ...func(string) string) (*config.Config, *c
 	if err != nil {
 		t.Fatal(err)
 	}
-	secrets.Sites["home-c"] = config.SiteSecrets{WireGuardPrivateKey: "REREREREREREREREREREREREREREREREREREREREREQ=", HeartbeatToken: "6666666666666666666666666666ffff"}
+	secrets.Sites["home-c"] = config.SiteSecrets{WireGuardPrivateKey: "REREREREREREREREREREREREREREREREREREREREREQ=", HeartbeatToken: "6666666666666666666666666666ffff", BeszelToken: "b666666666666666666666666666ffffb666666666666666666666666666ffff"}
 	// box is a site only some worlds declare.
-	secrets.Sites["box"] = config.SiteSecrets{WireGuardPrivateKey: "RUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUU=", HeartbeatToken: "7777777777777777777777777777aaaa"}
-	secrets.Sites["home-d"] = config.SiteSecrets{WireGuardPrivateKey: "RkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkY=", HeartbeatToken: "8888888888888888888888888888bbbb"}
+	secrets.Sites["box"] = config.SiteSecrets{WireGuardPrivateKey: "RUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUU=", HeartbeatToken: "7777777777777777777777777777aaaa", BeszelToken: "b777777777777777777777777777aaaab777777777777777777777777777aaaa"}
+	secrets.Sites["home-d"] = config.SiteSecrets{WireGuardPrivateKey: "RkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkY=", HeartbeatToken: "8888888888888888888888888888bbbb", BeszelToken: "b888888888888888888888888888bbbbb888888888888888888888888888bbbb"}
 	return cfg, secrets, path
 }
 

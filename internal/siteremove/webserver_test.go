@@ -103,9 +103,10 @@ func TestHostGoneSaysWhatTheOwnersWebServerStillCarries(t *testing.T) {
 	watch := w.cfg.Sites["watch"]
 	watch.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480"}
 	w.cfg.Sites["watch"] = watch
-	// Its app was removed first, as app remove does, while the host was
+	// Its apps were removed first, as app remove does, while the host was
 	// still there.
 	delete(w.cfg.Apps, "health")
+	delete(w.cfg.Apps, "stats")
 	p, err := w.build("watch", siteremove.Options{HostGone: true})
 	if err != nil {
 		t.Fatal(err)

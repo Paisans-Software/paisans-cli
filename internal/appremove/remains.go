@@ -50,6 +50,10 @@ func bucketAliases(name string, global, local int) string {
 	return fmt.Sprintf("a bucket kept; it has extra aliases. The bucket is %s, with %d global and %d key specific aliases, where storage init gives it one", name, global, local)
 }
 
+func agentOwed(site string) string {
+	return fmt.Sprintf("%s: its Beszel agent still runs, with no hub to dial; apply the site, then run this again to stop it. Its infra stack has not been applied since the hub left the configuration, so it still renders the agent: run `%s deployment apply --site %s --execute`", site, progname.Cmd(), site)
+}
+
 func dirEdited(site, dir string) string {
 	return fmt.Sprintf("%s: stack directory kept, because a file in it was edited on the host. It is %s, with its data", site, dir)
 }

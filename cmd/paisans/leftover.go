@@ -14,8 +14,10 @@ import (
 )
 
 // printLeftovers is apply's "left over" section: this deployment's stacks
-// still on the host that the site no longer renders, and its files that no
-// apply renders any more. A whole plan's left over files are what it is about
+// still on the host that the site no longer renders, its files that no apply
+// renders any more, and its containers for a service a stack's rendered
+// compose file no longer declares, which compose leaves running and site
+// prune removes. A whole plan's left over files are what it is about
 // to record; a scoped or partial plan marks nothing, so the manifest's marks
 // from the last whole apply are shown. Each is a warning naming `paisans app
 // remove` for the app it belongs to, which is what takes it off, so the
@@ -39,12 +41,18 @@ func printLeftovers(r ui.Reporter, cfg *config.Config, site string, inv *hostche
 	if err != nil {
 		return err
 	}
+	declared, err := plan.DeclaredServices()
+	if err != nil {
+		return err
+	}
+	report.Services = ownership.UndeclaredServices(cfg.Deployment(), inv, declared)
 	lines := report.LeftoverLines()
 	if len(lines) == 0 {
 		return nil
 	}
 	r.Detail("left over: this deployment's, no longer rendered for %s. apply leaves each one in place.", site)
-	// LeftoverLines describes the stacks, then the files, in that order.
+	// LeftoverLines describes the stacks, then the files, then the services,
+	// in that order.
 	hint := func(what, app string) string {
 		if app == "" {
 			return "left over: " + what
@@ -60,6 +68,19 @@ func printLeftovers(r ui.Reporter, cfg *config.Config, site string, inv *hostche
 	}
 	for i, f := range report.Files {
 		r.Warn(hint("file /"+f.Path, ownership.FileApp(f.Path)), lines[len(report.Stacks)+i])
+	}
+	pruned := false
+	for i, s := range report.Services {
+		line := lines[len(report.Stacks)+len(report.Files)+i]
+		if s.Kept != "" {
+			r.Warn(fmt.Sprintf("left over: service %s of stack %s", s.Name, s.Stack), line+". It is "+s.Kept+".")
+			continue
+		}
+		pruned = true
+		r.Warn(fmt.Sprintf("left over: service %s of stack %s (`%s site prune %s`)", s.Name, s.Stack, progname.Cmd(), site), line)
+	}
+	if pruned {
+		r.Detail("`%s site prune %s` removes the containers of each left over service once this apply has written its compose files; their data under the stack's directory stays", progname.Cmd(), site)
 	}
 	for _, line := range removeAdvice(report) {
 		r.Detail("%s", line)

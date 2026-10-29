@@ -48,6 +48,7 @@ func appAnswers(chat bool) []string {
 	}
 	return append(out,
 		"", "", "", // health page: yes, hostname, display name
+		"", "", "", // stats: yes, hostname, display name
 		"", "", "203.0.113.50", "", "", // its machine: where (its own), name, address, ssh host, user
 	)
 }
@@ -259,6 +260,64 @@ func TestDecliningTheHealthPageDropsIt(t *testing.T) {
 	}
 }
 
+// The stats question follows the health page: a yes declares Beszel under the
+// health page's label and pins it to the monitor's machine beside the uptime
+// monitor.
+func TestStatsAreOfferedAfterTheHealthPage(t *testing.T) {
+	var lines []string
+	lines = append(lines, communityAnswers...)
+	lines = append(lines, adminAnswers...)
+	lines = append(lines, shapeAnswers[ShapeOneMachine]...)
+	lines = append(lines, "")
+	lines = append(lines, managementAnswers...)
+	lines = append(lines, "n", "n", "n") // no forums, wiki or blog
+	lines = append(lines, "", "", "")    // health page: yes, hostname, display name
+	lines = append(lines, "", "", "")    // stats: yes, hostname, display name
+	lines = append(lines, "", "", "203.0.113.50", "", "")
+	lines = append(lines, mailAnswers...)
+	w, out, err := run(t, script(lines...))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if want := "Server and container stats (Beszel)? [Y/n]: "; !strings.Contains(out, want) {
+		t.Errorf("missing %q:\n%s", want, out)
+	}
+	app, ok := w.Answers.App(statsApp)
+	if !ok || app.Blueprint != config.BlueprintBeszel || app.Hostname != "status.health.example.org" {
+		t.Fatalf("stats not declared as expected: %+v", w.Answers.Apps)
+	}
+	data, err := Render(w.Answers, testID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "  stats:\n    blueprint: beszel\n    hostname: status.health.example.org\n    placement: { pinned: health }\n") {
+		t.Errorf("stats not pinned to the monitor site:\n%s", data)
+	}
+}
+
+// Without a health page there is no monitor site for the hub, so the question
+// is not asked.
+func TestStatsAreNotOfferedWithoutTheHealthPage(t *testing.T) {
+	var lines []string
+	lines = append(lines, communityAnswers...)
+	lines = append(lines, adminAnswers...)
+	lines = append(lines, shapeAnswers[ShapeOneMachine]...)
+	lines = append(lines, "")
+	lines = append(lines, managementAnswers...)
+	lines = append(lines, "n", "n", "n", "n")
+	lines = append(lines, mailAnswers...)
+	w, out, err := run(t, script(lines...))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if strings.Contains(out, "Beszel") {
+		t.Errorf("stats were offered without a health page:\n%s", out)
+	}
+	if _, ok := w.Answers.App(statsApp); ok {
+		t.Errorf("stats declared without a health page: %+v", w.Answers.Apps)
+	}
+}
+
 // Choosing the gateway puts the monitor beside it, offered by the gateway
 // site's name with what it costs, and answering the machines again with the
 // gateway renamed keeps it there.
@@ -273,6 +332,7 @@ func TestTheHealthPageOnTheGateway(t *testing.T) {
 		"n", "n", "n", // no forums, wiki or blog
 		"n",        // no chat
 		"", "", "", // health page: yes, hostname, display name
+		"", "", "", // stats: yes, hostname, display name
 		"2", // on the gateway
 	)
 	lines = append(lines, mailAnswers...)
@@ -439,7 +499,7 @@ func TestAnsweringAgainKeepsTheHealthPageOnTheGateway(t *testing.T) {
 	lines = append(lines, shapeAnswers[ShapeHomeAndVPS]...)
 	lines = append(lines, "")
 	lines = append(lines, managementAnswers...)
-	lines = append(lines, "n", "n", "n", "n", "", "", "", "2")
+	lines = append(lines, "n", "n", "n", "n", "", "", "", "", "", "", "2")
 	lines = append(lines, mailAnswers...)
 	w, out, err := run(t, script(lines...))
 	if err != nil {
@@ -471,7 +531,8 @@ func TestDisplayNameIsAskedAndKept(t *testing.T) {
 		"n",                // no forums
 		"", "", "Wiki", "", // wiki: yes, hostname, display name, members only
 		"n", "n", // no blog or chat
-		"", "", "", "2", // health page: yes, hostname, display name, on the gateway
+		"", "", "", // health page: yes, hostname, display name
+		"", "", "", "2", // stats: yes, hostname, display name, health page on the gateway
 	)
 	lines = append(lines, mailAnswers...)
 	w, out, err := run(t, script(lines...))

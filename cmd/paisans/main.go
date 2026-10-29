@@ -94,8 +94,10 @@ func main() {
 			err = runSiteDeployments(os.Args[3:])
 		case len(os.Args) >= 3 && os.Args[2] == "ssh":
 			err = runSiteSSH(os.Args[3:])
+		case len(os.Args) >= 3 && os.Args[2] == "prune":
+			err = runSitePrune(os.Args[3:], os.Stdin, os.Stdout)
 		default:
-			os.Exit(groupError(os.Stderr, "site", "site takes one subcommand, list, request, admit, prepare, add, remove, evict, deployments or ssh"))
+			os.Exit(groupError(os.Stderr, "site", "site takes one subcommand, list, request, admit, prepare, add, remove, evict, deployments, ssh or prune"))
 		}
 	case "mesh":
 		err = runMesh(os.Args[2:])
@@ -103,7 +105,7 @@ func main() {
 		err = runGateway(os.Args[2:])
 	case "deployment":
 		if len(os.Args) < 3 {
-			os.Exit(groupError(os.Stderr, "deployment", "deployment takes one subcommand, apply, list, fetch, publish, pull, log or recover"))
+			os.Exit(groupError(os.Stderr, "deployment", "deployment takes one subcommand, apply, prune, list, fetch, publish, pull, log or recover"))
 		}
 		err = runDeployment(os.Args[2:], os.Stdin, os.Stdout)
 	case "operator":
@@ -131,8 +133,6 @@ func main() {
 		default:
 			os.Exit(groupError(os.Stderr, "storage", "storage takes one subcommand, init, add or rotate-key"))
 		}
-	case "prune":
-		err = runPrune(os.Args[2:])
 	case "preflight":
 		err = runPreflight(os.Args[2:])
 	case "failover":

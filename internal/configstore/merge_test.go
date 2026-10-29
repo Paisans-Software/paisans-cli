@@ -108,6 +108,24 @@ func TestMergeKeepsTheStructFieldsAndLeavesInputsAlone(t *testing.T) {
 	}
 }
 
+// A site's beszel_token merges and is removed as a field of its own, beside
+// the site's other secrets rather than in place of one of them.
+func TestMergeCarriesASitesBeszelToken(t *testing.T) {
+	base := secretsWith("sites.a.heartbeat_token", "t", "sites.a.beszel_token", "b")
+	ours := secretsWith("sites.a.heartbeat_token", "t2", "sites.a.beszel_token", "b")
+	theirs := secretsWith("sites.a.heartbeat_token", "t", "sites.a.beszel_token", "b2")
+	m, conflicts := mustMerge(t, base, ours, theirs)
+	want := map[string]string{"sites.a.heartbeat_token": "t2", "sites.a.beszel_token": "b2"}
+	if got := flatten(m); len(conflicts) != 0 || !reflect.DeepEqual(got, want) {
+		t.Fatalf("merged %v, conflicts %v, want %v", got, conflicts, want)
+	}
+	removed := secretsWith("sites.a.heartbeat_token", "t")
+	m, conflicts = mustMerge(t, base, base, removed)
+	if got := flatten(m); len(conflicts) != 0 || !reflect.DeepEqual(got, map[string]string{"sites.a.heartbeat_token": "t"}) {
+		t.Fatalf("after removal %v, conflicts %v", got, conflicts)
+	}
+}
+
 // populated fills every yaml-tagged field of v, and returns the paths the
 // flattener is expected to produce for it, using "k" for every map key.
 func populated(v reflect.Value, prefix []string, paths *[]string) {

@@ -199,7 +199,7 @@ func TestForSite(t *testing.T) {
 	if got, want := ForSite(cfg, "vm"), (Runs{Etcd: true, Caddy: true, Gate: true}); got != want {
 		t.Errorf("vm: %+v, want %+v", got, want)
 	}
-	if got, want := ForSite(cfg, "watch"), (Runs{Caddy: true, Uptime: true}); got != want {
+	if got, want := ForSite(cfg, "watch"), (Runs{Caddy: true, Uptime: true, Beszel: true}); got != want {
 		t.Errorf("watch: %+v, want %+v", got, want)
 	}
 
@@ -313,5 +313,32 @@ func TestSize(t *testing.T) {
 		if got := Size(n); got != want {
 			t.Errorf("Size(%d) = %q, want %q", n, got, want)
 		}
+	}
+}
+
+// The Beszel hub is counted on the site its app is pinned to, and on no
+// other. Admit judges by roles alone, and a monitor need not run a hub, so
+// ForRoles never counts one.
+func TestFloorBeszel(t *testing.T) {
+	cfg := fixtureConfig(t)
+	cfg.Apps["stats"] = config.App{Blueprint: config.BlueprintBeszel, Hostname: "status.health.example.org",
+		Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch"}}
+	r := ForSite(cfg, "watch")
+	if !r.Beszel {
+		t.Fatalf("watch, holding the stats app: %+v, want Beszel", r)
+	}
+	if !slices.Contains(r.Parts(), Part{"the Beszel hub", FloorBeszel}) {
+		t.Errorf("watch's parts %v leave out the Beszel hub", r.Parts())
+	}
+	if got, want := r.Floor(), int64(FloorBase+FloorCaddy+FloorUptime+FloorBeszel); got != want {
+		t.Errorf("watch: %s, want %s", Size(got), Size(want))
+	}
+	for _, site := range []string{"home-a", "home-b", "vm"} {
+		if ForSite(cfg, site).Beszel {
+			t.Errorf("%s, which holds no beszel app, is counted with the hub", site)
+		}
+	}
+	if byRoles(config.RoleMonitor).Beszel {
+		t.Error("a monitor judged by its roles is counted with a hub it may not run")
 	}
 }

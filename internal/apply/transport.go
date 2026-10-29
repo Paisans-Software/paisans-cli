@@ -288,10 +288,17 @@ func (t SSHTransport) sectionOptions() []string {
 // With dockerHost, the command runs after `export DOCKER_HOST=<dockerHost>`,
 // inside the same encoded word, so every docker the command starts, in a
 // pipeline or a subshell as much as at its head, reaches the login user's
-// own daemon.
+// own daemon. A unix:// host's socket path is exported beside it, on the same
+// line, as PAISANS_DOCKER_SOCKET: the infrastructure stack's Beszel agent
+// mounts that socket, and its compose file names the variable because the
+// user's UID, and so the path, is learnt over ssh after rendering.
 func RemoteCommand(dockerHost, command string) string {
 	if dockerHost != "" {
-		command = "export DOCKER_HOST=" + shellQuote(dockerHost) + "\n" + command
+		export := "export DOCKER_HOST=" + shellQuote(dockerHost)
+		if socket, ok := strings.CutPrefix(dockerHost, "unix://"); ok {
+			export += " PAISANS_DOCKER_SOCKET=" + shellQuote(socket)
+		}
+		command = export + "\n" + command
 	}
 	return `sh -c 'eval "$(printf %s ` + base64.StdEncoding.EncodeToString([]byte(command)) + ` | base64 -d)"'`
 }

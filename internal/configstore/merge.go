@@ -175,6 +175,7 @@ func flatten(s *config.Secrets) map[string]string {
 		put("sites."+name+".wireguard_private_key", site.WireGuardPrivateKey)
 		put("sites."+name+".wireguard_next_private_key", site.WireGuardNextPrivateKey)
 		put("sites."+name+".heartbeat_token", site.HeartbeatToken)
+		put("sites."+name+".beszel_token", site.BeszelToken)
 	}
 	for app, values := range s.Apps {
 		for key, v := range values {
@@ -258,6 +259,8 @@ func assign(dst, src *config.Secrets, path string) error {
 		switch parts[2] {
 		case "heartbeat_token":
 			site.HeartbeatToken = from.HeartbeatToken
+		case "beszel_token":
+			site.BeszelToken = from.BeszelToken
 		case "wireguard_next_private_key":
 			site.WireGuardNextPrivateKey = from.WireGuardNextPrivateKey
 		default:
@@ -309,6 +312,8 @@ func remove(s *config.Secrets, path string) error {
 		switch parts[2] {
 		case "heartbeat_token":
 			site.HeartbeatToken = ""
+		case "beszel_token":
+			site.BeszelToken = ""
 		case "wireguard_next_private_key":
 			site.WireGuardNextPrivateKey = ""
 		default:

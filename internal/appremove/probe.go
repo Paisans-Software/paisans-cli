@@ -37,8 +37,8 @@ type Clients interface {
 }
 
 // ProbeSite reads one site: its inventory (internal/hostcheck, reads
-// only), the host's copy of each of the app's manifest files, and the app's
-// stack directory.
+// only), the host's copy of each of the app's manifest files and of a
+// hubless Beszel agent's (AgentFile), and the app's stack directory.
 func ProbeSite(cfg *config.Config, app, site string, h Host) (SiteState, error) {
 	d := cfg.Deployment()
 	st := SiteState{Site: site, Hashes: map[string]string{}}
@@ -48,7 +48,7 @@ func ProbeSite(cfg *config.Config, app, site string, h Host) (SiteState, error) 
 	}
 	st.Inventory = inv
 	for _, e := range inv.ManifestFiles {
-		if !AppFile(cfg, app, e.Path) {
+		if !AppFile(cfg, app, e.Path) && !AgentFile(cfg, e.Path) {
 			continue
 		}
 		content, found, err := h.ReadFile("/" + e.Path)

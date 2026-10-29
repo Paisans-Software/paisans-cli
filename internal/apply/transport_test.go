@@ -918,3 +918,22 @@ func TestShellArgsForASection(t *testing.T) {
 		t.Fatalf("shell args:\n got %q\nwant %q", got, want)
 	}
 }
+
+// A unix:// docker host's socket path is exported as PAISANS_DOCKER_SOCKET
+// beside DOCKER_HOST, on its line, for the Beszel agent's mount; any other
+// host exports DOCKER_HOST alone.
+func TestRemoteCommandExportsSocket(t *testing.T) {
+	got, ok := apply.InnerCommand(apply.RemoteCommand("unix:///run/user/1001/docker.sock", "true"))
+	want := "export DOCKER_HOST='unix:///run/user/1001/docker.sock' PAISANS_DOCKER_SOCKET='/run/user/1001/docker.sock'\ntrue"
+	if !ok || got != want {
+		t.Errorf("decoded %q, want %q", got, want)
+	}
+	got, ok = apply.InnerCommand(apply.RemoteCommand("tcp://10.44.0.1:2375", "true"))
+	if want := "export DOCKER_HOST='tcp://10.44.0.1:2375'\ntrue"; !ok || got != want {
+		t.Errorf("decoded %q, want %q", got, want)
+	}
+	out, err := exec.Command("sh", "-c", apply.RemoteCommand("unix:///run/user/1001/docker.sock", `printf %s "$PAISANS_DOCKER_SOCKET"`)).Output()
+	if err != nil || string(out) != "/run/user/1001/docker.sock" {
+		t.Errorf("PAISANS_DOCKER_SOCKET was %q, %v", out, err)
+	}
+}

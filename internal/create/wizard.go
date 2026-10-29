@@ -439,7 +439,11 @@ func (w *Wizard) apps() error {
 		return err
 	}
 	health := false
+	declared := map[string]bool{}
 	for _, c := range offered {
+		if c.needs != "" && !declared[c.needs] {
+			continue
+		}
 		if c.separateSites && len(a.Sites) < 2 {
 			w.p.Say("%s needs a second machine: its apps share ports with the roles one machine holds, so it is not offered here.", c.name)
 			continue
@@ -477,6 +481,7 @@ func (w *Wizard) apps() error {
 				}
 			}
 			apps = append(apps, app)
+			declared[app.Key] = true
 		}
 		health = health || c.apps[0].key == healthApp
 	}
@@ -488,7 +493,7 @@ func (w *Wizard) apps() error {
 			return err
 		}
 		if !keep {
-			apps = slices.DeleteFunc(apps, func(app App) bool { return app.Key == healthApp })
+			apps = slices.DeleteFunc(apps, func(app App) bool { return app.Key == healthApp || app.Key == statsApp })
 		}
 	} else {
 		a.Monitor, a.MonitorOnGateway = nil, false

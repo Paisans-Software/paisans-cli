@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"golang.org/x/crypto/ssh"
 	"gopkg.in/yaml.v3"
 
 	"github.com/paisans-software/paisans-cli/internal/blueprints/coretest"
@@ -45,6 +46,21 @@ secrets:
     - {name: data_key, format: hex32, never_rotate: "it encrypts the app's data"}
 `
 
+// hubkeyBlueprint declares an Ed25519 pair as one group.
+const hubkeyBlueprint = `apiVersion: paisans.blueprint/v1
+name: hubkey
+services:
+  - {name: app, image: "example/app:1"}
+database: {engine: none}
+port: 8000
+config: {format: env, file: .env}
+health: {path: /status, status: [200]}
+secrets:
+  generate:
+    - {name: hub_key, format: ed25519-openssh, group: hub, rotation_cost: restart}
+    - {name: hub_key_public, format: ed25519-public, of: hub_key, group: hub}
+`
+
 // declaredWorld is mqWorld with its apps on a catalog blueprint that
 // declares their rotations, rather than on Mbin.
 func declaredWorld(t *testing.T) *mqWorld {
@@ -55,6 +71,8 @@ func declaredWorld(t *testing.T) *mqWorld {
 		"catalog.yaml":                        "apiVersion: paisans.catalog/v1\nname: example\n",
 		"blueprints/broker/blueprint.yaml":    brokerBlueprint,
 		"blueprints/broker/compose.yaml.tmpl": "services: {}\n",
+		"blueprints/hubkey/blueprint.yaml":    hubkeyBlueprint,
+		"blueprints/hubkey/compose.yaml.tmpl": "services: {}\n",
 	} {
 		p := filepath.Join(repo, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
@@ -186,5 +204,58 @@ func TestADeclaredSecretIsReplacedOnlyAsItsBlueprintAllows(t *testing.T) {
 	}
 	if _, err := secretsgen.ReplacementIn(w.cfg, "apps.forum.oauth_private_key", w.store.s); err == nil || !strings.Contains(err.Error(), "apps.forum.oauth") {
 		t.Errorf("a keypair alone: %v", err)
+	}
+}
+
+// Rotating a group holding an Ed25519 pair replaces both halves together, and
+// a next value whose public half is not the private key's is refused.
+func TestRotateEd25519GroupKeepsHalves(t *testing.T) {
+	w := declaredWorld(t)
+	for _, name := range []string{"forum"} {
+		app := w.cfg.Apps[name]
+		app.Blueprint = "ex/hubkey"
+		w.cfg.Apps[name] = app
+	}
+	if problems := config.ResolveBlueprints(w.cfg); len(problems) > 0 {
+		t.Fatal(problems)
+	}
+	priv, pub, err := secretsgen.ReplacementEd25519()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.store.s.Apps["forum"]["hub_key"] = priv
+	w.store.s.Apps["forum"]["hub_key_public"] = pub
+	r := AppGroup(w.cfg, "forum", "hub")
+	next, err := r.Next(w.env(), w.store.s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Promote(w.store.s, next); err != nil {
+		t.Fatal(err)
+	}
+	key, _ := w.store.s.Get("apps.forum.hub_key")
+	public, _ := w.store.s.Get("apps.forum.hub_key_public")
+	if key == priv || public == pub {
+		t.Fatal("the pair was not replaced")
+	}
+	raw, err := ssh.ParseRawPrivateKey([]byte(key))
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.NewSignerFromKey(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey()))); public != want {
+		t.Errorf("public half %q does not match the private key, want %q", public, want)
+	}
+	var values map[string]string
+	if err := yaml.Unmarshal([]byte(next), &values); err != nil {
+		t.Fatal(err)
+	}
+	values["hub_key_public"] = pub
+	broken, _ := yaml.Marshal(values)
+	if err := r.Promote(w.store.s, string(broken)); err == nil || !strings.Contains(err.Error(), "half") {
+		t.Errorf("a mismatched public half: %v", err)
 	}
 }

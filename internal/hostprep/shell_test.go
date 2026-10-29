@@ -85,22 +85,47 @@ func TestAnOldBlockIsReplacedInPlace(t *testing.T) {
 }
 
 // The block runs under sh and bash alike: it sets XDG_RUNTIME_DIR when the
-// session has none, keeps one it has, and points DOCKER_HOST under it.
+// session has none, keeps one it has, and points DOCKER_HOST under it, with
+// PAISANS_DOCKER_SOCKET the same socket's path.
 func TestTheBlockSetsDockerHost(t *testing.T) {
 	block := hostprep.WithBashrcBlock(fixture(t).Deployment(), "")
 	for _, c := range []struct{ env, want string }{
 		{"", "unix:///run/user/"},
 		{"XDG_RUNTIME_DIR=/tmp/xdg", "unix:///tmp/xdg/docker.sock"},
 	} {
-		cmd := exec.Command("sh", "-c", block+`printf %s "$DOCKER_HOST"`)
+		cmd := exec.Command("sh", "-c", block+`printf '%s %s' "$DOCKER_HOST" "$PAISANS_DOCKER_SOCKET"`)
 		cmd.Env = []string{"PATH=/usr/bin:/bin"}
 		if c.env != "" {
 			cmd.Env = append(cmd.Env, c.env)
 		}
 		out, err := cmd.CombinedOutput()
-		if err != nil || !strings.HasPrefix(string(out), c.want) {
-			t.Errorf("%q: DOCKER_HOST %q (%v), want it to start %q", c.env, out, err, c.want)
+		host, socket, _ := strings.Cut(string(out), " ")
+		if err != nil || !strings.HasPrefix(host, c.want) {
+			t.Errorf("%q: DOCKER_HOST %q (%v), want it to start %q", c.env, host, err, c.want)
 		}
+		if "unix://"+socket != host || !strings.HasSuffix(socket, "/docker.sock") {
+			t.Errorf("%q: PAISANS_DOCKER_SOCKET %q, want the path of DOCKER_HOST %q", c.env, socket, host)
+		}
+	}
+}
+
+// A host prepared before the block exported PAISANS_DOCKER_SOCKET holds the
+// block as it was then, which differs from today's, so prepare rewrites it.
+func TestABlockWithoutTheSocketIsRewritten(t *testing.T) {
+	host := preparedHost(false)
+	before := "# >>> paisans-f2a9 >>>\n" +
+		"# Kept by paisans site prepare, which replaces anything between these markers.\n" +
+		`[ -n "$XDG_RUNTIME_DIR" ] || export XDG_RUNTIME_DIR="/run/user/$(id -u)"` + "\n" +
+		`export DOCKER_HOST="unix://$XDG_RUNTIME_DIR/docker.sock"` + "\n" +
+		"# <<< paisans-f2a9 <<<\n"
+	host.files[bashrcPath] = before + ubuntuBashrc
+	steps := shellSteps(t, host)
+	if len(steps) != 1 || steps[0].Title != "set DOCKER_HOST in .bashrc" {
+		t.Fatalf("steps %+v, want the .bashrc rewritten", steps)
+	}
+	got := written(t, steps[0])
+	if !strings.Contains(got, `export PAISANS_DOCKER_SOCKET="$XDG_RUNTIME_DIR/docker.sock"`) || strings.Count(got, "# >>> paisans-f2a9 >>>") != 1 {
+		t.Errorf("bashrc:\n%s", got)
 	}
 }
 

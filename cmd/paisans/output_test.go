@@ -422,10 +422,10 @@ func fixtureRuns(t *testing.T) map[string]string {
 		"site prepare dry run": {"site prepare", "--config", cfg, "--site", "home-a"},
 		"site add dry run":     {"site add", "home-b", "--config", "join.yaml", "--secrets", secrets},
 		"storage add dry run":  {"storage add", "--config", cfg, "--secrets", secrets},
-		"prune dry run":        {"prune", "--config", cfg, "--site", "home-a"},
+		"site prune dry run":   {"site prune", "home-a", "--config", cfg},
 	} {
 		run := map[string]func([]string) error{
-			"site prepare": runSitePrepare, "site add": func(a []string) error { return runSiteAdd(a, strings.NewReader(""), io.Discard) }, "storage add": runStorageAdd, "prune": runPrune,
+			"site prepare": runSitePrepare, "site add": func(a []string) error { return runSiteAdd(a, strings.NewReader(""), io.Discard) }, "storage add": runStorageAdd, "site prune": func(a []string) error { return runSitePrune(a, strings.NewReader(""), io.Discard) },
 		}[args[0]]
 		runs[name] = runDefault(t, name, func() error { return run(args[1:]) })
 	}

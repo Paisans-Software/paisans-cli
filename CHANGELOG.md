@@ -10,6 +10,18 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+## [0.3.0-rc.17] - 2026-10-29
+
+### Added
+
+- The `beszel` blueprint runs Beszel's hub on the monitor site, signed in through Pocket ID only, and an agent in every site's infra stack; `paisans create` offers it; run `site prepare` on hosts prepared earlier.
+- `deployment apply` lists, under `left over`, each container of a stack still rendered whose service the stack no longer declares.
+- `site prune` removes those containers, keeping etcd, Patroni and Garage, then this deployment's dangling volumes; `deployment prune` runs it on every site.
+
+### Removed
+
+- `prune --site`, whose volume removal `site prune` now does.
+
 ## [0.3.0-rc.16] - 2026-10-29
 
 ### Changed
@@ -382,7 +394,8 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.
 - The gateway refuses any request to Pocket ID that carries an `X-API-Key` header with 403, so Pocket ID's API keys work only on the mesh.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.16...develop
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.17...develop
+[0.3.0-rc.17]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.16...v0.3.0-rc.17
 [0.3.0-rc.16]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.15...v0.3.0-rc.16
 [0.3.0-rc.15]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.14...v0.3.0-rc.15
 [0.3.0-rc.14]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.13...v0.3.0-rc.14

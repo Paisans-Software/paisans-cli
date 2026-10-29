@@ -50,7 +50,7 @@ func TestALoginAsksItsUIDOnceAndPointsDockerAtIt(t *testing.T) {
 	if _, err := copied.Run("docker version"); err != nil {
 		t.Fatal(err)
 	}
-	export := "export DOCKER_HOST='" + rootlessSocket + "'\n"
+	export := "export DOCKER_HOST='" + rootlessSocket + "' PAISANS_DOCKER_SOCKET='" + strings.TrimPrefix(rootlessSocket, "unix://") + "'\n"
 	want := []string{"id -u", export + "docker ps", export + "docker version"}
 	if strings.Join(*ran, "|") != strings.Join(want, "|") {
 		t.Errorf("ran %q, want %q", *ran, want)
@@ -100,7 +100,7 @@ func TestAGivenDockerHostAsksNoUID(t *testing.T) {
 	if _, err := tr.Run("docker ps"); err != nil {
 		t.Fatal(err)
 	}
-	if want := "export DOCKER_HOST='unix:///run/user/1001/docker.sock'\ndocker ps"; strings.Join(*ran, "|") != want {
+	if want := "export DOCKER_HOST='unix:///run/user/1001/docker.sock' PAISANS_DOCKER_SOCKET='/run/user/1001/docker.sock'\ndocker ps"; strings.Join(*ran, "|") != want {
 		t.Errorf("ran %q, want %q", *ran, want)
 	}
 }
