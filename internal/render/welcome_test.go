@@ -8,13 +8,19 @@ import (
 
 func TestCommunityRoomName(t *testing.T) {
 	for community, want := range map[string]string{
-		"Riverside":           "Riverside Community",
-		"Riverside Guild":     "Riverside Guild",
-		"riverside community": "riverside community",
-		"Riverside Clubhouse": "Riverside Clubhouse Community",
-		" Riverside ":         "Riverside Community",
-		"Fixture Community":   "Fixture Community",
-		"The Commons":         "The Commons",
+		"Riverside":            "Riverside Community",
+		"Riverside Guild":      "Riverside Guild",
+		"riverside community":  "riverside community",
+		"Riverside Clubhouse":  "Riverside Clubhouse Community",
+		" Riverside ":          "Riverside Community",
+		"Fixture Community":    "Fixture Community",
+		"The Commons":          "The Commons",
+		"Riverside-Club":       "Riverside-Club",
+		"Club, Riverside":      "Club, Riverside",
+		"Riverside Community.": "Riverside Community.",
+		"Gemeinschaft Hub":     "Gemeinschaft Hub",
+		"":                     "Community",
+		"   ":                  "Community",
 	} {
 		if got := render.CommunityRoomName(community); got != want {
 			t.Errorf("CommunityRoomName(%q) = %q, want %q", community, got, want)

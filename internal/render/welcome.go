@@ -3,6 +3,7 @@ package render
 import (
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 )
@@ -17,16 +18,19 @@ var communityWords = []string{
 // CommunityRoomName is the default name of the Matrix room the engagement
 // bot welcomes newcomers in: the community's name, with " Community"
 // appended unless a whole word of it is one of communityWords, in any case.
+// A word is a run of letters and digits, so "Riverside-Club" holds Club and
+// "Clubhouse" does not. A blank name gives "Community".
 func CommunityRoomName(community string) string {
 	name := strings.TrimSpace(community)
-	for _, word := range strings.Fields(name) {
+	words := strings.FieldsFunc(name, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+	for _, word := range words {
 		for _, w := range communityWords {
 			if strings.EqualFold(word, w) {
 				return name
 			}
 		}
 	}
-	return name + " Community"
+	return strings.TrimSpace(name + " Community")
 }
 
 // RoomAliasLocalpart is the localpart of the community room's alias: the
@@ -54,19 +58,20 @@ func RoomAliasLocalpart(name string) string {
 // welcomes newcomers through, which the mbin app declares.
 const AgentClientID = "engagement-agent"
 
-// communityRoom is the engagement app's community room name and alias
+// CommunityRoom is the engagement app's community room name and alias
 // localpart: its community_room_name setting, or CommunityRoomName of the
-// name the digest calls the community by.
-func (p *planner) communityRoom(app string) (name, alias string) {
-	name, _ = p.cfg.Apps[app].Settings["community_room_name"].(string)
+// name the digest calls the community by. Derived is true for the second,
+// which validate then checks at community.name.
+func CommunityRoom(cfg *config.Config, app string) (name, alias string, derived bool) {
+	name, _ = cfg.Apps[app].Settings["community_room_name"].(string)
 	if name == "" {
-		community := p.cfg.Community.Name
-		if mbin, ok := p.cfg.EngagementSource(); ok && community == "" {
-			_, community = mbinTitles(p.cfg, mbin)
+		community := cfg.Community.Name
+		if mbin, ok := cfg.EngagementSource(); ok && community == "" {
+			_, community = mbinTitles(cfg, mbin)
 		}
-		name = CommunityRoomName(community)
+		name, derived = CommunityRoomName(community), true
 	}
-	return name, RoomAliasLocalpart(name)
+	return name, RoomAliasLocalpart(name), derived
 }
 
 // welcomeDailyLimit is the app's welcome_email_daily_limit setting, 50 when
@@ -101,7 +106,7 @@ func (p *planner) consumerValues(app string) map[string]string {
 	if p.cfg.Apps[app].Blueprint != config.BlueprintEngagement {
 		return map[string]string{}
 	}
-	_, alias := p.communityRoom(app)
+	_, alias, _ := CommunityRoom(p.cfg, app)
 	username, _ := p.cfg.Apps[app].Settings["bot_localpart"].(string)
 	if username == "" {
 		username = "community-bot"

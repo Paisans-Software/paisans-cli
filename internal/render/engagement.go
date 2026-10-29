@@ -62,7 +62,7 @@ func (p *planner) engagementValuesFor(planned plannedApp, host string, port int)
 		OperatorEmails:    operatorEmails(p.cfg),
 		AgentClientID:     AgentClientID,
 	}
-	welcome.CommunityRoomName, welcome.CommunityRoomAlias = p.communityRoom(planned.Name)
+	welcome.CommunityRoomName, welcome.CommunityRoomAlias, _ = CommunityRoom(p.cfg, planned.Name)
 	mbin, ok := p.cfg.EngagementSource()
 	if !ok {
 		return welcome
