@@ -57,6 +57,14 @@ var convergePullImage = apply.PullImage
 type puller struct {
 	cfg *config.Config
 	o   convergeOptions
+	// leaves is set when the run leaves a site with nothing to do alone:
+	// each site's pull then also decides whether it is one, and its plan
+	// reads what its sweep would remove, since that is work too. See
+	// converge_idle.go.
+	leaves bool
+
+	mu   sync.Mutex
+	idle map[string]bool
 
 	once    sync.Once
 	secrets *config.Secrets
@@ -82,8 +90,15 @@ func (p *puller) load() error {
 			need = n
 		}
 		// The pull stage executes none of these plans, so none reads what
-		// its apply's sweep would remove.
-		p.options = []apply.Option{apply.MinFree(need), apply.SkipSweepRead()}
+		// its apply's sweep would remove, unless that decides whether the
+		// site is left alone.
+		p.options = []apply.Option{apply.MinFree(need)}
+		if !p.leaves {
+			p.options = append(p.options, apply.SkipSweepRead())
+		}
+		if runSites != nil {
+			p.options = append(p.options, pendingOptions(runSites)...)
+		}
 		if p.o.KeepImages {
 			p.options = append(p.options, apply.KeepImages())
 		}
@@ -191,6 +206,18 @@ func (p *puller) pullSite(line ui.Line, s convergeStep) ([]checkReport, error) {
 		line.Explain(m)
 	}
 	switch {
+	case plan.Disk == nil && p.idleSite(site, plan):
+		// What its apply's plan would have said, the site's install line
+		// does not: it runs no plan.
+		for _, n := range plan.Notes {
+			if n.Hint != "" {
+				line.Note(n.Hint, n.Text)
+			} else {
+				line.Detail("%s", n.Text)
+			}
+		}
+		line.Done("unchanged")
+		return reports, nil
 	case plan.Disk == nil:
 		line.Done("nothing to pull")
 		return reports, nil
@@ -285,18 +312,20 @@ func lastLine(s string) string {
 // convergePullAll is the pull stage of a run with --execute: a line per
 // site, every host at once, as prepare runs. A host that fails stops none of
 // the others; once every one has ended, the run stops if any failed, naming
-// each.
+// each. With leaves it returns each site found to have nothing to do, which
+// the run then leaves alone.
 //
 // It runs nothing through convergeQuiet or checkStep, which swap the
 // process's reporterOverride and so allow one command at a time: each site's
 // plan and pulls report straight to its own line, and its retries go to a
 // log of its own on its transport, so nothing shared is touched while the
 // hosts run at once.
-func convergePullAll(r ui.Reporter, cfg *config.Config, steps []convergeStep, o convergeOptions) error {
+func convergePullAll(r ui.Reporter, cfg *config.Config, steps []convergeStep, o convergeOptions, leaves bool) (map[string]bool, error) {
 	r.Section("pull")
 	lines := ui.Group(r, siteTitles(steps)...)
 	errs := make([]error, len(steps))
 	p := newPuller(cfg, o)
+	p.leaves = leaves
 	atOnce(len(steps), func(k int) {
 		reports, err := p.pullSite(lines[k], steps[k])
 		for _, n := range lineDetails(lines[k], "", "", reports) {
@@ -307,5 +336,5 @@ func convergePullAll(r ui.Reporter, cfg *config.Config, steps []convergeStep, o 
 			lines[k].Fail(err)
 		}
 	})
-	return groupStop("pull", steps, errs)
+	return p.idle, groupStop("pull", steps, errs)
 }

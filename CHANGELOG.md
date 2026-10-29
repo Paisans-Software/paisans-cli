@@ -13,6 +13,7 @@ changes share a bullet. Detailed notes are on the corresponding
 ### Changed
 
 - The `engagement` blueprint's bot defaults to the account `community-bot`, was `digest-bot`, and takes the name members see from a new `bot_display_name` setting, `Community Bot` by default; `validate` refuses a blank or multi-line one.
+- `deployment apply` without `--site` leaves alone a site whose plan has nothing to do, no pull or install steps, recording the version there, unless the run founds, joins or moves the gateway.
 
 ### Fixed
 

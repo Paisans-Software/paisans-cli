@@ -981,7 +981,28 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	// line, which shows only with -v. The run says it again, at every
 	// verbosity, once its steps are done or one has stopped it.
 	moved := watchLeaderMoves()
-	err = convergeExecute(r, cfg, steps, o, publish)
+	// A site the run leaves alone records what its apply would: the
+	// version, with what was granted, and on a gateway the deployment
+	// record, and the gateway asked from outside, in the order its apply
+	// ends with.
+	record := func(r ui.Reporter, site string) error {
+		if err := recordApplied(r, declaration, sites, site, func(gw string) registry.Runner {
+			return registryHost(gw, cfg.Sites[gw], "")
+		}); err != nil {
+			return err
+		}
+		if err := checkGatewayAnswers(r, cfg, site); err != nil {
+			return err
+		}
+		run := reviewedByRun
+		s := run.sites[site]
+		if s == nil {
+			return nil
+		}
+		s.version = run.version
+		return recordGrant(r, s, cfg.Deployment(), run.approvedBy)
+	}
+	err = convergeExecute(r, cfg, steps, o, publish, record)
 	reportLeaderMoves(r, moved())
 	if err != nil {
 		return publishedNotApplied(err, reviewedByRun.version)
@@ -1424,8 +1445,13 @@ func resumeAdvice() string {
 //
 // publish is called once, after the prepare steps and before the first
 // other step that runs, or at the end when none does.
-func convergeExecute(r ui.Reporter, cfg *config.Config, steps []convergeStep, o convergeOptions, publish func() error) error {
+//
+// A site the pull finds nothing to do on has no install step: its line
+// records what its apply would and says it is unchanged, with record. See
+// converge_idle.go.
+func convergeExecute(r ui.Reporter, cfg *config.Config, steps []convergeStep, o convergeOptions, publish func() error, record func(r ui.Reporter, site string) error) error {
 	published := false
+	idle := idleSites{record: record}
 	for i := 0; i < len(steps); {
 		s := steps[i]
 		if !published && s.Stage != stageInit && s.Stage != stagePrepare {
@@ -1445,15 +1471,21 @@ func convergeExecute(r ui.Reporter, cfg *config.Config, steps []convergeStep, o 
 			i = j
 		case s.Stage == stagePull:
 			j := stageEnd(steps, i)
-			if err := convergePullAll(r, cfg, steps[i:j], o); err != nil {
+			left, err := convergePullAll(r, cfg, steps[i:j], o, leavesIdle(steps))
+			if err != nil {
 				return err
+			}
+			steps, idle.sites = dropIdle(cfg, steps, j, left)
+			if v := reviewedByRun; v != nil && v.version != nil {
+				idle.sha = v.version.sha
 			}
 			i = j
 		case s.Stage.installs():
 			j := installEnd(steps, i)
-			if err := convergeInstall(r, steps[i:j], o); err != nil {
+			if err := convergeInstall(r, steps[i:j], o, idle); err != nil {
 				return err
 			}
+			idle.sites = nil
 			i = j
 		default:
 			r.Section(map[stage]string{stageDNS: "dns", stageGateway: "gateway"}[s.Stage])
@@ -1471,6 +1503,10 @@ func convergeExecute(r ui.Reporter, cfg *config.Config, steps []convergeStep, o 
 	}
 	if !published {
 		return publish()
+	}
+	// Every install step was of a site left alone.
+	if len(idle.sites) > 0 {
+		return convergeInstall(r, nil, o, idle)
 	}
 	return nil
 }
@@ -1549,13 +1585,18 @@ func groupStop(what string, steps []convergeStep, errs []error) error {
 // naming the members that run no etcd. Each step is listed under its line with its own result, which -v shows with the step's
 // own output; its notes follow the line at every verbosity. A failure lists
 // its error under its inner step and ends its line and the run, leaving the
-// other lines as they stand.
-func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) error {
+// other lines as they stand. Each site in idle has a line after the rest,
+// which ends unchanged once every step has run, or, when a step published
+// another version meanwhile, applies the site after all.
+func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions, idle idleSites) error {
 	r.Section("install")
-	places := installPlaces(steps)
+	places := append(installPlaces(steps), idle.sites...)
 	lines, done := ui.Ordered(r, places...)
 	defer done()
 	last := lastVisits(steps)
+	for range idle.sites {
+		last = append(last, -1)
+	}
 	// again is each step whose site waited for its databases on its last
 	// visit, to be run once more at the end.
 	var again []int
@@ -1619,6 +1660,18 @@ func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) err
 	}
 	for _, i := range again {
 		if err := run(i, true); err != nil {
+			return err
+		}
+	}
+	for _, site := range idle.sites {
+		if idle.moved() {
+			steps = append(steps, applyStep(stagePassTwo, site))
+			if err := run(len(steps)-1, true); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := leaveIdle(r, lines[slices.Index(places, site)], site, idle); err != nil {
 			return err
 		}
 	}

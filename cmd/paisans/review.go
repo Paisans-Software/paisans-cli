@@ -311,6 +311,9 @@ type runReview struct {
 	approved map[string]grant.Review
 	// approvedBy is who approved it, as approver says.
 	approvedBy string
+	// sites is each site's review as the run read it, for a site the run
+	// leaves alone to record the version as its apply would.
+	sites map[string]*siteReview
 	// version is the configuration version the run published, which each
 	// apply step records with what it applied; nil in a dry run.
 	version *appliedVersion

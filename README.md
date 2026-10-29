@@ -6762,7 +6762,7 @@ it:
 | joining | `site add <s>` | the cluster runs and a data member has not joined it; a joining witness is joined by that `site add`, and gets one of its own only when no data member joins, which stops the run |
 | other sites | `deployment apply --site <s>`, monitor sites last | first each site that joined with `roles: [data, apps]`, which starts its apps, and then each gateway in `etcd.members`, so its routes gain the new apps site; then every site not in `etcd.members`, and then every Garage site no earlier step applies or joins, since storage works through Garage's container |
 | storage | `storage init --site <g>` for one Garage site, `storage add` for several | any Garage site |
-| pass two | `deployment apply --site <s>` for every site, monitor sites last, a monitor in `etcd.members` too | always: it resumes a founding stop or a replica's wait for the databases, and moves what earlier steps changed |
+| pass two | `deployment apply --site <s>` for every site, monitor sites last, a monitor in `etcd.members` too | always: it resumes a founding stop or a replica's wait for the databases, and moves what earlier steps changed; a site with nothing to do is left alone (below) |
 | gateway | `gateway move` | a site without the gateway role still holds this deployment's gateway (see *Moving the gateway*) |
 
 **The configuration is published once the stores exist.** The version `deployment apply`
@@ -6817,6 +6817,26 @@ its module has to be in the binary*), and an apply resolves each tag once for
 the whole run, so the build pulled here is the one every later step plans,
 even if the tag moves in between. A registry that refuses an image,
 `unauthorized` or `denied`, is reported as a private image, with what to do.
+
+**A site with nothing to do is left alone.** In a run that founds or joins
+no etcd member and moves no gateway, each site's pull decides from the plan it
+makes whether the site's apply would do anything: write or replace a file,
+bring up a stack (a container that stopped included), change the mesh or the
+source mark, run an action a stopped apply still owes, sweep an old image, run
+a database grant, or pull an image. A file edited on the host counts too, so
+its apply refuses it as usual, and so does a file left over, so its apply
+warns about it. So does a review entry approved for the site, and an OIDC
+client or signup group its apps need made or changed at Pocket ID, which the
+pull asks Pocket ID about, read only; a Pocket ID that could not be asked
+counts as well. A site with none of these is not applied: its pull line and
+its install line end `unchanged`. The install line does what its apply would
+have done at its end: on a gateway it writes the deployment record and asks
+the gateway from outside (see *The gateway answers as itself*), and then it
+records the version applied, with what was granted.
+`site prepare`, `dns init` and storage still run. A step that publishes
+another version partway through, by recording what it made at Pocket ID,
+may change what such a site renders, so each one is then applied after the
+other steps instead.
 
 **Every Garage site is applied before storage.** `storage init` and `storage
 add` read and change Garage's layout through its running container. A
@@ -6913,7 +6933,7 @@ install
 ```
 
 The pull lines are drawn the same way, each ending with how many images its
-host pulled, or `nothing to pull`; `-v` lists each image under its site's line
+host pulled, `nothing to pull`, or `unchanged` for a site left alone; `-v` lists each image under its site's line
 with the time it took. Under each line, at every verbosity, is every image whose
 build that site's apply moves, with the builds it goes between, as a dry run of
 the one site lists it. The install lines say only how long each site took, so

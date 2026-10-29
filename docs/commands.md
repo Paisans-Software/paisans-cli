@@ -1588,7 +1588,9 @@ when it has work; `site prepare` on every host at once; a pull of every site's
 images on every host at once, so no install waits on a download; `dns init`; the
 founding applies (each gateway outside `etcd.members` with `--hold-apps`
 before the data members, whose apps reach Pocket ID through it), `site add`, the other sites (a site that joined with the `apps` role first,
-then the gateway), storage and pass two; `gateway
+then the gateway), storage and pass two, leaving alone a site whose plan
+has nothing to do when the run founds no member, joins none and moves no
+gateway; `gateway
 move`, when a site without the gateway role still serves as the gateway; the
 `pocket id` step, which makes each operator a user of every running Pocket ID
 app and issues a login link to one with no passkey; and, for each app behind the operator's own web
