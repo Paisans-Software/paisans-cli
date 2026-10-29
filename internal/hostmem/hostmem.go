@@ -179,8 +179,9 @@ const mib = 1 << 20
 const (
 	// FloorBase is every host: Ubuntu Server's own services, an apt or
 	// unattended-upgrades run among them, the deployment user's rootless
-	// Docker (dockerd, containerd and RootlessKit), WireGuard and the
-	// heartbeat container.
+	// Docker (dockerd, containerd and RootlessKit), WireGuard, the
+	// heartbeat container, and the Beszel agent every site runs while a
+	// beszel app is declared.
 	FloorBase = 512 * mib
 	// FloorEtcd is an etcd v3.5 member, on every data site and the witness:
 	// its keyspace is Patroni's few keys, and the rest is room for its
@@ -203,6 +204,11 @@ const (
 	FloorGate = 64 * mib
 	// FloorUptime is the uptime monitor, a Node.js process.
 	FloorUptime = 256 * mib
+	// FloorBeszel is Beszel's hub, one Go process with its SQLite database,
+	// on the site its beszel app is pinned to. Provisional: set from what
+	// the hub runs, as the others are, until it is measured at rest on a
+	// host.
+	FloorBeszel = 64 * mib
 	// FloorApps is an apps site's least: Pocket ID and one app beside it.
 	// An app such as Mbin, with its PHP workers and Valkey, or Wiki.js
 	// needs more of its own, so a site running several needs more than
@@ -220,7 +226,7 @@ type Part struct {
 // once however many roles run it: a witness on a data site runs one etcd,
 // and a monitor beside the gateway is served by the gateway's Caddy.
 type Runs struct {
-	Etcd, Postgres, Garage, Caddy, Gate, Uptime, Apps bool
+	Etcd, Postgres, Garage, Caddy, Gate, Uptime, Beszel, Apps bool
 	// ByRole is set by ForRoles: the parts are what the roles usually
 	// run, not what a configuration places, and the words say so.
 	ByRole bool
@@ -242,15 +248,19 @@ func ForRoles(roles []config.Role, runsCaddy bool) Runs {
 		Caddy:    runsCaddy,
 		Gate:     has(config.RoleGateway),
 		Uptime:   has(config.RoleMonitor),
-		Apps:     has(config.RoleApps),
-		ByRole:   true,
+		// No role says a site runs Beszel's hub: it is an app a monitor
+		// may hold or not, and admit cannot know which.
+		Beszel: false,
+		Apps:   has(config.RoleApps),
+		ByRole: true,
 	}
 }
 
 // ForSite is what site runs in cfg: etcd on the members of etcd.members,
 // the database on cluster.sites, Garage on storage.garage.sites, Caddy
 // where Site.RunsCaddy says, oauth2-proxy where the gate app is pinned,
-// the uptime monitor on a monitor and the apps on an apps site.
+// the uptime monitor on a monitor, Beszel's hub where a beszel app is
+// pinned and the apps on an apps site.
 func ForSite(cfg *config.Config, site string) Runs {
 	s := cfg.Sites[site]
 	gate, gated := cfg.Apps[config.GateApp]
@@ -261,6 +271,7 @@ func ForSite(cfg *config.Config, site string) Runs {
 		Caddy:    s.RunsCaddy(),
 		Gate:     gated && gate.Blueprint == config.BlueprintOAuth2Proxy && gate.Placement.Site == site,
 		Uptime:   s.Has(config.RoleMonitor),
+		Beszel:   slices.ContainsFunc(cfg.PinnedTo(site), func(app string) bool { return cfg.Apps[app].Blueprint == config.BlueprintBeszel }),
 		Apps:     s.Has(config.RoleApps),
 	}
 }
@@ -278,6 +289,7 @@ func (r Runs) Parts() []Part {
 		{r.Caddy, Part{"Caddy", FloorCaddy}},
 		{r.Gate, Part{"oauth2-proxy", FloorGate}},
 		{r.Uptime, Part{"the uptime monitor", FloorUptime}},
+		{r.Beszel, Part{"the Beszel hub", FloorBeszel}},
 		{r.Apps, Part{"Pocket ID and an app", FloorApps}},
 	} {
 		if c.runs {

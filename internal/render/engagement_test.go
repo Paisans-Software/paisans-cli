@@ -27,18 +27,20 @@ func digestAndTalkEnv(t *testing.T, cfg *config.Config) (digest, talk string) {
 	return digest, files[talkEnvA]
 }
 
-// The digest names the community exactly as Mbin does, so each case is
-// asserted against Mbin's own .env as well as the string it should be.
+// The digest names the community by its name, and falls back to Mbin's meta
+// title without one. Its instance title is Mbin's, so each case asserts the
+// instance title, and a meta title from the fallback, against Mbin's own .env.
 func TestMbinTitles(t *testing.T) {
 	for _, c := range []struct {
 		display, community string
 		settings           map[string]any
 		title, meta        string
 	}{
-		{"Talk", "Paisans", nil, "Talk", "Talk · Paisans"},
+		{"Talk", "Paisans", nil, "Talk", "Paisans"},
 		{"Talk", "", nil, "Talk", "Talk"},
-		{"", "Fixture Community", nil, "talk", "talk · Fixture Community"},
-		{"Talk", "Paisans", map[string]any{"title": "Forum", "meta_title": "The Forum"}, "Forum", "The Forum"},
+		{"", "Fixture Community", nil, "talk", "Fixture Community"},
+		{"Talk", "Paisans", map[string]any{"title": "Forum", "meta_title": "The Forum"}, "Forum", "Paisans"},
+		{"Talk", "", map[string]any{"meta_title": "The Forum"}, "Talk", "The Forum"},
 	} {
 		cfg := fixture(t)
 		cfg.Community.Name = c.community
@@ -49,17 +51,15 @@ func TestMbinTitles(t *testing.T) {
 		}
 		cfg.Apps["talk"] = app
 		digest, talk := digestAndTalkEnv(t, cfg)
-		for key, want := range map[string]struct{ mbin, value string }{
-			"ENGAGEMENT_INSTANCE_TITLE": {"KBIN_TITLE", c.title},
-			"ENGAGEMENT_META_TITLE":     {"KBIN_META_TITLE", c.meta},
-		} {
-			got := envValue(digest, key)
-			if got != want.value {
-				t.Errorf("display %q, community %q: %s=%s, want %s", c.display, c.community, key, got, want.value)
-			}
-			if mbin := envValue(talk, want.mbin); got != mbin {
-				t.Errorf("display %q, community %q: %s=%s, but Mbin renders %s=%s", c.display, c.community, key, got, want.mbin, mbin)
-			}
+		if got := envValue(digest, "ENGAGEMENT_META_TITLE"); got != c.meta {
+			t.Errorf("display %q, community %q: ENGAGEMENT_META_TITLE=%s, want %s", c.display, c.community, got, c.meta)
+		}
+		if mbin := envValue(talk, "KBIN_META_TITLE"); c.community == "" && c.meta != mbin {
+			t.Errorf("display %q: ENGAGEMENT_META_TITLE=%s, but Mbin renders KBIN_META_TITLE=%s", c.display, c.meta, mbin)
+		}
+		got := envValue(digest, "ENGAGEMENT_INSTANCE_TITLE")
+		if mbin := envValue(talk, "KBIN_TITLE"); got != c.title || got != mbin {
+			t.Errorf("display %q: ENGAGEMENT_INSTANCE_TITLE=%s, want %s, and Mbin renders KBIN_TITLE=%s", c.display, got, c.title, mbin)
 		}
 	}
 }

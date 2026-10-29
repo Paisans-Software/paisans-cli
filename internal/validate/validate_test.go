@@ -144,6 +144,8 @@ func TestRulesFire(t *testing.T) {
 		{"web-server-on-gateway", "web-server-on-gateway", validate.Refuse},
 		{"monitor-without-uptime", "monitor-without-uptime", validate.Refuse},
 		{"uptime-needs-a-monitor-site", "uptime-needs-a-monitor-site", validate.Refuse},
+		{"beszel-off-monitor", "beszel-needs-a-monitor-site", validate.Refuse},
+		{"beszel-twice", "one-beszel", validate.Refuse},
 		{"monitor-without-public-address", "monitor-without-public-address", validate.Refuse},
 		{"web-server-outside-monitor", "web-server-outside-monitor", validate.Refuse},
 		{"web-server-listen-managed-by", "web-server-listen-managed-by", validate.Refuse},

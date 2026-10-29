@@ -97,6 +97,9 @@ func generatedNames(cfg *config.Config) []string {
 	}
 	for _, name := range cfg.SiteNames() {
 		out = append(out, "sites."+name+".wireguard_private_key", "sites."+name+".heartbeat_token")
+		if cfg.BeszelApp() != "" {
+			out = append(out, "sites."+name+".beszel_token")
+		}
 	}
 	for _, name := range cfg.AppNames() {
 		for _, key := range appSecretKeys(cfg, cfg.Apps[name]) {

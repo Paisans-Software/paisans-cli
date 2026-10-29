@@ -1,0 +1,108 @@
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
+#
+# Beszel's hub, pinned to {{ .App.Site }}. Its systems are not added here or in
+# its UI: data/config.yml, which `deployment apply` renders from
+# {{ configFile }}, lists one per site, and the hub creates, updates and
+# deletes its systems to match it at every start.
+#
+# ORDER. The hub starts first, and runs its own migrations, which make the
+# break glass user and superuser from USER_EMAIL and USER_PASSWORD on a new
+# install. admin then sets the superuser's password, which USER_PASSWORD
+# alone never changes after the first start, and setup writes the sign in
+# through the API as that superuser. A superuser made before the hub's first
+# start would share the email the migration then makes one with, which
+# PocketBase's unique index on email refuses, and the hub would not start.
+#
+# OWNERSHIP. The image is FROM scratch with no USER, so the hub runs as root,
+# which a rootless Docker maps to the deployment user that owns data/.
+name: {{ .Project }}
+
+services:
+  app:
+    labels:
+      {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
+    image: {{ yamlquote (.Image "app") }}
+    restart: unless-stopped
+    env_file:
+      - .env
+    # The image declares none, and has no shell: the hub's own health
+    # subcommand GETs /api/health and fails on anything but 200
+    # (internal/cmd/hub/hub.go:68-102 at v0.21.1). apply's health gate reads
+    # it, and admin waits for it. It asks for the hub by its service name,
+    # which this project's network resolves to the container itself.
+    healthcheck:
+      test: ["CMD", "/beszel", "health", "--url", "http://app:8090"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      start_interval: 5s
+      retries: 3
+    # The mesh address only, where the Caddy on this site and every site's
+    # agent reach it. A port published on every interface would answer
+    # anything the host's firewall lets in. A monitor behind its owner's web
+    # server hosts the uptime app alone (web-server-external-serves-one-app),
+    # so the hub is never published for one.
+    ports:
+      - "{{ .MeshAddress }}:{{ .App.Port }}:8090"
+    # data/config.yml and data/id_ed25519 are rendered into this directory,
+    # so the hub reads them at /beszel_data beside its database.
+    volumes:
+      - {{ .DataPath }}/data:/beszel_data
+
+  # PocketBase's `superuser upsert <email> <password>` (cmd/superuser.go:32-66
+  # at v0.40.5), from the hub's own binary: sets the superuser's password to
+  # admin_password, so a rotated one takes effect on the next apply. Compose
+  # interpolates both from .env, so this file never holds the password, but
+  # they are the one shot's arguments: for the moment it runs, the password
+  # is in its argv, which /proc and `docker inspect` show to the deployment
+  # user and to root. The command takes the password as an argument only,
+  # with no stdin or file form. "--" ends the options first: a generated
+  # password is base64url, so about one in 64 begins with "-", which cobra
+  # would read as an unknown shorthand flag, and admin would exit 1 on every
+  # apply.
+  admin:
+    labels:
+      {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
+    image: {{ yamlquote (.Image "admin") }}
+    restart: "no"
+    command: ["superuser", "upsert", "--", "${BESZEL_ADMIN_EMAIL:?set in .env}", "${BESZEL_ADMIN_PASSWORD:?set in .env}"]
+    volumes:
+      - {{ .DataPath }}/data:/beszel_data
+    depends_on:
+      app:
+        condition: service_healthy
+
+  # Writes the oidc provider into the users collection, and the break glass
+  # user's password, through the PocketBase API, at every start: a rotated
+  # client secret or admin_password reaches the hub on the next apply.
+  # setup.sh is 0600 because it carries both, and root in a rootless
+  # container is the deployment user that owns it; the image's own user is
+  # not. It dials the hub on this project's network and listens for nothing.
+  #
+  # It reads nothing from .env, and takes it all the same: apply answers a
+  # changed .env with `up -d`, which recreates only a service whose own
+  # configuration changed. Without the env_file a rotated admin_password
+  # would recreate app and admin and leave this container asleep, so the
+  # break glass user would keep the old password. A changed setup.sh alone
+  # restarts the whole stack, which starts it again.
+  setup:
+    labels:
+      {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
+    image: {{ yamlquote (.Image "setup") }}
+    restart: on-failure
+    user: "0:0"
+    env_file:
+      - .env
+    entrypoint: ["/bin/sh", "/setup.sh"]
+    volumes:
+      - {{ .DataPath }}/setup.sh:/setup.sh:ro
+    depends_on:
+      admin:
+        condition: service_completed_successfully
+
+# Every network carries the deployment label too, so that what owns it is
+# read from the label rather than guessed from its name.
+networks:
+  default:
+    labels:
+      {{ .DeploymentLabel }}: "{{ .DeploymentID }}"

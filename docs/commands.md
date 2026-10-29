@@ -222,10 +222,10 @@ paisans validate --offline   # the file alone; no site is reached
   naming the fix. It reads the file without decrypting it, so it needs no age
   key.
 * **Images:** an `infra` override is refused under a key the infrastructure
-  stack does not run (`infra.images` takes etcd, haproxy, garage and
-  heartbeat), for a Postgres major the toolkit does not run, with a floating
+  stack does not run (`infra.images` takes etcd, haproxy, garage, heartbeat
+  and beszel-agent), for a Postgres major the toolkit does not run, with a floating
   tag (`latest`, or none), and outside the versions the toolkit is written
-  against (etcd v3, HAProxy 3, Garage v1, Zalando Spilo 3 and 4); an etcd,
+  against (etcd v3, HAProxy 3, Garage v1, Zalando Spilo 3 and 4, Beszel 0.21); an etcd,
   HAProxy, Garage or Zalando Spilo override is refused with a digest and no
   tag. It is warned about for a Postgres major the deployment does not run,
   for a Spilo from another provider, which the toolkit cannot check, and for
@@ -242,6 +242,10 @@ the questions it came from again, every question, writing the file as it
 stands to fix by hand, or quitting. A file refused nothing is written at once,
 to `--config` or `paisans-stack.yaml` in the current directory, and is not
 printed. It then names `init`, `site request`, `secrets set` and `deployment apply`.
+
+After a yes to the health page it asks `Server and container stats (Beszel)?`,
+and a yes declares an app `stats` of blueprint `beszel` at `status.health.<domain>`
+on the monitor's site.
 
 Each operator's keys are checked as they are pasted: a key another operator
 gave, one listed twice, and one the loader refuses are refused there.
@@ -472,6 +476,7 @@ paisans secrets rotate --all                               # dry run: every secr
 paisans secrets rotate --all --execute
 paisans secrets rotate cluster.standby_password --execute
 paisans secrets rotate apps.talk.oauth --execute           # Mbin's OAuth2 keys, as one unit
+paisans secrets rotate sites.site-a.beszel_token --execute # the hub's stack, then site-a's infra
 paisans secrets rotate external.acme_dns_token --execute   # asks for the new token, then hands it to every site using it
 security find-generic-password -s acme -w | paisans secrets set external.acme_dns_token
 paisans secrets rotate external.acme_dns_token --execute   # without a terminal: hands on the token set above

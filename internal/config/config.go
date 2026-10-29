@@ -77,6 +77,8 @@ const (
 	BlueprintUptime      Blueprint = "uptime"
 	BlueprintAccount     Blueprint = "account"
 	BlueprintEngagement  Blueprint = "engagement"
+	// The server monitor: a hub, and an agent beside it on every site.
+	BlueprintBeszel Blueprint = "beszel"
 )
 
 // Config is a whole deployment, declared. It records intent and never status:
@@ -181,7 +183,7 @@ type Infra struct {
 }
 
 // InfraImageKeys are the keys infra.images takes.
-var InfraImageKeys = []string{"etcd", "garage", "haproxy", "heartbeat"}
+var InfraImageKeys = []string{"beszel-agent", "etcd", "garage", "haproxy", "heartbeat"}
 
 // InfraPostgresKeys are the keys infra.postgres.<major> takes.
 var InfraPostgresKeys = []string{"spilo"}
@@ -1069,6 +1071,18 @@ func (c *Config) AppNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// BeszelApp is the name of the deployment's beszel app, the hub every site's
+// agent reports to, or empty when it declares none. one-beszel refuses a
+// second, so the first in name order is the one.
+func (c *Config) BeszelApp() string {
+	for _, name := range c.AppNames() {
+		if c.Apps[name].Blueprint == BlueprintBeszel {
+			return name
+		}
+	}
+	return ""
 }
 
 // DataSites returns the sites holding the data role, sorted.

@@ -419,7 +419,7 @@ func TestTheMonitorDoesNotCheckItself(t *testing.T) {
 		if strings.HasPrefix(name, "health — ") {
 			t.Errorf("the monitor seeds a check of itself: %s", name)
 		}
-		if url, _ := m["url"].(string); strings.Contains(url, "health.example.org") {
+		if url, _ := m["url"].(string); strings.Contains(url, "://health.example.org") {
 			t.Errorf("%s checks the monitor's own hostname: %s", name, url)
 		}
 	}
@@ -446,7 +446,7 @@ func TestEachMonitorChecksTheOthersPublicURL(t *testing.T) {
 	cfg.Apps["health-b"] = config.App{Blueprint: config.BlueprintUptime, Hostname: "health-b.example.org",
 		Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch-b"},
 		Settings:  map[string]any{"admin_group": "admins"}}
-	secrets.Sites["watch-b"] = config.SiteSecrets{WireGuardPrivateKey: "REREREREREREREREREREREREREREREREREREREREREQ=", HeartbeatToken: "4444444444444444444444444444dddd"}
+	secrets.Sites["watch-b"] = config.SiteSecrets{WireGuardPrivateKey: "REREREREREREREREREREREREREREREREREREREREREQ=", HeartbeatToken: "4444444444444444444444444444dddd", BeszelToken: "b4444444444444444444444444444dddb4444444444444444444444444444ddd"}
 	secrets.Apps["health-b"] = map[string]any{"admin_password": "fixture-admin-b", "session_secret": "fixture-session-b"}
 	if refusals := validate.Check(cfg).Refusals(); len(refusals) > 0 {
 		t.Fatalf("two monitors is a configuration the toolkit refuses: %v", refusals)
@@ -637,7 +637,7 @@ func withTwoMonitors(t *testing.T) (*config.Config, *config.Secrets) {
 	cfg.Apps["health-b"] = config.App{Blueprint: config.BlueprintUptime, Hostname: "health-b.example.org",
 		Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch-b"},
 		Settings:  map[string]any{"admin_group": "admins"}}
-	secrets.Sites["watch-b"] = config.SiteSecrets{WireGuardPrivateKey: "REREREREREREREREREREREREREREREREREREREREREQ=", HeartbeatToken: "4444444444444444444444444444dddd"}
+	secrets.Sites["watch-b"] = config.SiteSecrets{WireGuardPrivateKey: "REREREREREREREREREREREREREREREREREREREREREQ=", HeartbeatToken: "4444444444444444444444444444dddd", BeszelToken: "b4444444444444444444444444444dddb4444444444444444444444444444ddd"}
 	secrets.Apps["health-b"] = map[string]any{"admin_password": "fixture-admin-b", "session_secret": "fixture-session-b"}
 	if refusals := validate.Check(cfg).Refusals(); len(refusals) > 0 {
 		t.Fatalf("two monitors is a configuration the toolkit refuses: %v", refusals)
@@ -689,6 +689,7 @@ func TestTwoMonitorsCrossCoverHeartbeats(t *testing.T) {
 func TestNoMonitorMeansNoHeartbeatPusher(t *testing.T) {
 	cfg := fixture(t)
 	delete(cfg.Apps, "health")
+	delete(cfg.Apps, "stats")
 	delete(cfg.Sites, "watch")
 	secrets := fixtureSecrets(t)
 	if refusals := validate.Check(cfg).Refusals(); len(refusals) > 0 {

@@ -756,10 +756,11 @@ func TestServedHostnamesSplitsGatewayAndMonitor(t *testing.T) {
 	for _, h := range GatewayHostnames(cfg) {
 		gateway = append(gateway, h.Name)
 	}
-	if got := names("vm"); !slices.Equal(got, gateway) || slices.Contains(got, "health.example.org") {
+	if got := names("vm"); !slices.Equal(got, gateway) || slices.Contains(got, "health.example.org") || slices.Contains(got, "status.health.example.org") {
 		t.Errorf("vm serves %v, want the gateway's %v", got, gateway)
 	}
-	if got := names("watch"); !slices.Equal(got, []string{"health.example.org"}) {
+	// The monitor serves the uptime app and the Beszel hub pinned beside it.
+	if got := names("watch"); !slices.Equal(got, []string{"health.example.org", "status.health.example.org"}) {
 		t.Errorf("watch serves %v", got)
 	}
 	if got := names("home-a"); len(got) != 0 {

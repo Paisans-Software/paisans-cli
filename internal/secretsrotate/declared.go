@@ -98,7 +98,8 @@ func (r appGroup) Next(e Env, s *config.Secrets) (string, error) {
 	members := r.members()
 	next := map[string]string{}
 	for _, m := range members {
-		if m.Format == blueprints.FormatRSAKeypair || m.Format == blueprints.FormatRSAPublic {
+		switch m.Format {
+		case blueprints.FormatRSAKeypair, blueprints.FormatRSAPublic, blueprints.FormatEd25519OpenSSH, blueprints.FormatEd25519Public:
 			continue
 		}
 		v, err := secretsgen.ReplacementIn(e.Cfg, r.key(m.Name), s)
@@ -121,6 +122,23 @@ func (r appGroup) Next(e Env, s *config.Secrets) (string, error) {
 		next[m.Name] = priv
 		for _, half := range members {
 			if half.Format == blueprints.FormatRSAPublic && half.Of == m.Name {
+				next[half.Name] = pub
+			}
+		}
+	}
+	for _, m := range members {
+		if m.Format != blueprints.FormatEd25519OpenSSH {
+			continue
+		}
+		priv, pub, err := secretsgen.ReplacementEd25519()
+		if err != nil {
+			return "", err
+		}
+		ui.Secret(priv)
+		ui.Secret(pub)
+		next[m.Name] = priv
+		for _, half := range members {
+			if half.Format == blueprints.FormatEd25519Public && half.Of == m.Name {
 				next[half.Name] = pub
 			}
 		}
@@ -172,6 +190,20 @@ func (r appGroup) parse(next string) (map[string]string, error) {
 				return nil, fmt.Errorf("the next %s does not parse: %w", half.Name, err)
 			}
 			if pub, ok := public.(*rsa.PublicKey); !ok || !pub.Equal(&key.PublicKey) {
+				return nil, fmt.Errorf("the next %s is not the next %s's half", half.Name, m.Name)
+			}
+		}
+	}
+	for _, m := range members {
+		if m.Format != blueprints.FormatEd25519OpenSSH {
+			continue
+		}
+		public, err := secretsgen.Ed25519PublicOf(values[m.Name])
+		if err != nil {
+			return nil, fmt.Errorf("the next %s does not parse as an Ed25519 key", m.Name)
+		}
+		for _, half := range members {
+			if half.Format == blueprints.FormatEd25519Public && half.Of == m.Name && values[half.Name] != public {
 				return nil, fmt.Errorf("the next %s is not the next %s's half", half.Name, m.Name)
 			}
 		}

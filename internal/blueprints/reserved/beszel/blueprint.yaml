@@ -1,0 +1,84 @@
+# The beszel blueprint. A reserved blueprint: built into the binary with the Go that drives it, and never read from a catalog.
+# internal/blueprints reads it; Parse there documents every key.
+#
+# Beszel's hub, henrygd/beszel, read at v0.21.1 (released 2026-10-22); every
+# citation below is to that tag unless it says otherwise. The hub is a
+# PocketBase v0.40.5 application (go.mod:19). See
+# docs/specs/2026-10-29-beszel-server-stats.md.
+apiVersion: paisans.blueprint/v1
+name: beszel
+services:
+  # The hub: one static binary in an image FROM scratch, with no USER, that
+  # serves on 8090 and keeps everything under /beszel_data
+  # (internal/dockerfile_hub:32-37; internal/cmd/hub/hub.go:42). Its SQLite
+  # database is why the blueprint is pinned only: it has no Postgres
+  # service, so cluster-placement-without-a-cluster refuses it. Its image is
+  # the core catalog's foundation.yaml's.
+  - {name: "app", foundation: "beszel", purpose: "the hub"}
+  # The same image, run once per start as `superuser upsert`, which sets the
+  # break glass superuser's password from admin_password (PocketBase
+  # cmd/superuser.go:32-66 at v0.40.5; beszel-docs user-accounts.md).
+  - {name: "admin", foundation: "beszel", purpose: "sets the superuser's password"}
+  # curl and a shell, the foundation's heartbeat image: writes the hub's
+  # sign in through the PocketBase API once it answers (setup.sh).
+  - {name: "setup", foundation: "heartbeat", purpose: "writes the hub's sign in settings"}
+database: {engine: sqlite}
+# The port the hub is published on, on the site's mesh address, where Caddy
+# and every site's agent reach it. Not the hub's own 8090: the core
+# catalog's Element publishes 8090, and two apps on one site publish on the
+# same mesh address. compose maps it to 8090 in the container.
+port: 8084
+config:
+  format: env
+  file: ".env"
+# PocketBase's GET /api/health answers 200 with no authentication (apis/
+# health.go:11-25 at v0.40.5). Used for the monitor's checks of the hub.
+health: {path: "/api/health", status: [200]}
+# The hub is what an operator opens when the sites it watches are down. The
+# gate signs in at the identity provider on those sites, so a gated hub is
+# unreadable at exactly the moment it exists for, and its break glass user's
+# password sign in would sit behind the sign in it is the fallback for. Its
+# own OIDC client admits only settings.admin_group, so the gate would add no
+# access control, only a dependency.
+gate: {gateable: false}
+settings:
+  # The Pocket ID group whose members may sign in to the hub; see oidc below.
+  admin_group: {type: string, default: "operators"}
+storage:
+  local_only: true
+  local_only_reason: "the hub keeps its SQLite database and its key under /beszel_data"
+# Beszel signs in through PocketBase's OAuth2 provider oidc, whose callback
+# is /api/oauth2-redirect (beszel-docs oauth.md:5-6). Every sign in sends an
+# S256 code challenge when the provider's pkce is true (PocketBase
+# apis/record_auth_methods.go:156-159 at v0.40.5), which setup.sh sets. Its
+# one group is settings.admin_group, used as both: the client is restricted
+# to it, so Pocket ID refuses everyone else before the hub sees them, and the
+# hub reads no group claim. It defaults to operators, the people who run the
+# machines the hub watches.
+oidc:
+  callback: "/api/oauth2-redirect"
+  pkce: true
+  admin_group_setting: "admin_group"
+  member_group_setting: "admin_group"
+  default_admin_group: "operators"
+  default_member_group: "operators"
+secrets:
+  required:
+    # internal/migrations/initial-settings.go:25-61: without USER_EMAIL and
+    # USER_PASSWORD a new hub makes a superuser _@b.b with a random password,
+    # and no user.
+    - {key: "admin_password", why: "without it a new hub has no user to sign in as when the identity provider is down"}
+    # internal/hub/hub.go:152-201: the hub reads <data>/id_ed25519, and
+    # writes a key of its own there when there is none.
+    - {key: "hub_key", why: "without it the hub generates a key of its own, which no agent's KEY names"}
+    - {key: "hub_key_public", why: "every site's agent refuses to start without the hub's public key as KEY"}
+  generate:
+    # The break glass sign in, as USER_PASSWORD on a new hub and the
+    # superuser's password on every start (admin), for when the identity
+    # provider is down.
+    - admin_password
+    # The hub's key and its public half, which every agent is given as KEY
+    # and checks the hub by. They change together, and every agent and the
+    # hub restart with them.
+    - {name: hub_key, format: ed25519-openssh, group: hub, rotation_cost: restart}
+    - {name: hub_key_public, format: ed25519-public, of: hub_key, group: hub, rotation_cost: restart}

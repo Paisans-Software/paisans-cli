@@ -284,7 +284,7 @@ func TestOIDCClientCreateRefusesABlueprintItDoesNotKnow(t *testing.T) {
 	// web is an Element client, which authenticates at the homeserver and
 	// holds no client of its own.
 	err := runOIDCClientCreate([]string{"--config", fixtureDraft(t, fixtureDeploymentID), "--secrets", tempSecrets(t), "--app", "web"})
-	if err == nil || !strings.Contains(err.Error(), "Blueprints with one: account, mbin, oauth2-proxy, synapse, uptime, wikijs, writefreely") {
+	if err == nil || !strings.Contains(err.Error(), "Blueprints with one: account, beszel, mbin, oauth2-proxy, synapse, uptime, wikijs, writefreely") {
 		t.Fatalf("got %v", err)
 	}
 	if len(fake.commands) != 0 {

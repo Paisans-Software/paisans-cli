@@ -125,6 +125,9 @@ func externalFixture(t *testing.T) string {
 		t.Fatal(err)
 	}
 	text := strings.Replace(string(data), "    public_address: 203.0.113.20\n", "    public_address: 203.0.113.20\n    web_server:\n      managed_by: external\n      listen: 127.0.0.1:8480\n", 1)
+	// It hosts the uptime app alone (web-server-external-serves-one-app), so
+	// the fixture's Beszel hub goes.
+	text = strings.Replace(text, "  stats:\n    blueprint: beszel\n    hostname: status.health.example.org\n    placement: { pinned: watch }\n", "", 1)
 	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 		t.Fatal(err)

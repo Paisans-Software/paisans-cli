@@ -88,13 +88,23 @@ const (
 // judge decides a stack's state, and names the services behind anything
 // other than healthy. A stack with no containers at all is waiting: after an
 // `up -d` or a restart there must be at least one.
-func judge(list []container) (verdict, []string) {
+//
+// A container that exited with code 0 under the restart policy "no" is a one
+// shot that finished, done rather than failed: Docker will never start it
+// again, and its exit is what the services after it wait for
+// (service_completed_successfully). Exited 0 under any other policy is not:
+// unless-stopped or always would have restarted it, so it was stopped, and
+// on-failure leaves exited 0 only for a service meant to keep running.
+// restartPolicy reads the policy, and is asked only about such a container.
+func judge(list []container, restartPolicy func(container) string) (verdict, []string) {
 	if len(list) == 0 {
 		return waiting, nil
 	}
 	var bad, slow []string
 	for _, c := range list {
 		switch {
+		case c.State == "exited" && c.ExitCode == 0 && restartPolicy(c) == "no":
+			// A one shot that finished.
 		case c.State == "exited" || c.State == "dead" || c.State == "restarting":
 			bad = append(bad, fmt.Sprintf("%s (%s, exit code %d)", c.Service, c.State, c.ExitCode))
 		case c.Health == "unhealthy":
@@ -114,6 +124,28 @@ func judge(list []container) (verdict, []string) {
 		return waiting, slow
 	}
 	return healthy, nil
+}
+
+// containerIDShape is a Docker container ID, full or short, which is all
+// restartPolicyOf puts on a command line.
+var containerIDShape = regexp.MustCompile(`^[0-9a-f]{12,64}$`)
+
+// restartPolicyOf reads a container's restart policy on the host, as
+// HostConfig.RestartPolicy.Name: "no", "always", "unless-stopped" or
+// "on-failure". `compose ps` does not print it. A container it cannot read
+// answers "", which judge counts as failed, never as done.
+func restartPolicyOf(t Transport) func(container) string {
+	return func(c container) string {
+		id := strings.TrimSpace(c.ID)
+		if !containerIDShape.MatchString(id) {
+			return ""
+		}
+		out, err := t.Run("docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' " + id)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(out)
+	}
 }
 
 // waitHealthy is the gate after each stack's action: every container of the
@@ -157,7 +189,7 @@ func waitStack(d deployment.Deployment, site, stack string, t Transport, stopped
 		} else if list, perr := parseContainers(out); perr != nil {
 			last = fmt.Sprintf("unreadable `ps` output: %v", perr)
 		} else {
-			v, names := judge(list)
+			v, names := judge(list, restartPolicyOf(t))
 			switch v {
 			case healthy:
 				return nil
@@ -311,7 +343,7 @@ func StackHealthy(d deployment.Deployment, stack string, t Transport) error {
 	if err != nil {
 		return fmt.Errorf("stack %s: unreadable `ps` output: %v", stack, err)
 	}
-	switch v, names := judge(list); {
+	switch v, names := judge(list, restartPolicyOf(t)); {
 	case v == healthy:
 		return nil
 	case len(list) == 0:

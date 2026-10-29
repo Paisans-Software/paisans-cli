@@ -875,6 +875,9 @@ Mbin. The design is in `docs/specs/2026-10-24-engagement-digest.md`.
   On a deployment with several apps sites the service runs on each of them,
   and each member is mailed once: every copy claims a member's week in the
   service's own database before sending, so only one sends it.
+* **What it calls the community.** `community.name`, as in "This week on
+  Paisans", in the subject, the headings, the footer and the Matrix message.
+  Without one it uses Mbin's meta title. Mbin's own pages keep their titles.
 * **How it reads Mbin.** Through a read only Postgres role, `<app>_reader`
   (`digest_reader` for an app named `digest`), which `deployment apply` creates
   beside the app's own role. The role has `SELECT` on named columns of named
@@ -1457,6 +1460,177 @@ the deployment's user, 0600, because it carries the SMTP password; the data
 directory is a bind mount the user's rootless Docker creates. The fork's
 entrypoint, root of the container's user namespace, hands both to `node` and
 drops to it. An image older than that entrypoint ignores the seed.
+
+### Server and container stats
+
+The `beszel` blueprint is a reserved one, built into the binary beside
+`uptime`, which runs Beszel's hub (`henrygd/beszel`, checked at `v0.21.1`).
+The uptime monitor says whether an app answers; the hub says why a site is
+slow: the host's CPU, memory, swap, disk, network and load, and each
+container's CPU, memory and network, with history. A site's agent reads them,
+so the machine is not entered over ssh to run `docker stats` at the moment the
+operator least wants to. The hub is an operator tool, as the monitor is: it
+has no member access, keeps no alert rules for you, and shows no GPU, SMART,
+sensor or systemd figures, each of which needs a device or a privilege the
+rootless agent does not have. It is **pinned only**, since it keeps SQLite
+under `/beszel_data`, so `cluster` is refused by the rule that refuses the
+monitor.
+
+| Combination | Result | Rule |
+|---|---|---|
+| a `beszel` app pinned to a site without `monitor` | refused | `beszel-needs-a-monitor-site` |
+| more than one `beszel` app | refused | `one-beszel` |
+
+A monitor with `web_server.managed_by: external` hosts one app, so
+`web-server-external-serves-one-app` refuses the hub there beside the uptime
+app.
+
+**The hub is served like the monitor.** It sits on the monitor site, so its
+hostname, `status.health.<domain>` from `paisans create`, is pointed at the
+monitor's `public_address` by `dns init` and served by that site's Caddy.
+That name is two labels under the domain, which the certificate covers
+through DNS-01 as for any other. A DNS provider that proxies records must
+leave it unproxied, because the provider's own edge certificate covers one
+label only; `dns init` writes the monitor's records unproxied. It is not
+gateable (`gated-on-ungateable-blueprint`), for the monitor's reason: the gate
+signs in at Pocket ID, which may be what is down. The hub listens on 8090 in
+its container and publishes 8084 on the monitor's mesh address, which is how
+every agent reaches it; the Caddy in front of it reaches it there too.
+
+**Operators sign in through Pocket ID, and only operators.** The OIDC client is
+restricted to `settings.admin_group`, default `operators`, with callback
+`/api/oauth2-redirect` and PKCE on, so Pocket ID refuses everyone else before
+Beszel sees them. The hub runs with `USER_CREATION=true` and
+`OAUTH_DEFAULT_USER_ROLE=user`, so an operator's first sign in creates their
+user, with `SHARE_ALL_SYSTEMS=true`, so each sees every system. Beszel never
+gives an OAuth2 user the `admin` role (`internal/users/users.go:28-49` at
+`v0.21.1`). Pocket ID is the only sign in: `DISABLE_PASSWORD_AUTH=true` turns
+password sign in off on the `users` collection at every start.
+`DISABLE_SSH=true`, since the hub never dials an agent.
+
+**The break glass is the superuser, over the mesh.** Pocket ID is one of the
+things the hub watches, so a hub that only Pocket ID opens is no use while it
+is down. The superuser `beszel-admin@<domain>` signs in with
+`apps.<app>.admin_password` from the secrets file; nothing is sent to that
+address. Its sign in is refused at the edge (below), so it is reached through
+an ssh tunnel to the monitor's site:
+
+1. `ssh -L 8084:<monitor mesh address>:8084 <the monitor site's ssh
+   destination>`, as the deployment's user, as `paisans site ssh` logs in.
+2. Open `http://localhost:8084/_/` and sign in as the superuser.
+3. In the `users` collection's options, turn on Identity/Password.
+4. Open `http://localhost:8084/` and sign in as `beszel-admin@<domain>` with
+   the same password: a user of that name exists beside the superuser.
+
+The hub turns password sign in off again at its next start.
+
+The hub's stack has three services. `app` is the hub. `admin` is a one shot
+from the hub's own image that runs `/beszel superuser upsert` once the hub is
+healthy, because `USER_PASSWORD` is read on a new install only and this is
+what makes a rotated `admin_password` take effect. The command takes the
+password as an argument, so while it runs the password is in its argv, which
+the deployment user and root can read. It runs as `superuser upsert --
+<email> <password>`: a generated password is base64url, so about one in 64
+begins with `-`, which the hub's command line would otherwise read as an
+unknown flag on every apply. `setup` runs on the heartbeat image: it
+writes the Pocket ID provider into PocketBase through its API and resets the
+break glass user's password. Setting it on every start gives the user a new
+token key, as PocketBase does on any password change, so a break glass
+session ends at the stack's next start, which is intended. It carries `env_file: .env`, so a rotated
+password recreates it; without that it would sleep through the rotation.
+`deployment apply`'s health gate, and its probe of a stopped stack, treat a
+service with `restart: "no"` that exited 0 as done, which is what `admin` is.
+
+**The Caddy snippet refuses the superuser's panel and API.** It answers 404
+to `/_/` and everything under it, PocketBase's superuser panel, and to
+`/api/collections/_superusers` and everything under it, the superuser API the
+panel signs in through, by the collection's name and by its id,
+`pbc_3142635823`, which PocketBase derives the same on every hub and accepts
+in place of the name. Both sign in with the superuser's password alone, and
+nothing an operator does day to day needs either from the internet. They stay
+reachable over the mesh on 8084, which is the break glass. Everything else
+passes: the UI, the sign in through Pocket ID, the callback, and the API and
+realtime stream the UI reads, since the hub authenticates those itself.
+
+**The systems list is the whole truth.** The toolkit renders
+`/beszel_data/config.yml` with one system per site, in site name order, each
+with the site's mesh address as `host` and `sites.<site>.beszel_token` as its
+`token`. At every start the hub creates the missing systems, updates the rest
+and **deletes every system the file does not list**, history included
+(`internal/hub/config/config.go`, `SyncSystems` at `v0.21.1`). So `site add`
+and `site remove` re-render the hub with the monitor, and the next apply
+restarts it: a new site appears and a removed one is dropped with no visit to
+the UI. `SyncSystems` matches a listed system to a stored one on its name,
+host and port together, so changing a site's mesh address deletes its system
+and creates a new one, and the site's history is lost. The file is rendered
+0600 at every apply, since the toolkit owns it and the
+hub only reads it. The hub reads its private key from
+`/beszel_data/id_ed25519` (`internal/hub/hub.go:152-201`).
+
+**The agent runs in every site's `infra` stack** whenever a `beszel` app is
+declared, beside the heartbeat, on `network_mode: host` so the host's network
+figures are the host's. It listens for nothing: it dials the hub over
+WebSocket at `http://<monitor mesh address>:8084`, which is plain HTTP inside
+the mesh as every service talks across sites, and authenticates with its
+token. Its configuration is `infra/beszel-agent/beszel-agent.env`, mode 0600,
+since `TOKEN` is the site's credential at the hub; `KEY` is the hub's public
+key and `SYSTEM_NAME` the site's name. Three details follow from how it runs:
+
+* **`DATA_DIR`** is `/var/lib/beszel-agent`, bound from the infra stack's
+  `beszel-agent/data`, where the toolkit renders the agent's fingerprint,
+  `fingerprint`, mode 0600: the lowercase hex sha256 of
+  `beszel-agent:<deployment id>:<site>`. The hub pins a fingerprint on the
+  agent's first connect and refuses any other for that system, token
+  rotations included, and an agent left to itself derives one from its host.
+  The toolkit's is the same on every host the site is ever on, so a host
+  rebuilt under the same site name is accepted as the same system.
+* **The socket path is learnt over ssh**, after rendering, so the compose file
+  mounts `${PAISANS_DOCKER_SOCKET:?run by paisans deployment apply}` and the
+  transport exports `PAISANS_DOCKER_SOCKET` beside the `DOCKER_HOST` it
+  already exports. `site prepare`'s bashrc block exports both, so the
+  operator's own `docker compose` on the infra stack keeps working, and a
+  compose run with neither fails by name rather than mounting nothing. A
+  host prepared before the agent existed has a block without
+  `PAISANS_DOCKER_SOCKET`; running `site prepare` on it again replaces the
+  block between its markers with the current one.
+* **No `EXTRA_FILESYSTEMS`**: the agent reports the filesystems it sees.
+
+**The socket reaches everything the deployment user's Docker does.** The agent
+mounts the deployment user's rootless Docker socket, `/run/user/<uid>/docker.sock`,
+read only, and read only on a mount does not restrict the API behind it: a
+process that can talk to that socket can start a container as the deployment
+user, which already owns every container on the site. The agent only reads,
+and it runs from the foundation's pinned digest like every infra image, but
+this is a real widening and an agent that was compromised could do anything the
+deployment user's Docker can.
+
+**Per container CPU, memory and I/O need delegation, which `site admit`
+already grants.** It writes `Delegate=cpu cpuset io memory pids` for
+`user@.service` on every host, so the controllers are there on Ubuntu 22.04
+and 24.04 alike, and `doctor` has no check for it. A host's own drop-in at
+that path is left as it is, with a warning (`planDelegation`,
+`internal/hostadmit/user.go`), and on a running manager a drop-in takes effect
+at the manager's next start.
+
+**Rotation.** `sites.<site>.beszel_token` is `hex32`, 64 hexadecimal
+characters, generated only while a hub is declared. `paisans secrets rotate
+sites.<site>.beszel_token` applies the hub's stack and then the site's infra,
+and `--all` does the same while a hub is declared. The site's agent and the
+hub restart; the agent's env file restarts only the agent, so the gateway's
+Caddy is not reloaded. `apps.<hub>.admin_password` rotates through the hub's
+stack. `apps.<hub>.hub_key` and `hub_key_public` are a pair in the group
+`hub`, in two secret formats this blueprint introduced: `ed25519-openssh`, an
+unencrypted OpenSSH private key written to `id_ed25519` at 0600, and
+`ed25519-public`, its public half, as `rsa-public` is for `rsa-keypair`
+(`of` names the private half). `paisans secrets rotate apps.<hub>.hub`, and
+`--all`, apply the hub's stack and then every site's infra stack, because each
+agent's `KEY` is the public half and an agent refuses a hub that signs with
+another key. The hub and every agent restart, and each site's figures are
+missing from the hub's restart until its own infra apply.
+
+The image tracks `beszel` and `beszel-agent` in the core catalog are optional
+and held to `0.21.`: Beszel is 0.x, so the track is held to one minor, and a new minor is a
+catalog release.
 
 ## Adding a site, and the constraint that shapes it
 
@@ -2820,6 +2994,8 @@ Finishing either command first costs nothing but its resume.
 | `sites.<site>.heartbeat_token` | the monitor | the site's heartbeat | its pushes refused while the monitors restart and the pusher switches, normally within the grace before a heartbeat counts as missed |
 | Pocket ID `operators_heartbeat_token`, `dns_super_admins_heartbeat_token`, `dns_2fa_heartbeat_token` | the monitor | the operators heartbeat on every site the app runs on | its pushes refused while the monitors restart and the pushers switch, normally within the grace before a heartbeat counts as missed |
 | `apps.<app>.heartbeat_token`, for a blueprint that declares a heartbeat | the monitor | the app, on every site it runs on | its pushes refused while the monitors restart and the app switches, normally within the grace before a heartbeat counts as missed |
+| `sites.<site>.beszel_token`, while a Beszel hub is declared | the hub, through its `config.yml` | the site's Beszel agent | the hub and the agent restart; the site's figures are missing until they reconnect |
+| Beszel `hub_key` and `hub_key_public`, as `apps.<app>.hub` | the hub, through its `id_ed25519` | every site's Beszel agent, as its `KEY` | the hub and every agent restart; each site's figures are missing until its infra stack is applied |
 | Pocket ID `dns_email_hash_key` | the reconciler | the reconciler, with the hashed mapping rendered under it | a restart of the Pocket ID stack on each site in turn |
 | engagement `mas_admin_client_secret`, and any secret a blueprint shares with its provider | MAS, through the synapse app's `mas.yaml` | the engagement app; the synapse stack is re-applied with it, first | none; a restart of both stacks |
 
@@ -9434,6 +9610,20 @@ That is the one step `app remove` runs on a site the app never ran on, and it
 is planned from the render and the monitor's host rather than from the left
 over marks. A failure there comes after everything of the app's is gone and
 names the `deployment apply` that finishes it.
+
+**Removing the Beszel hub stops every agent.** Every site's agent is the
+hub's, and a whole apply after the hub leaves `paisans-stack.yaml` drops the
+agent from the infra stack's compose file and marks its files left over, but
+`docker compose up -d` leaves a service its file no longer names running, so
+the agent would keep dialling a hub that is gone. While no `beszel` app is
+declared, `app remove` stops and removes each site's agent, by this
+deployment's label, the infra project and the `beszel-agent` service
+together, so nothing else in the stack is touched, then its left over files
+and their entries, after the sites' own steps. `one-beszel` allows one hub, so
+with none declared every agent is the removed hub's, and a run after the
+hub's own files are gone still finds them. A site not applied since the hub
+left still renders its agent, so nothing of it is touched there, and it is
+named at the end with the `deployment apply` to run before this command again.
 
 **It leaves three things and says so.** The app's secrets stay in the secrets
 file, which it never edits, so they are listed for removal with `sops`; it does

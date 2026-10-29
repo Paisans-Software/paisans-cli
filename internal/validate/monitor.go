@@ -71,6 +71,45 @@ func (c *checker) monitorRoles() {
 	}
 }
 
+// beszel checks where Beszel's hub may run, and how many. README.md,
+// "Monitoring".
+//
+// The hub is what an operator opens to see which machine is failing, so it
+// runs where the uptime monitor does, for the monitor's reason: on a site
+// that holds the monitor role, apart from what it watches, serving its own
+// hostname from its own address. Its SQLite database keeps it off the
+// cluster, which cluster-placement-without-a-cluster already refuses.
+//
+// One hub per deployment, because every site runs one agent, and an agent
+// reports to one hub: a second hub would list systems no agent reports to.
+func (c *checker) beszel() {
+	var hubs []string
+	for _, name := range c.cfg.AppNames() {
+		app := c.cfg.Apps[name]
+		if app.Blueprint != config.BlueprintBeszel {
+			continue
+		}
+		hubs = append(hubs, name)
+		if app.Placement.Mode != config.PlacementPinned {
+			continue
+		}
+		site, ok := c.cfg.Sites[app.Placement.Site]
+		if !ok || site.Has(config.RoleMonitor) {
+			continue // undeclared-site reports a missing one
+		}
+		c.refuse("beszel-needs-a-monitor-site", fmt.Sprintf("apps.%s.placement", name),
+			"beszel app is pinned to a site without the monitor role",
+			"pins Beszel's hub to %s, which does not hold the monitor role. The hub is what you open when the rest is failing, so it runs beside the uptime monitor, on a site holding the monitor role, and serves its own hostname from it. Pin it to the monitor's site.", app.Placement.Site)
+	}
+	if len(hubs) > 1 {
+		for _, name := range hubs[1:] {
+			c.refuse("one-beszel", fmt.Sprintf("apps.%s", name),
+				"one beszel app per deployment",
+				"is a second beszel app, beside %s. Every site runs one Beszel agent, which reports to one hub, so a second hub would list every site and hear from none. Keep one beszel app.", hubs[0])
+		}
+	}
+}
+
 // nothingWatches warns when the deployment declares no uptime app.
 // README.md: "The monitor has a site of its own".
 //

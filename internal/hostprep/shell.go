@@ -27,6 +27,11 @@ const DeploymentLink = "deployment"
 // (apply.RootlessDockerHost), and XDG_RUNTIME_DIR first when the session has
 // none, since a non-interactive ssh session does not always set it and
 // systemctl --user (UserSystemctl) needs it as much as DOCKER_HOST does.
+// PAISANS_DOCKER_SOCKET is the same socket's path, which the infrastructure
+// stack's Beszel agent mounts and its compose file requires, as the
+// transport exports it for every command of the toolkit's
+// (apply.RemoteCommand): without it a `docker compose` the operator runs on
+// the infra stack, a `down` or an `exec patroni`, aborts naming it.
 //
 // It goes at the top because bash reads ~/.bashrc for a command sent over
 // ssh as well as for an interactive shell, and the ~/.bashrc Debian and
@@ -41,6 +46,7 @@ func bashrcBlock(d deployment.Deployment) string {
 		"# Kept by paisans site prepare, which replaces anything between these markers.\n" +
 		`[ -n "$XDG_RUNTIME_DIR" ] || export XDG_RUNTIME_DIR="/run/user/$(id -u)"` + "\n" +
 		`export DOCKER_HOST="unix://$XDG_RUNTIME_DIR/docker.sock"` + "\n" +
+		`export PAISANS_DOCKER_SOCKET="$XDG_RUNTIME_DIR/docker.sock"` + "\n" +
 		end + "\n"
 }
 

@@ -696,6 +696,12 @@ func TestMeshSubnetComesFromTheConfiguration(t *testing.T) {
 // file and none of the stack's data, so a move has nothing of it to carry.
 const hostTimeZoneMount = "/etc/localtime:/etc/localtime:ro"
 
+// dockerSocketMount is the Beszel agent's read only mount of the deployment
+// user's Docker socket, whose path the transport exports as
+// PAISANS_DOCKER_SOCKET. It is the host's daemon and none of the stack's
+// data, and the infrastructure stack is never moved.
+const dockerSocketMount = "${PAISANS_DOCKER_SOCKET:?run by paisans deployment apply}:/var/run/docker.sock:ro"
+
 // No named volumes anywhere: a stack under /srv relocates with one tar.
 func TestNoNamedVolumes(t *testing.T) {
 	for _, f := range build(t).Files {
@@ -720,7 +726,7 @@ func TestNoNamedVolumes(t *testing.T) {
 				continue
 			}
 			mount := strings.TrimPrefix(trimmed, "- ")
-			if !strings.HasPrefix(mount, "/srv/paisans/f2a9/") && !strings.HasPrefix(mount, "/dev/") && mount != hostTimeZoneMount {
+			if !strings.HasPrefix(mount, "/srv/paisans/f2a9/") && !strings.HasPrefix(mount, "/dev/") && mount != hostTimeZoneMount && mount != dockerSocketMount {
 				t.Errorf("%s mounts something that is not a bind mount under /srv: %s", f.Path, mount)
 			}
 		}
@@ -1657,6 +1663,12 @@ func TestGarageServesAWebEndpointOnAnInternalSuffix(t *testing.T) {
 // else in the same stack directory.
 var requiredComposeVar = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*):\?`)
 
+// transportComposeVars are the required variables no .env sets, because the
+// transport exports them ahead of every command it runs on a host
+// (apply.RemoteCommand): PAISANS_DOCKER_SOCKET is learnt over ssh, after
+// rendering.
+var transportComposeVars = map[string]bool{"PAISANS_DOCKER_SOCKET": true}
+
 // A rendered compose file and the rendered `.env` beside it are two halves of
 // one thing, and only compose knows that. It reads `.env` from the project
 // directory for ${VAR} substitution whether or not a service declares
@@ -1689,7 +1701,12 @@ func TestEveryRequiredComposeVariableIsSetInTheStacksEnv(t *testing.T) {
 		if filepath.Base(path) != "compose.yaml" {
 			continue
 		}
-		refs := requiredComposeVar.FindAllStringSubmatch(files[path], -1)
+		var refs [][]string
+		for _, ref := range requiredComposeVar.FindAllStringSubmatch(files[path], -1) {
+			if !transportComposeVars[ref[1]] {
+				refs = append(refs, ref)
+			}
+		}
 		if len(refs) == 0 {
 			continue
 		}
@@ -2733,7 +2750,7 @@ func TestAStorageSiteRendersGarageAlone(t *testing.T) {
 	cfg.Sites["store"] = config.Site{Roles: []config.Role{config.RoleStorage}, Address: "10.44.0.4", Endpoint: "203.0.113.40:51820"}
 	cfg.Storage.Garage.Sites = append(cfg.Storage.Garage.Sites, "store")
 	secrets := fixtureSecrets(t)
-	secrets.Sites["store"] = config.SiteSecrets{WireGuardPrivateKey: "Q0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0M=", HeartbeatToken: "5555555555555555555555555555eeee"}
+	secrets.Sites["store"] = config.SiteSecrets{WireGuardPrivateKey: "Q0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0M=", HeartbeatToken: "5555555555555555555555555555eeee", BeszelToken: "b5555555555555555555555555555eeeb5555555555555555555555555555eee"}
 	plan, err := render.Build(cfg, secrets)
 	if err != nil {
 		t.Fatal(err)
@@ -2746,7 +2763,8 @@ func TestAStorageSiteRendersGarageAlone(t *testing.T) {
 		}
 	}
 	sort.Strings(mine)
-	want := "srv/paisans/f2a9/infra/compose.yaml,srv/paisans/f2a9/infra/garage/garage.toml,srv/paisans/f2a9/infra/heartbeat/heartbeat.env,srv/paisans/f2a9/infra/heartbeat/push.sh,srv/paisans/f2a9/psns-f2a9.conf"
+	// The Beszel agent runs on every site beside the fixture's hub.
+	want := "srv/paisans/f2a9/infra/beszel-agent/beszel-agent.env,srv/paisans/f2a9/infra/beszel-agent/data/fingerprint,srv/paisans/f2a9/infra/compose.yaml,srv/paisans/f2a9/infra/garage/garage.toml,srv/paisans/f2a9/infra/heartbeat/heartbeat.env,srv/paisans/f2a9/infra/heartbeat/push.sh,srv/paisans/f2a9/psns-f2a9.conf"
 	if got := strings.Join(mine, ","); got != want {
 		t.Fatalf("a storage site renders %s, want %s", got, want)
 	}
@@ -2768,7 +2786,9 @@ func TestAStorageSiteRendersGarageAlone(t *testing.T) {
 
 // A site with no roles exists only to host what is pinned to it, so it runs
 // no infrastructure at all. Rendering an infra stack with an empty services
-// map would hand apply a compose project with nothing in it to recreate.
+// map would hand apply a compose project with nothing in it to recreate. The
+// Beszel agent is the exception: while a hub is declared it runs on every
+// site, and is then the one service of this one's infra stack.
 func TestARolelessSiteRendersItsPinnedAppAndNoInfraStack(t *testing.T) {
 	cfg := fixture(t)
 	cfg.Sites["mon"] = config.Site{Address: "10.44.0.9", SSH: cfg.Sites["vm"].SSH}
@@ -2779,6 +2799,10 @@ func TestARolelessSiteRendersItsPinnedAppAndNoInfraStack(t *testing.T) {
 	if _, err := secretsgen.Fill(cfg, secrets); err != nil {
 		t.Fatal(err)
 	}
+	// The fixture's beszel hub lists every site, this one included.
+	mon := secrets.Sites["mon"]
+	mon.BeszelToken = "b9999999999999999999999999999fffb9999999999999999999999999999fff"
+	secrets.Sites["mon"] = mon
 	plan, err := render.Build(cfg, secrets)
 	if err != nil {
 		t.Fatal(err)
@@ -2791,6 +2815,31 @@ func TestARolelessSiteRendersItsPinnedAppAndNoInfraStack(t *testing.T) {
 		if !have[want] {
 			t.Errorf("%s was not rendered", want)
 		}
+	}
+	var infra string
+	for _, f := range plan.Files {
+		if f.Path == "mon/srv/paisans/f2a9/infra/compose.yaml" {
+			infra = f.Content
+		}
+	}
+	var compose struct {
+		Services map[string]any `yaml:"services"`
+	}
+	if err := yaml.Unmarshal([]byte(infra), &compose); err != nil {
+		t.Fatal(err)
+	}
+	if len(compose.Services) != 1 || compose.Services["beszel-agent"] == nil {
+		t.Errorf("a role-less site's infra stack beside a beszel hub runs %v, want the Beszel agent alone", compose.Services)
+	}
+
+	delete(cfg.Apps, "stats")
+	plan, err = render.Build(cfg, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	have = map[string]bool{}
+	for _, f := range plan.Files {
+		have[f.Path] = true
 	}
 	if have["mon/srv/paisans/f2a9/infra/compose.yaml"] {
 		t.Error("a role-less site was given an infra stack with no services in it")

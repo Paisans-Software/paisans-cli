@@ -12,16 +12,20 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Added
 
+- The `beszel` blueprint runs Beszel's hub on the monitor site, signed in through Pocket ID only, and an agent in every site's infra stack; `paisans create` offers it; run `site prepare` on hosts prepared earlier.
 - `deployment apply` lists, under `left over`, each container of a stack still rendered whose service the stack no longer declares.
 - `site prune` removes those containers, keeping etcd, Patroni and Garage, then this deployment's dangling volumes; `deployment prune` runs it on every site.
-
-### Changed
-
-- The engagement app's front page and `/d/` with no date redirect to the account app, or the community's domain without one; `/d/` before the gate, the front page after it.
 
 ### Removed
 
 - `prune --site`, whose volume removal `site prune` now does.
+
+## [0.3.0-rc.16] - 2026-10-29
+
+### Changed
+
+- The `engagement` blueprint names the community in the digest by `community.name`, falling back to Mbin's meta title without one, so the digest reads "This week on Paisans" rather than "Talk · Paisans".
+- The engagement app's front page and `/d/` with no date redirect to the account app, or the community's domain without one; `/d/` before the gate, the front page after it.
 
 ## [0.3.0-rc.15] - 2026-10-29
 
@@ -388,7 +392,8 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.
 - The gateway refuses any request to Pocket ID that carries an `X-API-Key` header with 403, so Pocket ID's API keys work only on the mesh.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.15...develop
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.16...develop
+[0.3.0-rc.16]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.15...v0.3.0-rc.16
 [0.3.0-rc.15]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.14...v0.3.0-rc.15
 [0.3.0-rc.14]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.13...v0.3.0-rc.14
 [0.3.0-rc.13]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.12...v0.3.0-rc.13

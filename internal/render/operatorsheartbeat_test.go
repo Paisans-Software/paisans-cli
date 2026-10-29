@@ -134,6 +134,7 @@ func TestNoMonitorMeansNoOperatorsHeartbeatPusher(t *testing.T) {
 	cfg := fixture(t)
 	delete(cfg.Apps, "health")
 	delete(cfg.Sites, "watch")
+	delete(cfg.Apps, "stats")
 	secrets := fixtureSecrets(t)
 	if refusals := validate.Check(cfg).Refusals(); len(refusals) > 0 {
 		t.Fatalf("a deployment without a monitor is refused: %v", refusals)
@@ -172,6 +173,7 @@ func TestAMissingOrMalformedOperatorsHeartbeatTokenIsRefused(t *testing.T) {
 	cfg := fixture(t)
 	delete(cfg.Apps, "health")
 	delete(cfg.Sites, "watch")
+	delete(cfg.Apps, "stats")
 	secrets := fixtureSecrets(t)
 	delete(secrets.Apps["auth"], "operators_heartbeat_token")
 	if _, err := render.Build(cfg, secrets); err != nil {

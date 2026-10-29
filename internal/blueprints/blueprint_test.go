@@ -117,8 +117,8 @@ func TestAConditionReadsTheApp(t *testing.T) {
 }
 
 // Every reserved blueprint is marked reserved, and no core one is.
-func TestTheReservedBlueprintsAreTheFive(t *testing.T) {
-	want := map[config.Blueprint]bool{config.BlueprintPocketID: true, config.BlueprintOAuth2Proxy: true, config.BlueprintAccount: true, config.BlueprintUptime: true, config.BlueprintEngagement: true}
+func TestTheReservedBlueprintsAreTheSix(t *testing.T) {
+	want := map[config.Blueprint]bool{config.BlueprintPocketID: true, config.BlueprintOAuth2Proxy: true, config.BlueprintAccount: true, config.BlueprintUptime: true, config.BlueprintEngagement: true, config.BlueprintBeszel: true}
 	for _, blueprint := range known() {
 		if defs[blueprint].Reserved != want[blueprint] {
 			t.Errorf("%s reserved is %v", blueprint, defs[blueprint].Reserved)
@@ -141,5 +141,24 @@ func TestOptionalHealthAndADumpParse(t *testing.T) {
 	mysql := strings.Replace(minimal, "engine: none", "engine: mysql", 1) + "backup:\n  dump: {service: db, run: [mysqldump, x]}\n  restore: {service: db, run: [mysql, x]}\n"
 	if d, err := Parse("example", []byte(mysql), always); err != nil || d.Backup == nil || d.Engine != "mysql" {
 		t.Errorf("mysql: %+v, %v", d, err)
+	}
+}
+
+// An Ed25519 pair is two secrets in one group, the public half naming the
+// private one, and the private key has no passphrase.
+func TestParseEd25519Pair(t *testing.T) {
+	pair := "secrets:\n  generate:\n    - {name: hub_key, format: ed25519-openssh, group: hub}\n    - {name: hub_key_public, format: ed25519-public, of: hub_key, group: hub}\n"
+	if _, err := Parse("example", []byte(minimal+pair), always); err != nil {
+		t.Fatalf("a valid pair: %v", err)
+	}
+	for _, c := range []struct{ name, change, want string }{
+		{"a public half naming nothing", minimal + "secrets:\n  generate:\n    - {name: hub_key_public, format: ed25519-public, group: hub}\n", "names the ed25519-openssh secret"},
+		{"a public half naming an RSA keypair", minimal + "secrets:\n  generate:\n    - {name: p, group: hub}\n    - {name: k, format: rsa-keypair, passphrase: p, group: hub}\n    - {name: hub_key_public, format: ed25519-public, of: k, group: hub}\n", "names the ed25519-openssh secret"},
+		{"a private key with a passphrase", minimal + "secrets:\n  generate:\n    - {name: p, group: hub}\n    - {name: hub_key, format: ed25519-openssh, passphrase: p, group: hub}\n", "passphrase"},
+		{"a pair outside one group", minimal + "secrets:\n  generate:\n    - {name: hub_key, format: ed25519-openssh, group: hub}\n    - {name: hub_key_public, format: ed25519-public, of: hub_key}\n", "one group"},
+	} {
+		if _, err := Parse("example", []byte(c.change), always); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: got %v, want an error naming %q", c.name, err, c.want)
+		}
 	}
 }
