@@ -2,6 +2,9 @@
 # Paisans reads it; internal/blueprints.Parse in paisans-cli documents every key.
 apiVersion: paisans.blueprint/v3
 name: mbin
+# Its .env reads a consumer's .Values, which a toolkit before 0.3.0-rc.19
+# does not have, so that toolkit keeps the release before this one.
+requires_toolkit: ">= 0.3.0-rc.19"
 services:
   # The paisans fork, not upstream: it carries the generic OIDC
   # provider this blueprint's .env configures, which upstream does not
@@ -32,10 +35,10 @@ services:
   - {name: "valkey", image: "docker.io/valkey/valkey:9.*.*-trixie", purpose: "the cache"}
   - {name: "postgres", purpose: "its own database, when the app is pinned"}
 database: {engine: postgres}
-# An engagement app links to it by this role to welcome newcomers through an
-# Mbin agent client. api_port is the port Mbin publishes on each site's mesh
-# address: an engagement app reads Mbin only when both are clustered, so it
-# calls the API on its own site's mesh address.
+# An engagement app links to it by this role to welcome newcomers, through
+# the agent client the .env declares for it. api_port is the port Mbin
+# publishes on each site's mesh address: an engagement app reads Mbin only
+# when both are clustered, so it calls the API on its own site's mesh address.
 provides:
   - role: forum
     values:
