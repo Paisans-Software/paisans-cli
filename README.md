@@ -911,9 +911,16 @@ Mbin. The design is in `docs/specs/2026-10-24-engagement-digest.md`.
 * **What the gateway forwards.** `/u/*`, the unsubscribe links, `/d/*`, the
   web digests the Matrix message links to, and
   `GET /healthz`, which answers ok or 503, for the monitor's public check;
-  everything else on the hostname answers 404. The route has no Pocket ID
-  gate (`gateable: false`) because a member clicking from an inbox may not be
-  signed in, and the signed token in the link is what names them.
+  everything else on the hostname answers 404.
+* **Gated, with the unsubscribe links open.** The web digest, `/d/<week>`,
+  names the member by the gate's `X-Auth-Request-User`, their Pocket ID
+  subject, so the link carries no secret and no member's id, and a forwarded
+  link shows members-only content to nobody. The blueprint is gateable with
+  `/u/*` open: a member clicking unsubscribe from an inbox may not be signed
+  in, and the signed token in that link is what names them. `/healthz` is
+  open as the health route. Ungated, the service gets no header and every
+  web digest answers not found, so `validate` warns (`engagement-not-gated`)
+  when the app links to a homeserver and is not gated.
 
 ```yaml
 apps:
@@ -925,6 +932,7 @@ apps:
     blueprint: engagement
     hostname: digest.example.org
     placement: cluster
+    gated: true
 ```
 
 The service's own database, in the cluster's Postgres, holds only
@@ -945,6 +953,7 @@ app*).
 | `engagement-source-not-clustered` | the `mbin` app is pinned. Refused: the reader role is created in the cluster's Postgres, and a pinned Mbin runs against a Postgres of its own on its site, where no such role exists |
 | `engagement-without-smtp` | the app resolves no SMTP host or `from_address`. Warned: it is an email and cannot send without them |
 | `engagement-bot-localpart-invalid` | `settings.bot_localpart` is not a Matrix localpart, lowercase letters, digits and `._=/-` only. Refused: MAS would not create the bot's account |
+| `engagement-not-gated` | the app links to a Matrix homeserver and is not `gated`. Warned: the bot's links to the web digest, which names the member by the gate's header, all answer not found |
 | `engagement-bot-display-name-invalid` | `settings.bot_display_name` is blank or holds a line break, tab or other control character. Refused: it is rendered into one `.env` line |
 | `link-provider-ambiguous` | an optional link with its setting unset while several apps provide the role. Refused: it could not tell which to use. Applies to any blueprint's link, the engagement app's `homeserver` being one |
 | `link-shared-secret-outside` | a link that shares a secret, leading to a hostname no app in the deployment provides: the one its setting names, or the app's own when a link without `optional` leaves it unset. Refused: the secret can be handed only to an app the deployment renders. Applies to any blueprint's link, the engagement app's being the one that shares a secret |

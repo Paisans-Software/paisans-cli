@@ -22,8 +22,14 @@ func TestEngagementBlueprintParses(t *testing.T) {
 	if got := Port(config.BlueprintEngagement); got != 8083 {
 		t.Errorf("port %d, want 8083", got)
 	}
-	if GateFor(config.BlueprintEngagement).Gateable {
-		t.Error("engagement is gateable, and a member unsubscribing from an inbox may not be signed in")
+	// Gateable, so the web digest reads the member from the gate, with the
+	// unsubscribe links and the health probe open: a member unsubscribing
+	// from an inbox may not be signed in.
+	if !GateFor(config.BlueprintEngagement).Gateable {
+		t.Error("engagement is not gateable, and its web digest names the member by the gate's header")
+	}
+	if open := OpenPathsFor(config.BlueprintEngagement); !slices.Equal(open, []string{"/u/*", "/healthz"}) {
+		t.Errorf("open paths %q, want /u/* and /healthz", open)
 	}
 	if !SendsMail(config.BlueprintEngagement) {
 		t.Error("engagement does not send mail")
