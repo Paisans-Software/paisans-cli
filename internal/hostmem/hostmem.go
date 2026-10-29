@@ -179,8 +179,9 @@ const mib = 1 << 20
 const (
 	// FloorBase is every host: Ubuntu Server's own services, an apt or
 	// unattended-upgrades run among them, the deployment user's rootless
-	// Docker (dockerd, containerd and RootlessKit), WireGuard and the
-	// heartbeat container.
+	// Docker (dockerd, containerd and RootlessKit), WireGuard, the
+	// heartbeat container, and the Beszel agent every site runs while a
+	// beszel app is declared.
 	FloorBase = 512 * mib
 	// FloorEtcd is an etcd v3.5 member, on every data site and the witness:
 	// its keyspace is Patroni's few keys, and the rest is room for its
@@ -204,8 +205,9 @@ const (
 	// FloorUptime is the uptime monitor, a Node.js process.
 	FloorUptime = 256 * mib
 	// FloorBeszel is Beszel's hub, one Go process with its SQLite database,
-	// on the site its beszel app is pinned to. Set from the hub at rest on a
-	// staging host.
+	// on the site its beszel app is pinned to. Provisional: set from what
+	// the hub runs, as the others are, until it is measured at rest on a
+	// host.
 	FloorBeszel = 64 * mib
 	// FloorApps is an apps site's least: Pocket ID and one app beside it.
 	// An app such as Mbin, with its PHP workers and Valkey, or Wiki.js

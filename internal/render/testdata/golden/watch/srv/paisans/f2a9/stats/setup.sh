@@ -71,7 +71,7 @@ JSON
 # key whenever its stored password changes (core/record_model.go,
 # onRecordSaveExecute), which signs out every break glass session. That is
 # intended: break glass is for while the identity provider is down, and a
-# session of it does not outlive the next apply or restart of this stack.
+# session of it does not outlive the next start of this container.
 users=$(curl -sS --fail-with-body -G "$hub/api/collections/users/records" \
 	-H "Authorization: $token" --data-urlencode "filter=email='beszel-admin@example.org'" --data-urlencode 'fields=id')
 id=$(printf '%s' "$users" | sed -n 's/.*"items":\[{"id":"\([^"]*\)".*/\1/p')

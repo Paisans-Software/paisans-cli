@@ -1537,7 +1537,10 @@ and **deletes every system the file does not list**, history included
 (`internal/hub/config/config.go`, `SyncSystems` at `v0.21.1`). So `site add`
 and `site remove` re-render the hub with the monitor, and the next apply
 restarts it: a new site appears and a removed one is dropped with no visit to
-the UI. The file is rendered 0600 at every apply, since the toolkit owns it and the
+the UI. `SyncSystems` matches a listed system to a stored one on its name,
+host and port together, so changing a site's mesh address deletes its system
+and creates a new one, and the site's history is lost. The file is rendered
+0600 at every apply, since the toolkit owns it and the
 hub only reads it. The hub reads its private key from
 `/beszel_data/id_ed25519` (`internal/hub/hub.go:152-201`).
 
@@ -1563,7 +1566,10 @@ key and `SYSTEM_NAME` the site's name. Three details follow from how it runs:
   transport exports `PAISANS_DOCKER_SOCKET` beside the `DOCKER_HOST` it
   already exports. `site prepare`'s bashrc block exports both, so the
   operator's own `docker compose` on the infra stack keeps working, and a
-  compose run with neither fails by name rather than mounting nothing.
+  compose run with neither fails by name rather than mounting nothing. A
+  host prepared before the agent existed has a block without
+  `PAISANS_DOCKER_SOCKET`; running `site prepare` on it again replaces the
+  block between its markers with the current one.
 * **No `EXTRA_FILESYSTEMS`**: the agent reports the filesystems it sees.
 
 **The socket reaches everything the deployment user's Docker does.** The agent

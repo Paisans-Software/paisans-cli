@@ -223,8 +223,9 @@ controllers. So the figures work on Ubuntu 22.04 and 24.04 alike, with no new
 drop-in and no `doctor` check.
 
 **Memory.** `hostmem` counts the agent in `FloorBase` and the hub in a new
-`FloorBeszel` on a site a `beszel` app is pinned to, each set from what the
-builder measures on a host at rest.
+`FloorBeszel` on a site a `beszel` app is pinned to. `FloorBeszel` is
+provisional, set from what the hub runs, until it is measured at rest on a
+host.
 
 **Its env file restarts only the agent.** `deployment apply` treats a changed
 infra env file as a change to the gateway's compose, except the heartbeat's;
