@@ -1496,9 +1496,25 @@ Beszel sees them. The hub runs with `USER_CREATION=true` and
 `OAUTH_DEFAULT_USER_ROLE=user`, so an operator's first sign in creates their
 user, with `SHARE_ALL_SYSTEMS=true`, so each sees every system. Beszel never
 gives an OAuth2 user the `admin` role (`internal/users/users.go:28-49` at
-`v0.21.1`). The break glass is Beszel's own password sign in as
-`beszel-admin@<domain>`, with `apps.<app>.admin_password`; nothing is sent to
-that address. `DISABLE_SSH=true`, since the hub never dials an agent.
+`v0.21.1`). Pocket ID is the only sign in: `DISABLE_PASSWORD_AUTH=true` turns
+password sign in off on the `users` collection at every start.
+`DISABLE_SSH=true`, since the hub never dials an agent.
+
+**The break glass is the superuser, over the mesh.** Pocket ID is one of the
+things the hub watches, so a hub that only Pocket ID opens is no use while it
+is down. The superuser `beszel-admin@<domain>` signs in with
+`apps.<app>.admin_password` from the secrets file; nothing is sent to that
+address. Its sign in is refused at the edge (below), so it is reached through
+an ssh tunnel to the monitor's site:
+
+1. `ssh -L 8084:<monitor mesh address>:8084 <the monitor site's ssh
+   destination>`, as the deployment's user, as `paisans site ssh` logs in.
+2. Open `http://localhost:8084/_/` and sign in as the superuser.
+3. In the `users` collection's options, turn on Identity/Password.
+4. Open `http://localhost:8084/` and sign in as `beszel-admin@<domain>` with
+   the same password: a user of that name exists beside the superuser.
+
+The hub turns password sign in off again at its next start.
 
 The hub's stack has three services. `app` is the hub. `admin` is a one shot
 from the hub's own image that runs `/beszel superuser upsert` once the hub is
@@ -1524,10 +1540,9 @@ panel signs in through, by the collection's name and by its id,
 `pbc_3142635823`, which PocketBase derives the same on every hub and accepts
 in place of the name. Both sign in with the superuser's password alone, and
 nothing an operator does day to day needs either from the internet. They stay
-reachable over the mesh on 8084. Everything else passes: the UI, the sign in
-through Pocket ID, the callback, break glass through the `users` collection,
-and the API and realtime stream the UI reads, since the hub authenticates
-those itself.
+reachable over the mesh on 8084, which is the break glass. Everything else
+passes: the UI, the sign in through Pocket ID, the callback, and the API and
+realtime stream the UI reads, since the hub authenticates those itself.
 
 **The systems list is the whole truth.** The toolkit renders
 `/beszel_data/config.yml` with one system per site, in site name order, each

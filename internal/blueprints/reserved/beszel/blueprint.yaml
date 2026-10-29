@@ -36,7 +36,7 @@ config:
 health: {path: "/api/health", status: [200]}
 # The hub is what an operator opens when the sites it watches are down. The
 # gate signs in at the identity provider on those sites, so a gated hub is
-# unreadable at exactly the moment it exists for, and its break glass
+# unreadable at exactly the moment it exists for, and its break glass user's
 # password sign in would sit behind the sign in it is the fallback for. Its
 # own OIDC client admits only settings.admin_group, so the gate would add no
 # access control, only a dependency.

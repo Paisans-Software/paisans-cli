@@ -151,6 +151,17 @@ func TestBeszelKeyFile(t *testing.T) {
 	}
 }
 
+// Pocket ID is the hub's only sign in: password sign in is off on the users
+// collection, and an operator's first sign in creates their user.
+func TestBeszelSignsInThroughPocketIDOnly(t *testing.T) {
+	env := beszelFile(t, ".env").Content
+	for _, want := range []string{"\nDISABLE_PASSWORD_AUTH=true\n", "\nUSER_CREATION=true\n", "\nSHARE_ALL_SYSTEMS=true\n"} {
+		if !strings.Contains(env, want) {
+			t.Errorf(".env lacks %q:\n%s", strings.TrimSpace(want), env)
+		}
+	}
+}
+
 // setup.sh writes the oidc provider in PocketBase v0.40.5's own field names
 // (core/collection_model_auth_options.go:407-413 and :527-543), with this
 // app's client and Pocket ID's endpoints, and carries them, so it is 0600.

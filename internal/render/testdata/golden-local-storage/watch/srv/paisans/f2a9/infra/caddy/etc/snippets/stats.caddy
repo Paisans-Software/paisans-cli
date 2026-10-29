@@ -16,9 +16,9 @@
 # pbc_3142635823 on every hub, "pbc_" and the CRC-32 of "auth_superusers"
 # (core/collection_model.go, idChecksum), so both are refused. They stay
 # reachable over the mesh, on the hub's port 8084 at the
-# monitor's mesh address. What passes is break glass when the identity
-# provider is down, Beszel's own password sign in through the users
-# collection, and everything else. Caddy's path matcher already ignores
+# monitor's mesh address, which is where an operator turns password sign in
+# back on for the break glass user while the identity provider is down.
+# Everything else passes. Caddy's path matcher already ignores
 # case, as PocketBase does a collection's name, and /_/* matches /_/ itself.
 @superuser_panel path /_ /_/*
 respond @superuser_panel 404
