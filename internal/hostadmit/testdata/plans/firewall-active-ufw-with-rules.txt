@@ -31,9 +31,14 @@ step 22: allow all inbound on psns-f2a9
   run:
     $ ufw allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'
 
-step 23: set the host's sysctls
-step 24: write the admission record
-step 25: add the operators' keys
+step 23: allow routed from psns-f2a9 back out psns-f2a9
+  firewall: allow routed from psns-f2a9 back out psns-f2a9 (the mesh, relayed between sites that cannot dial each other)
+  run:
+    $ ufw route allow in on psns-f2a9 out on psns-f2a9 comment 'paisans-f2a9: the mesh, relayed between sites that cannot dial each other'
+
+step 24: set the host's sysctls
+step 25: write the admission record
+step 26: add the operators' keys
 
 present: swap: on
 present: docker: Engine 29.9.1
@@ -57,4 +62,4 @@ present: firewall: ufw active, its default policy left to the owner
 warning: delegation reaches paisans-f2a9's manager at its next start
   Its manager is running, and restarting it would restart its Docker daemon and every container in it, so admit does not. cpuset and io limits apply after the host's next reboot.
 warning: forwarding: this turns on routing between every interface on this host
-  The site has an endpoint, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's forward policy governs what is routed.
+  Other sites dial this one, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's route rule relays the mesh, and its forward policy governs every other route.

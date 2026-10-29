@@ -31,19 +31,24 @@ step 22: allow all inbound on psns-f2a9
   run:
     $ ufw allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'
 
-step 23: arm the ufw fallback
+step 23: allow routed from psns-f2a9 back out psns-f2a9
+  firewall: allow routed from psns-f2a9 back out psns-f2a9 (the mesh, relayed between sites that cannot dial each other)
+  run:
+    $ ufw route allow in on psns-f2a9 out on psns-f2a9 comment 'paisans-f2a9: the mesh, relayed between sites that cannot dial each other'
+
+step 24: arm the ufw fallback
   firewall: a timer, paisans-ufw-fallback.timer, that runs ufw disable 10 minutes from now, so a login ufw blocks is let back in; admit stops it once a new SSH login gets through. It does not survive a reboot: a reboot before it fires leaves ufw enabled, so wait for it rather than reboot
   run:
     $ systemd-run --on-active=600 --timer-property=AccuracySec=1s --unit=paisans-ufw-fallback ufw disable
 
-step 24: enable ufw
+step 25: enable ufw
   firewall: enable ufw, every rule above already in place, with the default policy ufw has (Ubuntu's denies incoming). Admit allows only the TCP ports sshd listens on, and names every other port that answers from off this host as it reads it. It cannot see DROP rules written by hand in /etc/ufw/before.rules, before6.rules or user.rules, nor a way in that is not listening as it reads the host, such as sslh, dropbear or mosh started later: if you rely on either, enable ufw by hand after checking them. Stays reachable: 22/tcp (sshd (pid 812, uid 0) listens on 0.0.0.0:22 and sshd (pid 812, uid 0) listens on [::]:22), sshd's port, which admit keeps allowed.
   run:
     $ ufw --force enable
 
-step 25: set the host's sysctls
-step 26: write the admission record
-step 27: add the operators' keys
+step 26: set the host's sysctls
+step 27: write the admission record
+step 28: add the operators' keys
 
 present: swap: on
 present: docker: Engine 29.9.1
@@ -68,4 +73,4 @@ present: firewall: SSH on 22/tcp allowed by `ufw allow 22/tcp`
 warning: delegation reaches paisans-f2a9's manager at its next start
   Its manager is running, and restarting it would restart its Docker daemon and every container in it, so admit does not. cpuset and io limits apply after the host's next reboot.
 warning: forwarding: this turns on routing between every interface on this host
-  The site has an endpoint, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's forward policy governs what is routed.
+  Other sites dial this one, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's route rule relays the mesh, and its forward policy governs every other route.

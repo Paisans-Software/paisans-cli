@@ -1476,7 +1476,8 @@ paisans site admit --site home-a --ssh owner@home-a.example.org --execute   # fr
   rules tagged `paisans-<token>:`; with `--watchdog`, the device for the user;
   with `--public-ports`, `ip_unprivileged_port_start` of 80 and 80/tcp,
   443/tcp and 443/udp open; for a site other sites dial, on its
-  `public_address` or its `endpoint`, forwarding, since it relays the mesh; the
+  `public_address` or its `endpoint`, forwarding and the ufw route rule
+  relaying the mesh back out of `psns-<token>`, since it relays the mesh; the
   admission record; the registry claim; the operators' keys in the user's
   `authorized_keys`. `/etc/paisans` is root's, at mode 755.
 * **The egress table:** fences the deployment's user off the owner's machine.

@@ -9418,6 +9418,17 @@ The cost is latency: with `synchronous_mode: true` every commit waits a round
 trip, so writes pay home-a → VM → home-b. Siting the VM near the homes largely
 mitigates that and costs nothing, so site it there and then measure.
 
+Every site that others dial, on its `public_address` or its `endpoint`, is a
+relay, because the WireGuard render routes the whole mesh subnet to the first
+of them from each site that is not dialled. So `site admit` gives every such
+site two things a relay needs and nothing else does: `net.ipv4.ip_forward`,
+since a host that does not forward drops the packet it was handed, and
+`ufw route allow in on psns-<token> out on psns-<token>`, since ufw's default
+forward policy is DROP and would drop it too. Forwarding is host wide, and the
+route rule is what keeps it to the mesh: traffic in on the mesh interface and
+back out of it is relayed, and every other route stays the owner's forward
+policy.
+
 The relay carries traffic; it must not carry quorum. When both homes are
 voters beside the VM, the VM is the one path between them, and its loss
 leaves every voter alone (see *The voters that survive one loss must still

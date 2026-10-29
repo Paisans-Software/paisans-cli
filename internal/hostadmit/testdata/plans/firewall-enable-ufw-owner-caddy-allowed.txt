@@ -22,17 +22,18 @@ step 19: install the WireGuard helper
 step 20: install the helper's sudoers line
 step 21: allow 51820/udp
 step 22: allow all inbound on psns-f2a9
-step 23: allow SSH on 22/tcp
-step 24: arm the ufw fallback
+step 23: allow routed from psns-f2a9 back out psns-f2a9
+step 24: allow SSH on 22/tcp
+step 25: arm the ufw fallback
 
-step 25: enable ufw
+step 26: enable ufw
   firewall: enable ufw, every rule above already in place, with the default policy ufw has (Ubuntu's denies incoming). Admit allows only the TCP ports sshd listens on, and names every other port that answers from off this host as it reads it. It cannot see DROP rules written by hand in /etc/ufw/before.rules, before6.rules or user.rules, nor a way in that is not listening as it reads the host, such as sslh, dropbear or mosh started later: if you rely on either, enable ufw by hand after checking them. Stays reachable: 22/tcp (sshd (pid 812, uid 0) listens on 0.0.0.0:22 and sshd (pid 812, uid 0) listens on [::]:22), sshd's port, which admit keeps allowed; 80/tcp (caddy (pid 900, uid 0) listens on *:80), allowed by your rule `ufw allow 'Nginx Full'`; 443/tcp (caddy (pid 900, uid 0) listens on *:443), allowed by your rule `ufw allow 'Nginx Full'`; 443/udp (caddy (pid 900, uid 0) listens on *:443/udp), allowed by your rule `ufw allow 443/udp`.
   run:
     $ ufw --force enable
 
-step 26: set the host's sysctls
-step 27: write the admission record
-step 28: add the operators' keys
+step 27: set the host's sysctls
+step 28: write the admission record
+step 29: add the operators' keys
 
 present: swap: on
 present: docker: Engine 29.9.1
@@ -56,4 +57,4 @@ present: firewall: 22/tcp allowed by the paisans: ssh rule, in place of the depl
 warning: delegation reaches paisans-f2a9's manager at its next start
   Its manager is running, and restarting it would restart its Docker daemon and every container in it, so admit does not. cpuset and io limits apply after the host's next reboot.
 warning: forwarding: this turns on routing between every interface on this host
-  The site has an endpoint, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's forward policy governs what is routed.
+  Other sites dial this one, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's route rule relays the mesh, and its forward policy governs every other route.

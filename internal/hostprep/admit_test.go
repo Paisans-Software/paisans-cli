@@ -21,15 +21,15 @@ import (
 func TestAdmitRules(t *testing.T) {
 	d := deployment.Deployment{ID: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}
 	var got []string
-	for _, r := range hostprep.AdmitRules(d, 2222, 51820, true) {
+	for _, r := range hostprep.AdmitRules(d, 2222, 51820, true, true) {
 		got = append(got, r.String()+" ("+r.Why+")")
 	}
-	want := []string{"2222/tcp (ssh, the bootstrap route)", "51820/udp (WireGuard, the mesh)", "all inbound on psns-f2a9 (the mesh: etcd, Patroni, Garage, HAProxy)", "80/tcp (public ports, HTTP)", "443/tcp (public ports, HTTPS)", "443/udp (public ports, HTTP/3)"}
+	want := []string{"2222/tcp (ssh, the bootstrap route)", "51820/udp (WireGuard, the mesh)", "all inbound on psns-f2a9 (the mesh: etcd, Patroni, Garage, HAProxy)", "routed from psns-f2a9 back out psns-f2a9 (the mesh, relayed between sites that cannot dial each other)", "80/tcp (public ports, HTTP)", "443/tcp (public ports, HTTPS)", "443/udp (public ports, HTTP/3)"}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("AdmitRules =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
-	if rules := hostprep.AdmitRules(d, 22, 0, false); len(rules) != 2 || !rules[0].SSH {
-		t.Errorf("no port, no public ports: %+v", rules)
+	if rules := hostprep.AdmitRules(d, 22, 0, false, false); len(rules) != 2 || !rules[0].SSH {
+		t.Errorf("no port, no public ports, no relay: %+v", rules)
 	}
 }
 

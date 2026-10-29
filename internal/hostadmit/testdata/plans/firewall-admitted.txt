@@ -36,6 +36,7 @@ present: public ports: nothing else answers on 80 or 443
 present: firewall: 22/tcp allowed
 present: firewall: 51820/udp allowed
 present: firewall: all inbound on psns-f2a9 allowed
+present: firewall: routed from psns-f2a9 back out psns-f2a9 allowed
 present: firewall: 80/tcp allowed
 present: firewall: 443/tcp allowed
 present: firewall: 443/udp allowed
@@ -50,4 +51,4 @@ warning: watchdog: paisans-f2a9's Patroni can reboot this machine
 warning: public ports: every local user on this host may bind ports 80 to 1023
   net.ipv4.ip_unprivileged_port_start = 80 is host wide: no user's process needs root for a port from 80 up, the deployment's Caddy among them.
 warning: forwarding: this turns on routing between every interface on this host
-  The site has an endpoint, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's forward policy governs what is routed.
+  Other sites dial this one, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's route rule relays the mesh, and its forward policy governs every other route.

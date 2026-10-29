@@ -73,7 +73,7 @@ func planFirewall(p *planner) error {
 		}
 		p.present("public ports: nothing else answers on 80 or 443")
 	}
-	s, err := p.profile.Firewall(p.t, p.d, hostprep.AdmitRules(p.d, req.SSHPort, req.ListenPort, p.in.Flags.PublicPorts))
+	s, err := p.profile.Firewall(p.t, p.d, hostprep.AdmitRules(p.d, req.SSHPort, req.ListenPort, p.in.Flags.PublicPorts, req.Endpoint))
 	if err != nil {
 		// Build names the part already.
 		return errors.New(strings.TrimPrefix(shown(err).Error(), "firewall: ") + ". Nothing was changed")

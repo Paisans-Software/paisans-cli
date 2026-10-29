@@ -704,7 +704,7 @@ func (p *planner) exposure(b ufwBefore) ([]kept, []Blocked) {
 	slices.SortStableFunc(all, func(x, y *answering) int {
 		return cmp.Or(x.lo-y.lo, x.hi-y.hi, strings.Compare(x.proto, y.proto))
 	})
-	own := hostprep.AdmitRules(p.d, p.in.Request.SSHPort, p.in.Request.ListenPort, p.in.Flags.PublicPorts)
+	own := hostprep.AdmitRules(p.d, p.in.Request.SSHPort, p.in.Request.ListenPort, p.in.Flags.PublicPorts, p.in.Request.Endpoint)
 	mesh := p.d.Interface()
 	var keep []kept
 	var blocked []Blocked

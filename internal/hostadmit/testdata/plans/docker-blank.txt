@@ -156,9 +156,10 @@ step 27: install the helper's sudoers line
 step 28: allow 22/tcp
 step 29: allow 51820/udp
 step 30: allow all inbound on psns-f2a9
-step 31: set the host's sysctls
-step 32: write the admission record
-step 33: add the operators' keys
+step 31: allow routed from psns-f2a9 back out psns-f2a9
+step 32: set the host's sysctls
+step 33: write the admission record
+step 34: add the operators' keys
 
 present: swap: on
 present: package: nftables installed
@@ -169,4 +170,4 @@ present: daemon: /home (ext2/ext3) has 42.9 GB free
 present: mesh: nothing on this host overlaps 10.44.0.0/24
 present: firewall: ufw active, its default policy left to the owner
 warning: forwarding: this turns on routing between every interface on this host
-  The site has an endpoint, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's forward policy governs what is routed.
+  Other sites dial this one, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's route rule relays the mesh, and its forward policy governs every other route.

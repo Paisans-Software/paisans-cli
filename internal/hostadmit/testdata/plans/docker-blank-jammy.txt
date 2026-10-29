@@ -499,7 +499,12 @@ step 30: allow all inbound on psns-f2a9
   run:
     $ ufw allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'
 
-step 31: set the host's sysctls
+step 31: allow routed from psns-f2a9 back out psns-f2a9
+  firewall: allow routed from psns-f2a9 back out psns-f2a9 (the mesh, relayed between sites that cannot dial each other)
+  run:
+    $ ufw route allow in on psns-f2a9 out on psns-f2a9 comment 'paisans-f2a9: the mesh, relayed between sites that cannot dial each other'
+
+step 32: set the host's sysctls
   sysctls: /etc/sysctl.d/60-paisans.conf, applied with sysctl --system, which applies every sysctl file on the host again, then each key checked, since a file read after it could set one back
   write /etc/sysctl.d/60-paisans.conf mode 0644:
     | # Written by paisans site admit, for every admitted deployment that needs
@@ -508,7 +513,7 @@ step 31: set the host's sysctls
   run:
     $ sysctl --system >/dev/null && { [ "$(sysctl -n net.ipv4.ip_forward)" = 1 ] || { echo 'net.ipv4.ip_forward is not 1 after sysctl --system: a file read after /etc/sysctl.d/60-paisans.conf sets it'; exit 1; }; }
 
-step 32: write the admission record
+step 33: write the admission record
   record: who the deployment runs as and what you granted, which its own commands read
   write /etc/paisans/admitted.f2a9.json mode 0644:
     | {
@@ -542,7 +547,7 @@ step 32: write the admission record
     |   "toolkit_modified": false
     | }
 
-step 33: add the operators' keys
+step 34: add the operators' keys
   keys: 1 operator key into paisans-f2a9's authorized_keys, written as paisans-f2a9, and recorded in /srv/paisans/f2a9/.paisans/authorized_keys.owned for site prepare
   provisional: run once the user exists
   run:
@@ -570,4 +575,4 @@ present: daemon: /home (ext2/ext3) has 42.9 GB free
 present: mesh: nothing on this host overlaps 10.44.0.0/24
 present: firewall: ufw active, its default policy left to the owner
 warning: forwarding: this turns on routing between every interface on this host
-  The site has an endpoint, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's forward policy governs what is routed.
+  Other sites dial this one, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's route rule relays the mesh, and its forward policy governs every other route.

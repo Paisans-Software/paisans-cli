@@ -95,9 +95,10 @@ step 19: install the helper's sudoers line
 step 20: allow 22/tcp
 step 21: allow 51820/udp
 step 22: allow all inbound on psns-f2a9
-step 23: set the host's sysctls
+step 23: allow routed from psns-f2a9 back out psns-f2a9
+step 24: set the host's sysctls
 
-step 24: write the admission record
+step 25: write the admission record
   record: who the deployment runs as and what you granted, which its own commands read
   write /etc/paisans/admitted.f2a9.json mode 0644:
     | {
@@ -131,7 +132,7 @@ step 24: write the admission record
     |   "toolkit_modified": false
     | }
 
-step 25: add the operators' keys
+step 26: add the operators' keys
 
 present: swap: on
 present: docker: Engine 29.9.1
@@ -157,4 +158,4 @@ warning: delegation reaches paisans-f2a9's manager at its next start
 warning: --mesh-lan: the deployment can send UDP to 192.168.1.0/24
   Its sites may then dial each other on your LAN, and the deployment's user, which writes each peer's endpoint, can send WireGuard packets to any address in 192.168.1.0/24.
 warning: forwarding: this turns on routing between every interface on this host
-  The site has an endpoint, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's forward policy governs what is routed.
+  Other sites dial this one, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's route rule relays the mesh, and its forward policy governs every other route.
