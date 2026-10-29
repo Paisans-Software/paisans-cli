@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
+	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
 // links checks each app's consumes of a role another app provides, for the
@@ -14,6 +15,8 @@ import (
 // provider is not in the deployment to be handed it. An app whose link cannot
 // be resolved is reported once, as the first, and skipped by the second. A
 // link LinkOf cannot resolve for another reason is reported with its error.
+// A colocated consume that links to an app in the deployment holds the app to
+// that provider's placement (colocated). README.md, "Links between apps".
 func (c *checker) links() {
 	for _, app := range c.cfg.AppNames() {
 		for _, consume := range blueprints.Consumes(c.cfg.Apps[app].Blueprint) {
@@ -32,6 +35,9 @@ func (c *checker) links() {
 					"leaves %s unset, and %d apps provide %s: %s. Set it to one of those hostnames.",
 					consume.Setting, len(hostnames), consume.Role, strings.Join(hostnames, ", "))
 				continue
+			}
+			if consume.Colocate && link.Provider != "" {
+				c.colocated(app, link)
 			}
 			if len(consume.SharedSecrets) == 0 || !link.Linked || link.Provider != "" {
 				continue
@@ -58,6 +64,34 @@ func (c *checker) links() {
 				link.Hostname, consume.Role, remedy)
 		}
 	}
+}
+
+// colocated refuses an app placed other than as the provider its colocated
+// consume links to: pinned to another site, or pinned beside a clustered
+// provider, or clustered beside a pinned one. The blueprint reaches what its
+// provider keeps on its own host, and is placed there so that what it holds
+// to do so stays on the host that already holds the provider.
+func (c *checker) colocated(app string, link blueprints.Link) {
+	mine, theirs := c.cfg.Apps[app].Placement, c.cfg.Apps[link.Provider].Placement
+	if mine.Mode == theirs.Mode && (mine.Mode != config.PlacementPinned || mine.Site == theirs.Site) {
+		return
+	}
+	want := "placement: cluster"
+	if theirs.Mode == config.PlacementPinned {
+		want = fmt.Sprintf("placement: { pinned: %s }", theirs.Site)
+	}
+	where := "is clustered"
+	if mine.Mode == config.PlacementPinned {
+		where = fmt.Sprintf("is pinned to %s", mine.Site)
+	}
+	runs := "is clustered"
+	if theirs.Mode == config.PlacementPinned {
+		runs = fmt.Sprintf("is pinned to %s", theirs.Site)
+	}
+	c.refuse("colocated-app-elsewhere", fmt.Sprintf("apps.%s.placement", app),
+		"this app runs beside its provider, which is placed elsewhere",
+		"%s, and its blueprint runs beside its %s provider, %s, which %s. It reaches what %s keeps on its own host, and runs there so that what it holds to do so stays on the host that already holds %s. Set %s.",
+		where, link.Role, link.Provider, runs, link.Provider, link.Provider, want)
 }
 
 // providerHostnames is the hostnames of the apps that provide role.
