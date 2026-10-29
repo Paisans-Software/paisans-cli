@@ -552,6 +552,24 @@ func TestBackupSecretsGetAndSet(t *testing.T) {
 	}
 }
 
+// A site's Beszel token is read and written beside its heartbeat token, and
+// setting one keeps the other.
+func TestSiteBeszelTokenGetAndSet(t *testing.T) {
+	s := &config.Secrets{}
+	if err := s.Set("sites.a.heartbeat_token", "h"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Set("sites.a.beszel_token", "b"); err != nil {
+		t.Fatalf("Set(sites.a.beszel_token): %v", err)
+	}
+	if got, ok := s.Get("sites.a.beszel_token"); !ok || got != "b" {
+		t.Fatalf("Get(sites.a.beszel_token) = %q, %v", got, ok)
+	}
+	if got, _ := s.Get("sites.a.heartbeat_token"); got != "h" {
+		t.Errorf("heartbeat_token %q after setting beszel_token", got)
+	}
+}
+
 // Version 2 is the first format with a backup section, whose two keys
 // nothing can regenerate. A toolkit that reads only version 1 would drop the
 // section on its next write, so a version 1 file this toolkit writes is

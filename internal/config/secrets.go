@@ -156,6 +156,10 @@ type SiteSecrets struct {
 	// and what each monitor's seed names for the site: 32 lowercase hex
 	// characters, generated at init. README, "Monitoring".
 	HeartbeatToken string `yaml:"heartbeat_token"`
+	// BeszelToken is what the site's Beszel agent presents to the hub, and
+	// what the hub's config.yml names for the site's system: 32 lowercase
+	// hex characters, set only while the deployment declares a beszel app.
+	BeszelToken string `yaml:"beszel_token,omitempty"`
 }
 
 // RekeyPending is every site with a next WireGuard key, sorted: a `paisans
