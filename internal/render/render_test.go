@@ -2764,7 +2764,7 @@ func TestAStorageSiteRendersGarageAlone(t *testing.T) {
 	}
 	sort.Strings(mine)
 	// The Beszel agent runs on every site beside the fixture's hub.
-	want := "srv/paisans/f2a9/infra/beszel-agent/beszel-agent.env,srv/paisans/f2a9/infra/compose.yaml,srv/paisans/f2a9/infra/garage/garage.toml,srv/paisans/f2a9/infra/heartbeat/heartbeat.env,srv/paisans/f2a9/infra/heartbeat/push.sh,srv/paisans/f2a9/psns-f2a9.conf"
+	want := "srv/paisans/f2a9/infra/beszel-agent/beszel-agent.env,srv/paisans/f2a9/infra/beszel-agent/data/fingerprint,srv/paisans/f2a9/infra/compose.yaml,srv/paisans/f2a9/infra/garage/garage.toml,srv/paisans/f2a9/infra/heartbeat/heartbeat.env,srv/paisans/f2a9/infra/heartbeat/push.sh,srv/paisans/f2a9/psns-f2a9.conf"
 	if got := strings.Join(mine, ","); got != want {
 		t.Fatalf("a storage site renders %s, want %s", got, want)
 	}

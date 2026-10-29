@@ -416,6 +416,7 @@ func (p *planner) renderSite(site *siteView) ([]File, error) {
 			return nil, err
 		}
 		files = append(files, File{Path: base + p.dep().RelPath("infra", "beszel-agent", "beszel-agent.env"), Content: env, Mode: 0o600})
+		files = append(files, File{Path: base + p.dep().RelPath("infra", "beszel-agent", "data", beszelFingerprintFile), Content: beszelFingerprint(p.cfg.ID, site.Name), Mode: 0o600})
 	}
 	if site.IsEtcd {
 		files = append(files, File{Path: base + EtcdInitialPath(p.dep()), Content: FormatEtcdInitial(initial), Mode: 0o644})

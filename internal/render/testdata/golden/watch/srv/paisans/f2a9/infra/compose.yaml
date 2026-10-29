@@ -33,11 +33,12 @@ services:
   # API behind it: the agent can do what the deployment user can, which
   # already owns every container here.
   #
-  # The data directory keeps the fingerprint the hub pins on the agent's
+  # The data directory holds the fingerprint the hub pins on the agent's
   # first connection (internal/hub/agent_connect.go handleSingleRecord at
-  # Beszel v0.21.1; agent/fingerprint.go), so a recreated container, or a
-  # renamed host, still reads as the same agent rather than a fingerprint
-  # mismatch.
+  # Beszel v0.21.1; agent/fingerprint.go). The toolkit renders it there from
+  # the deployment and the site, so a recreated container, a renamed host or
+  # a host rebuilt under this site's name reads as the same agent rather
+  # than a fingerprint mismatch.
   beszel-agent:
     labels:
       community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"

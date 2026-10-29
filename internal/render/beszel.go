@@ -2,6 +2,8 @@ package render
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 
@@ -120,12 +122,34 @@ type beszelAgent struct {
 
 // BeszelAgentDataDir is where the agent keeps its state in its container,
 // DATA_DIR, bind mounted from beszel-agent/data in the infrastructure stack's
-// directory. The hub pins an agent's fingerprint on its first connection
-// (internal/hub/agent_connect.go handleSingleRecord at Beszel v0.21.1), and
-// the agent keeps the fingerprint it presents there (agent/fingerprint.go),
-// so a recreated container reconnects as the same agent rather than as one
-// whose fingerprint does not match.
+// directory, where the toolkit renders the agent's fingerprint
+// (beszelFingerprint).
 const BeszelAgentDataDir = "/var/lib/beszel-agent"
+
+// beszelFingerprintFile is the file in DATA_DIR the agent reads its
+// fingerprint from before it would generate one, fingerprintFileName in
+// agent/fingerprint.go at Beszel v0.21.1.
+const beszelFingerprintFile = "fingerprint"
+
+// beszelFingerprint is a site's agent fingerprint: the lowercase hex sha256
+// of beszel-agent:<deployment id>:<site>.
+//
+// The hub pins an agent's fingerprint on its first connection and refuses
+// any other with the same token from then on, across token rotations
+// (internal/hub/agent_connect.go handleSingleRecord, and
+// internal/hub/config/config.go updateFingerprintToken, at Beszel v0.21.1). An agent left to itself derives
+// one from the host's id and saves it in DATA_DIR, so a host rebuilt under
+// the same site name, with an empty DATA_DIR, would present a new one and be
+// refused for good. The agent reads a saved fingerprint first and takes it
+// as it is, trimmed of white space and refused only when empty
+// (readFingerprint), and the hub stores between 9 and 255 characters, so
+// one derived from the deployment and the site is the same on every host
+// that site is ever on, and differs between sites and deployments. It is no
+// credential: the token is what the hub authenticates the agent by.
+func beszelFingerprint(deploymentID, site string) string {
+	sum := sha256.Sum256([]byte("beszel-agent:" + deploymentID + ":" + site))
+	return hex.EncodeToString(sum[:])
+}
 
 // beszelTokenShape is the token init generates, 32 random bytes as hex. It
 // goes unquoted into the agent's env file, where a space, a quote or a line

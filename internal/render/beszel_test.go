@@ -1,6 +1,8 @@
 package render
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -460,6 +462,40 @@ func TestBeszelAdminEndsTheOptions(t *testing.T) {
 	want := `command: ["superuser", "upsert", "--", "${BESZEL_ADMIN_EMAIL:?set in .env}", "${BESZEL_ADMIN_PASSWORD:?set in .env}"]`
 	if !strings.Contains(compose, want) {
 		t.Errorf("admin's command is not %s:\n%s", want, compose)
+	}
+}
+
+// Every site's agent is given its fingerprint, the lowercase hex sha256 of
+// beszel-agent:<deployment id>:<site>, 0600 in its data directory, so a host
+// rebuilt under the same site name presents the fingerprint the hub pinned.
+func TestBeszelAgentFingerprint(t *testing.T) {
+	cfg, secrets := beszelFixture(t)
+	plan, err := Build(cfg, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]File{}
+	for _, f := range plan.Files {
+		files[f.Path] = f
+	}
+	seen := map[string]string{}
+	for _, site := range cfg.SiteNames() {
+		f, ok := files[site+"/srv/paisans/f2a9/infra/beszel-agent/data/fingerprint"]
+		if !ok {
+			t.Errorf("%s has no agent fingerprint", site)
+			continue
+		}
+		sum := sha256.Sum256([]byte("beszel-agent:" + cfg.ID + ":" + site))
+		if want := hex.EncodeToString(sum[:]); f.Content != want {
+			t.Errorf("%s: fingerprint %q, want %q", site, f.Content, want)
+		}
+		if f.Mode != 0o600 {
+			t.Errorf("%s: fingerprint rendered %o, want 600", site, f.Mode)
+		}
+		if other, ok := seen[f.Content]; ok {
+			t.Errorf("%s and %s share a fingerprint", other, site)
+		}
+		seen[f.Content] = site
 	}
 }
 

@@ -201,8 +201,10 @@ declares a `beszel` app, beside the heartbeat:
 * `TOKEN`, which is `sites.<site>.beszel_token`, and `KEY`, the hub's
   public key, from `beszel-agent.env`, 0600, as `heartbeat.env` is.
 * `DATA_DIR=/var/lib/beszel-agent`, bound from the infra stack's
-  `beszel-agent/data`, so the fingerprint the hub pins on first connect
-  survives a restart.
+  `beszel-agent/data`, where the toolkit renders `fingerprint`, 0600, the
+  lowercase hex sha256 of `beszel-agent:<deployment id>:<site>`, so the
+  fingerprint the hub pins on first connect survives a restart and a host
+  rebuilt under the same site name.
 * `SYSTEM_NAME` the site's name. `DISABLE_SSH=true`, so it listens for
   nothing.
 

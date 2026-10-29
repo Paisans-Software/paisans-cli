@@ -186,3 +186,56 @@ func restarted(commands []string, service string) bool {
 	}
 	return false
 }
+
+// The Beszel agent's fingerprint is rendered inside the agent's bind
+// mounted data directory. A rebuilt host, whose directory is empty, is
+// written it like any rendered file, 0600 and recorded in the manifest; a
+// later change to it restarts the agent alone; and one the agent wrote
+// itself, which the last apply never recorded, is a conflict, not
+// overwritten.
+func TestTheBeszelFingerprintIsAnInfraServiceFile(t *testing.T) {
+	const rel = "srv/paisans/f2a9/infra/beszel-agent/data/fingerprint"
+	host := newHost()
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created *apply.Change
+	for i, c := range p.Changes {
+		if c.Path == "/"+rel {
+			created = &p.Changes[i]
+		}
+	}
+	if created == nil || created.Kind != apply.Create || created.Mode != 0o600 {
+		t.Fatalf("a rebuilt host is not written the fingerprint 0600: %+v", created)
+	}
+	if err := apply.Execute(p, host); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(host.files[apply.Fixture.Manifest()], rel) {
+		t.Errorf("the manifest does not record %s", rel)
+	}
+
+	host = appliedHost(t)
+	p, err = apply.Build("home-a", planChanging(t, rel), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "docker compose -f /srv/paisans/f2a9/infra/compose.yaml restart beszel-agent"
+	if a := infraAction(t, p); a.Recreate || a.Command(apply.Fixture) != want {
+		t.Errorf("a changed fingerprint runs %q, want %q", a.Command(apply.Fixture), want)
+	}
+	if p.GatewayChanging {
+		t.Error("a changed fingerprint is treated as the gateway changing")
+	}
+
+	host = newHost()
+	host.files["/"+rel] = "0123456789abcdef0123456789abcdef0123456789abcdef"
+	p, err = apply.Build("home-a", plan(t), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := p.Conflicts(); len(c) != 1 || c[0].Path != "/"+rel {
+		t.Errorf("an agent's own fingerprint is not the one conflict: %+v", c)
+	}
+}

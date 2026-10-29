@@ -1551,8 +1551,13 @@ since `TOKEN` is the site's credential at the hub; `KEY` is the hub's public
 key and `SYSTEM_NAME` the site's name. Three details follow from how it runs:
 
 * **`DATA_DIR`** is `/var/lib/beszel-agent`, bound from the infra stack's
-  `beszel-agent/data`. The agent keeps its own fingerprint there, which the hub pins on the
-  agent's first connect, so it survives a restart.
+  `beszel-agent/data`, where the toolkit renders the agent's fingerprint,
+  `fingerprint`, mode 0600: the lowercase hex sha256 of
+  `beszel-agent:<deployment id>:<site>`. The hub pins a fingerprint on the
+  agent's first connect and refuses any other for that system, token
+  rotations included, and an agent left to itself derives one from its host.
+  The toolkit's is the same on every host the site is ever on, so a host
+  rebuilt under the same site name is accepted as the same system.
 * **The socket path is learnt over ssh**, after rendering, so the compose file
   mounts `${PAISANS_DOCKER_SOCKET:?run by paisans deployment apply}` and the
   transport exports `PAISANS_DOCKER_SOCKET` beside the `DOCKER_HOST` it

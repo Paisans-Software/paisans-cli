@@ -47,6 +47,11 @@
       "mode": "0600"
     },
     {
+      "path": "srv/paisans/f2a9/infra/beszel-agent/data/fingerprint",
+      "sha256": "58b30e0031c28287252d5c6952600e04e9642fe92c2054f2abe5e9d65db10544",
+      "mode": "0600"
+    },
+    {
       "path": "srv/paisans/f2a9/infra/caddy/caddy.env",
       "sha256": "e4524ec782161f97cf1daad5745e4c59d5bf37815622a70442ec33e1b684ee31",
       "mode": "0600"
@@ -128,7 +133,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/compose.yaml",
-      "sha256": "104da68f06ea4e92957af577179b3c8093bcd0bfbc8aa2afd55ee6fdf59bafd2",
+      "sha256": "722011e3f800d1f587db7ed7e7976983fe54d18879aef2ee237c3829734fa894",
       "mode": "0644"
     },
     {
