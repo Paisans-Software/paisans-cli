@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Changed
+
+- A site holding `monitor` may run Beszel's hub alone: `monitor-without-uptime` accepts an uptime or a `beszel` app, and memory floors and doctor's losses count the uptime monitor only where it is pinned.
+
 ## [0.3.0-rc.17] - 2026-10-29
 
 ### Added

@@ -210,6 +210,20 @@ func TestAnUnreachableMonitorSaysNothingReportsFailures(t *testing.T) {
 	}
 }
 
+// A monitor whose one app is Beszel's hub runs no uptime monitor, so its
+// absence does not claim to take one away.
+func TestAMonitorWithoutUptimeLosesNoUptimeMonitor(t *testing.T) {
+	cfg := fixture(t)
+	for name, app := range cfg.Apps {
+		if app.Blueprint == config.BlueprintUptime {
+			delete(cfg.Apps, name)
+		}
+	}
+	if got := Losses(cfg, "watch"); strings.Contains(got, "the uptime monitor") {
+		t.Errorf("watch, holding only the stats app, loses %q", got)
+	}
+}
+
 func TestEtcdWithoutQuorumFails(t *testing.T) {
 	in := healthyInput()
 	in.Etcd.Health = `[{"endpoint":"http://10.44.0.1:2379","health":false,"took":"5.0s","error":"context deadline exceeded"},{"endpoint":"http://10.44.0.2:2379","health":false,"took":"5.0s","error":"dial tcp 10.44.0.2:2379: connect: connection refused"},{"endpoint":"http://10.44.0.3:2379","health":true,"took":"3ms"}]
@@ -673,6 +687,12 @@ func TestASharedGatewaysLossIsEveryHostname(t *testing.T) {
 	vm := cfg.Sites["vm"]
 	vm.Roles = append(vm.Roles, config.RoleMonitor)
 	cfg.Sites["vm"] = vm
+	for name, app := range cfg.Apps {
+		if app.Blueprint == config.BlueprintUptime {
+			app.Placement.Site = "vm"
+			cfg.Apps[name] = app
+		}
+	}
 	got := Losses(cfg, "vm")
 	for _, want := range []string{"its gateway, which every public hostname goes through", "the uptime monitor"} {
 		if !strings.Contains(got, want) {

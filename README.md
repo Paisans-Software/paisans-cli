@@ -1002,7 +1002,7 @@ uptime app is pinned to a site that holds it. Founder decision.
 |---|---|---|
 | `monitor` with `gateway`, `witness`, `data` or `apps` | warned, once per site | `monitor-shares-a-site` |
 | `web_server` on a site holding `gateway` | refused | `web-server-on-gateway` |
-| `monitor` with no uptime app pinned to it | refused | `monitor-without-uptime` |
+| `monitor` with neither an uptime app nor a `beszel` app pinned to it | refused | `monitor-without-uptime` |
 | an uptime app pinned to a site without `monitor` | refused | `uptime-needs-a-monitor-site` |
 | `monitor` without `public_address` | refused | `monitor-without-public-address` |
 | no app with blueprint `uptime` at all | warned | `no-uptime-monitor` |
@@ -1484,6 +1484,14 @@ monitor.
 A monitor with `web_server.managed_by: external` hosts one app, so
 `web-server-external-serves-one-app` refuses the hub there beside the uptime
 app.
+
+The hub alone is enough for a site to hold `monitor`: `monitor-without-uptime`
+asks for either app, not both. The role is what gives an app a site apart
+from what it watches, serving its own hostname from its own address, and the
+hub needs that for the monitor's reason. So the hub may sit on a second
+monitor site, Eg: beside the gateway while the first monitor's
+`web_server.managed_by: external` holds the uptime app alone, with no second
+uptime app made to satisfy the role.
 
 **The hub is served like the monitor.** It sits on the monitor site, so its
 hostname, `status.health.<domain>` from `paisans create`, is pointed at the

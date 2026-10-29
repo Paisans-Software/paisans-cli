@@ -259,8 +259,8 @@ func ForRoles(roles []config.Role, runsCaddy bool) Runs {
 // ForSite is what site runs in cfg: etcd on the members of etcd.members,
 // the database on cluster.sites, Garage on storage.garage.sites, Caddy
 // where Site.RunsCaddy says, oauth2-proxy where the gate app is pinned,
-// the uptime monitor on a monitor, Beszel's hub where a beszel app is
-// pinned and the apps on an apps site.
+// the uptime monitor where an uptime app is pinned, Beszel's hub where a
+// beszel app is pinned and the apps on an apps site.
 func ForSite(cfg *config.Config, site string) Runs {
 	s := cfg.Sites[site]
 	gate, gated := cfg.Apps[config.GateApp]
@@ -270,7 +270,7 @@ func ForSite(cfg *config.Config, site string) Runs {
 		Garage:   slices.Contains(cfg.Storage.Garage.Sites, site),
 		Caddy:    s.RunsCaddy(),
 		Gate:     gated && gate.Blueprint == config.BlueprintOAuth2Proxy && gate.Placement.Site == site,
-		Uptime:   s.Has(config.RoleMonitor),
+		Uptime:   slices.ContainsFunc(cfg.PinnedTo(site), func(app string) bool { return cfg.Apps[app].Blueprint == config.BlueprintUptime }),
 		Beszel:   slices.ContainsFunc(cfg.PinnedTo(site), func(app string) bool { return cfg.Apps[app].Blueprint == config.BlueprintBeszel }),
 		Apps:     s.Has(config.RoleApps),
 	}
