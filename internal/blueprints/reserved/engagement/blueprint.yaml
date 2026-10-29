@@ -5,8 +5,11 @@ name: engagement
 services:
   # paisans-engagement-service: the weekly digest email, which reads the
   # community's Mbin through a role that can only read
-  # (docs/specs/2026-10-24-engagement-digest.md). Its own database holds
-  # only unsubscribes and the record of each week's sends. Its image is the
+  # (docs/specs/2026-10-24-engagement-digest.md), and the welcomes for
+  # newcomers on Mbin, on Matrix and by a daily email
+  # (docs/specs/2026-10-29-engagement-welcome.md). Its own database holds
+  # unsubscribes, the record of each week's sends, and welcome records it
+  # deletes after 21 days. Its image is the
   # core catalog's foundation.yaml's.
   - {name: "app", foundation: "engagement", purpose: "the weekly digest"}
   - {name: "postgres", purpose: "its role and database on the cluster"}
