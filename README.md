@@ -911,6 +911,23 @@ Mbin. The design is in `docs/specs/2026-10-24-engagement-digest.md`.
   The MAS admin client it looks members up with is declared by the synapse
   app, with a secret the two apps share. A synapse blueprint that does not
   offer `mas_admin_url` leaves the bot off.
+* **Welcoming newcomers** (`docs/specs/2026-10-29-engagement-welcome.md`).
+  The app also consumes the `forum` role, which the mbin blueprint provides,
+  with `settings.forum` naming one by hostname when there are several. Linked,
+  it renders an Mbin agent client, `engagement-agent`, whose secret
+  `mbin_agent_client_secret` it shares with the mbin app, which declares the
+  client; the service calls Mbin's API on its own site's mesh address, since
+  both apps are clustered. With the bot on, the service announces newcomers
+  in a community room named by `settings.community_room_name`. Unset, that is
+  the community's name plus " Community", unless a whole word of the name is
+  already one of Community, Communities, Collective, Commons, Club, Society,
+  Guild, Circle, Network, Group, Hub or Crew. The room's alias is made from
+  the name, lowercased, with each run of other characters than letters and
+  digits replaced by one `-`, and the synapse app reads it from the app's
+  consumer values to auto-join new accounts to it. A daily welcome email
+  reaches at most `settings.welcome_email_daily_limit` members, 50 by
+  default, and the operators' addresses, in the order of their names, are
+  rendered so the service can tell them when the bot cannot post.
 * **What the gateway forwards.** `/u/*`, the unsubscribe links, `/d/*`, the
   web digests the Matrix message links to, and
   `GET /healthz`, which answers ok or 503, for the monitor's public check.
@@ -943,8 +960,9 @@ apps:
     gated: true
 ```
 
-The service's own database, in the cluster's Postgres, holds only
-unsubscribes and the record of what was sent to each member each week. A
+The service's own database, in the cluster's Postgres, holds the
+unsubscribes, the record of what was sent to each member each week, and the
+welcome loop's records, which it deletes after 21 days. A
 member is identified in it, and in every token, by Mbin's `oauth_oidc_id`,
 the member's Pocket ID subject. It reads the deployment's `smtp:` block like
 any other app that sends mail (see *Mail is declared once and overridden per
@@ -961,6 +979,8 @@ app*).
 | `engagement-source-not-clustered` | the `mbin` app is pinned. Refused: the reader role is created in the cluster's Postgres, and a pinned Mbin runs against a Postgres of its own on its site, where no such role exists |
 | `engagement-without-smtp` | the app resolves no SMTP host or `from_address`. Warned: it is an email and cannot send without them |
 | `engagement-bot-localpart-invalid` | `settings.bot_localpart` is not a Matrix localpart, lowercase letters, digits and `._=/-` only. Refused: MAS would not create the bot's account |
+| `engagement-community-room-name-invalid` | `settings.community_room_name` is blank, holds a control character, or has no letter or digit. Refused: it is rendered into one `.env` line and the room's alias is made from its letters and digits |
+| `engagement-welcome-limit-invalid` | `settings.welcome_email_daily_limit` is less than 1. Refused: the daily welcome email would reach nobody |
 | `engagement-not-gated` | the app links to a Matrix homeserver and is not `gated`. Warned: the bot's links to the web digest, which names the member by the gate's header, all answer not found |
 | `engagement-bot-display-name-invalid` | `settings.bot_display_name` is blank or holds a line break, tab or other control character. Refused: it is rendered into one `.env` line |
 | `link-provider-ambiguous` | an optional link with its setting unset while several apps provide the role. Refused: it could not tell which to use. Applies to any blueprint's link, the engagement app's `homeserver` being one |
