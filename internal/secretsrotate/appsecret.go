@@ -2,6 +2,8 @@ package secretsrotate
 
 import (
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -20,12 +22,12 @@ import (
 // A secret shared with a provider is also checked by the provider's stack,
 // which Users hands it to first.
 
-// AppSelfBlueprint is the blueprint whose secret key is, for each key AppSelf
-// rotates, and false for any other key: what `secrets rotate` reads to find, in
-// a deployment's apps, the ones whose secret it is. Each blueprint's record
-// names its keys (blueprints.Def.SelfRotated).
-func AppSelfBlueprint(key string) (config.Blueprint, bool) {
-	return blueprints.SelfRotatedBlueprint(key)
+// AppSelfBlueprints is every blueprint whose secret key is, for each key
+// AppSelf rotates, and none for any other key: what `secrets rotate` reads to
+// find, in a deployment's apps, the ones whose secret it is. Each blueprint's
+// record names its keys (blueprints.Def.SelfRotated).
+func AppSelfBlueprints(key string) []config.Blueprint {
+	return blueprints.SelfRotatedBlueprints(key)
 }
 
 // appSelf rotates one secret an app checks itself.
@@ -55,12 +57,16 @@ func (r appSelf) Precheck(e Env) error {
 	if spec, ok := blueprints.SecretOf(app.Blueprint, r.key); ok && spec.Group != "" {
 		return fmt.Errorf("%s is rotated with the rest of its unit as apps.%s.%s", r.Path(), r.app, spec.Group)
 	}
-	blueprint, ok := AppSelfBlueprint(r.key)
-	if !ok {
+	owners := AppSelfBlueprints(r.key)
+	if len(owners) == 0 {
 		return fmt.Errorf("%s is not a secret its app checks itself", r.Path())
 	}
-	if app.Blueprint != blueprint {
-		return fmt.Errorf("apps.%s is %s, and %s is a secret of %s", r.app, app.Blueprint, r.key, blueprint)
+	if !slices.Contains(owners, app.Blueprint) {
+		names := make([]string, len(owners))
+		for i, b := range owners {
+			names[i] = string(b)
+		}
+		return fmt.Errorf("apps.%s is %s, and %s is a secret of %s", r.app, app.Blueprint, r.key, strings.Join(names, " and "))
 	}
 	return runsSomewhere(e, r.app)
 }

@@ -58,7 +58,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/etc/Caddyfile",
-      "sha256": "1cbda5eb8563995d08e5c46ebd6d628f5b475438b73f19b2f8c9c747b28737c6",
+      "sha256": "7ff501ddbfebd4e036a9b48c30adb0f251ce6eece551dad7cb809af1377fbe5f",
       "mode": "0644"
     },
     {
@@ -112,6 +112,11 @@
       "mode": "0644"
     },
     {
+      "path": "srv/paisans/f2a9/infra/caddy/etc/snippets/notify.caddy",
+      "sha256": "feec74c3becdf0ff5d2b1fe5ed92dcdece21c4a21d80d966535418dd09bae68c",
+      "mode": "0644"
+    },
+    {
       "path": "srv/paisans/f2a9/infra/caddy/etc/snippets/talk-media.caddy",
       "sha256": "90b976d0607b542e59fe1a1598149bc1660334462c7dc13a84a16b512fa7e8d3",
       "mode": "0644"
@@ -149,6 +154,16 @@
     {
       "path": "srv/paisans/f2a9/infra/heartbeat/push.sh",
       "sha256": "03aefb206c52fc31cd9c4735a9720fb308b3b1e58aba6991799e08465c2d2702",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/notify/.env",
+      "sha256": "7e41ddf2499281cff2f123759f2de00e8f9f547ad7beb53ae9a5a0eca33ed8bb",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/notify/compose.yaml",
+      "sha256": "30e1fa35b2ea11f13aa823146012e7244bf4a87db0a5cedab26bfcb0f5b6c725",
       "mode": "0644"
     },
     {

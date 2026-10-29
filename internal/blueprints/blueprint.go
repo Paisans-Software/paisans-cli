@@ -13,14 +13,16 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
-// APIVersion is the newest blueprint format this toolkit reads, and
-// APIVersionV2 and APIVersionV1 the ones before it, read as well. v2 is v1
-// with heartbeat, and v3 is v2 whose templates may read .DisplayName and
-// .CommunityName. A blueprint that uses either names its format, so a toolkit
-// that cannot read it refuses the format by name and uses an older catalog
-// release.
+// APIVersion is the newest blueprint format this toolkit reads, APIVersionV4,
+// and APIVersionV3, APIVersionV2 and APIVersionV1 the ones before it, read as
+// well. v2 is v1 with heartbeat, v3 is v2 whose templates may read
+// .DisplayName and .CommunityName, and v4 is v3 with a consume's colocate. A
+// blueprint that uses any of them names its format, so a toolkit that cannot
+// read it refuses the format by name and uses an older catalog release.
 const (
-	APIVersion   = "paisans.blueprint/v3"
+	APIVersion   = APIVersionV4
+	APIVersionV4 = "paisans.blueprint/v4"
+	APIVersionV3 = "paisans.blueprint/v3"
 	APIVersionV2 = "paisans.blueprint/v2"
 	APIVersionV1 = "paisans.blueprint/v1"
 )
@@ -168,11 +170,13 @@ var callbackHelpers = template.FuncMap{"stableULID": StableULID}
 //
 // Links: `provides: [{role, values}]` names a role the blueprint provides,
 // each value a string CEL expression over the app (app.mesh_address
-// included). `consumes: [{role, setting, optional, shared_secrets}]` names a
-// role it consumes: setting names the provider's hostname, optional means an
-// unset setting links to the deployment's one provider of the role or to
-// none, and shared_secrets names the consumer's own self rotated secrets that
-// its provider's templates read through .Consumers.
+// included). `consumes: [{role, setting, optional, shared_secrets,
+// colocate}]` names a role it consumes: setting names the provider's
+// hostname, optional means an unset setting links to the deployment's one
+// provider of the role or to none, shared_secrets names the consumer's own
+// self rotated secrets that its provider's templates read through
+// .Consumers, and colocate (v4) means the app is placed as its provider is,
+// which validate holds it to.
 func Parse(name string, content []byte, hasTemplate func(string) bool) (*Def, error) {
 	var s spec
 	dec := yaml.NewDecoder(bytes.NewReader(content))
@@ -209,8 +213,8 @@ func publishable(port int) error {
 }
 
 func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
-	if s.APIVersion != APIVersion && s.APIVersion != APIVersionV2 && s.APIVersion != APIVersionV1 {
-		return nil, fmt.Errorf("apiVersion: is %q, and this toolkit reads %s, %s and %s", s.APIVersion, APIVersionV1, APIVersionV2, APIVersion)
+	if s.APIVersion != APIVersion && s.APIVersion != APIVersionV3 && s.APIVersion != APIVersionV2 && s.APIVersion != APIVersionV1 {
+		return nil, fmt.Errorf("apiVersion: is %q, and this toolkit reads %s, %s, %s and %s", s.APIVersion, APIVersionV1, APIVersionV2, APIVersionV3, APIVersion)
 	}
 	if s.Name != name {
 		return nil, fmt.Errorf("name: is %q, but the blueprint's directory is %s", s.Name, name)
@@ -341,7 +345,7 @@ func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
 			return nil, fmt.Errorf("hostname_roles: %s needs a template %s, which the blueprint does not ship", role, SnippetFor(role))
 		}
 	}
-	provides, err := checkLinks(s.Provides, s.Consumes)
+	provides, err := checkLinks(s.APIVersion, s.Provides, s.Consumes)
 	if err != nil {
 		return nil, err
 	}

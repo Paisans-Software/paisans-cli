@@ -690,6 +690,7 @@ func TestNoMonitorMeansNoHeartbeatPusher(t *testing.T) {
 	cfg := fixture(t)
 	delete(cfg.Apps, "health")
 	delete(cfg.Apps, "stats")
+	delete(cfg.Apps, "notify") // it serves the hub
 	delete(cfg.Sites, "watch")
 	secrets := fixtureSecrets(t)
 	if refusals := validate.Check(cfg).Refusals(); len(refusals) > 0 {

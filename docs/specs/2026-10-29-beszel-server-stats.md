@@ -47,7 +47,10 @@ All of it in `paisans-cli`, plus two image tracks in the core catalog:
 
 * **No alert seeding.** Beszel keeps alert rules and notification URLs per
   user, in its UI. Paging already belongs to the uptime monitor; an operator
-  who wants a memory alert sets one in Beszel by hand.
+  who wants a memory alert sets one in Beszel by hand. The hub's SMTP
+  settings are written from the deployment's `smtp` block, so an address an
+  operator adds in Beszel receives the alerts they set (amended 2026-10-29;
+  README.md, *Server and container stats*).
 * **No GPU, SMART, sensors or systemd monitoring.** Each needs a device or
   a privilege the rootless agent does not have.
 * **No member access.** The hub is an operator tool, like the monitor.

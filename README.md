@@ -966,6 +966,7 @@ app*).
 | `link-provider-ambiguous` | an optional link with its setting unset while several apps provide the role. Refused: it could not tell which to use. Applies to any blueprint's link, the engagement app's `homeserver` being one |
 | `link-shared-secret-outside` | a link that shares a secret, leading to a hostname no app in the deployment provides: the one its setting names, or the app's own when a link without `optional` leaves it unset. Refused: the secret can be handed only to an app the deployment renders. Applies to any blueprint's link, the engagement app's being the one that shares a secret |
 | `link-unresolvable` | a link the toolkit cannot resolve for any other reason, reported with that reason. Refused: the app's templates could not read their provider |
+| `colocated-app-elsewhere` | an app whose blueprint colocates a consume, placed other than as the app it links to: pinned to another site, pinned beside a clustered provider, or clustered beside a pinned one. Refused: the app holds what opens its provider, which stays on the host that already holds the provider |
 
 **Mbin must have `placement: cluster`.** The one-Mbin rule also keeps the
 source unambiguous: the digest reads one database and one community's title.
@@ -1516,6 +1517,26 @@ gives an OAuth2 user the `admin` role (`internal/users/users.go:28-49` at
 password sign in off on the `users` collection at every start.
 `DISABLE_SSH=true`, since the hub never dials an agent.
 
+**Alert email goes out through the deployment's mail.** Beszel emails an
+alert to the addresses each user lists in its own settings, through
+PocketBase's mailer, which has no working fallback in the hub's image, so the
+blueprint reads the `smtp` block (`mail: reads`) and `setup.sh` writes the
+hub's SMTP settings and sender at every start. Nothing else is seeded: an
+operator adds an address and the alert rules they want in Beszel's UI, since
+paging already belongs to the uptime monitor. With no SMTP host the hub's mail
+settings are left as they are. PocketBase's `tls` is implicit TLS or STARTTLS
+when the server offers it, with no way to require the upgrade, so:
+
+| Combination | Result | Rule |
+|---|---|---|
+| a `beszel` app with an SMTP host and no `from_address`, or one that is not an address alone | refused | `beszel-smtp-sender` |
+| a `beszel` app on `starttls` with no `username` | warned | `beszel-starttls-not-enforced` |
+| a `beszel` app on `none` with a `username` | refused | `smtp-plaintext-with-username` |
+
+A username makes STARTTLS required in effect, because PocketBase sends no
+credentials over an unencrypted connection; without one, a stripped STARTTLS
+delivers the alert in plaintext.
+
 **The break glass is the superuser, over the mesh.** Pocket ID is one of the
 things the hub watches, so a hub that only Pocket ID opens is no use while it
 is down. The superuser `beszel-admin@<domain>` signs in with
@@ -1639,6 +1660,65 @@ missing from the hub's restart until its own infra apply.
 The image tracks `beszel` and `beszel-agent` in the core catalog are optional
 and held to `0.21.`: Beszel is 0.x, so the track is held to one minor, and a new minor is a
 catalog release.
+
+#### Alerts in Matrix: `ops-notifier`
+
+Beszel keeps alert rules and notification URLs per user, and sends each
+alert to its owner's own settings, so an alert in Matrix needs a bot, a room
+and a `matrix://` URL in that operator's settings that keeps working when the
+bot's token is renewed. The reserved blueprint `ops-notifier` runs
+[`paisans-ops-notifier-service`](https://github.com/Paisans-Software/paisans-ops-notifier-service),
+which keeps them true (`docs/specs/2026-10-29-ops-notifier.md`; founder
+decision):
+
+* **One direct room per operator**, made by a bot account in MAS, `ops-bot`
+  by default, and one URL in that operator's Beszel webhooks naming it. Each
+  operator keeps their own alert rules; nothing is seeded. Their other URLs
+  and email addresses are left as they are.
+* **An opt out is either** removing the URL in Beszel or leaving the room.
+  A pass never puts the URL back. Replying `subscribe` in the room, or
+  inviting the bot to a room and replying `subscribe` there, turns the
+  alerts on again.
+* **An operator removed from `operators:` loses their Beszel account** at
+  the next pass after the apply that renders the shorter list, with their
+  alerts and settings. The break glass user, and any user who did not sign in
+  through Pocket ID, is never touched.
+
+**It runs beside the homeserver** (`colocate: true` on its
+`matrix-homeserver` consume, blueprint format v4). The MAS admin client
+secret it shares with the homeserver can make a token for any Matrix user, so
+it stays on the host that already runs MAS, which a takeover of the gateway
+does not reach.
+
+**It signs in to the hub with a superuser of its own.** The `beszel`
+blueprint provides the role `beszel-hub`, whose `url` is the hub's port on
+its mesh address. The notifier shares `beszel_superuser_password` with the
+hub, and the hub's `setup.sh` makes it the superuser
+`paisans-link-<app>@<domain>` at every start and deletes any other
+`paisans-link-` superuser, so the break glass password never leaves the
+hub's site, each credential rotates on its own, and removing the app removes
+its access. A PocketBase superuser is unscoped: it reads and changes
+everything in the hub. The hub's superuser API is refused at the edge and
+reached over the mesh, where the notifier is.
+
+| Combination | Result | Rule |
+|---|---|---|
+| an `ops-notifier` app with no homeserver in the deployment offering `mas_admin_url` | refused | `ops-notifier-without-homeserver` |
+| an `ops-notifier` app with no `beszel` app | refused | `ops-notifier-without-hub` |
+| more than one `ops-notifier` app | refused | `one-ops-notifier` |
+| an `ops-notifier` app placed unlike its homeserver | refused | `colocated-app-elsewhere` |
+
+Its hostname serves `GET /healthz` alone. Its state is one file in its data
+directory, what it wrote in each operator's settings, which is what makes an
+opt out readable; losing it gives every operator the URL again. Its image
+track, `ops-notifier`, is optional in the core catalog's foundation.
+
+A secret name may be self rotated by two blueprints when both share it with
+the provider of one role, which reads it under that name:
+`mas_admin_client_secret` is the engagement app's and the notifier's, and
+the app's own blueprint says which rotation `secrets rotate
+apps.<app>.mas_admin_client_secret` is. Both shared secrets restart the
+provider's stack first, then the notifier's.
 
 ## Adding a site, and the constraint that shapes it
 
@@ -3660,6 +3740,34 @@ the format by name and uses the newest catalog release it can read, rather
 than rendering the app without its monitor. `secrets rotate` replaces the
 token, by name or with `--all` (*A heartbeat token reaches the monitors before
 the pusher*).
+
+**A consume may be colocated with its provider**, for an app that reaches
+what its provider keeps on its own host, Eg: an admin API published only on the
+provider's mesh address, and the secret that opens it:
+
+```yaml
+apiVersion: paisans.blueprint/v4
+consumes:
+  - role: matrix-homeserver
+    setting: homeserver
+    optional: true
+    shared_secrets: [mas_admin_client_secret]
+    colocate: true
+```
+
+Such an app runs where its provider does: pinned to the provider's site, or
+clustered beside a clustered provider. A secret that opens the provider is
+then held only on the host that already holds the provider, so taking over
+any other site does not hand it over. validate refuses any other placement
+(`colocated-app-elsewhere`) and names the one to write; nothing places the app
+silently, so the placement in `paisans-stack.yaml` stays the one that runs. A
+colocated consume that links to no app in the deployment, an optional one
+with no provider or one naming a server the deployment does not run, has
+nothing to be placed beside and holds the app to nothing. `colocate` is read
+only from `apiVersion: paisans.blueprint/v4`, which is
+`paisans.blueprint/v3` with that one key, so a toolkit that cannot read it
+refuses the format by name and uses an older catalog release, rather than
+placing the app away from its provider.
 
 #### A blueprint ships a template set, not a single `.env`
 

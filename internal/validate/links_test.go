@@ -167,3 +167,100 @@ func TestASecretOutsideWithTheSettingUnsetSaysToSetIt(t *testing.T) {
 		t.Errorf("with a homeserver, message %q", f.Message)
 	}
 }
+
+// colocatingBlueprint consumes matrix-homeserver with colocate, optional so
+// that a deployment with no homeserver links to none.
+const colocatingBlueprint = `apiVersion: paisans.blueprint/v4
+name: notes
+services:
+  - {name: app, image: "ghcr.io/example/notes:1"}
+database: {engine: none}
+port: 8400
+config: {format: env, file: .env}
+settings:
+  homeserver: {type: string}
+consumes:
+  - {role: matrix-homeserver, setting: homeserver, optional: true, colocate: true}
+`
+
+// placeApps sets the placement of the app called name, and of the fixture's
+// one homeserver.
+func placeApps(t *testing.T, cfg *config.Config, notes, homeserver config.Placement) string {
+	t.Helper()
+	app := cfg.Apps["notes"]
+	app.Placement = notes
+	cfg.Apps["notes"] = app
+	var name string
+	for n, a := range cfg.Apps {
+		if a.Blueprint == "synapse" {
+			if name != "" {
+				t.Fatalf("the fixture has two homeservers, %s and %s", name, n)
+			}
+			name = n
+			a.Placement = homeserver
+			cfg.Apps[n] = a
+		}
+	}
+	if name == "" {
+		t.Fatal("the fixture has no homeserver")
+	}
+	return name
+}
+
+// A colocated consume holds the app to its provider's placement: pinned to
+// the same site, or clustered beside a clustered provider.
+func TestAColocatedAppIsPlacedAsItsProvider(t *testing.T) {
+	pinned := func(site string) config.Placement {
+		return config.Placement{Mode: config.PlacementPinned, Site: site}
+	}
+	cluster := config.Placement{Mode: config.PlacementCluster}
+	for _, c := range []struct {
+		name            string
+		notes, provider config.Placement
+		refused         bool
+		mentions        []string
+	}{
+		{"pinned to the provider's site", pinned("vm"), pinned("vm"), false, nil},
+		{"pinned elsewhere", pinned("home-a"), pinned("vm"), true, []string{"home-a", "vm", "pinned: vm"}},
+		{"clustered beside a clustered provider", cluster, cluster, false, nil},
+		{"clustered beside a pinned provider", cluster, pinned("vm"), true, []string{"pinned: vm"}},
+		{"pinned beside a clustered provider", pinned("vm"), cluster, true, []string{"placement: cluster"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := loadWithBlueprint(t, colocatingBlueprint, "")
+			// The fixture's own colocated app, which this test is not about.
+			delete(cfg.Apps, "notify")
+			provider := placeApps(t, cfg, c.notes, c.provider)
+			result := validate.Check(cfg)
+			f, fired := linkFinding(result, "colocated-app-elsewhere")
+			if fired != c.refused {
+				t.Fatalf("refused %v, want %v: %v", fired, c.refused, result.Findings)
+			}
+			if !fired {
+				return
+			}
+			if f.Level != validate.Refuse || f.Key != "apps.notes.placement" {
+				t.Errorf("finding %s at %s, want a refusal at apps.notes.placement", f.Level, f.Key)
+			}
+			for _, want := range append([]string{provider}, c.mentions...) {
+				if !strings.Contains(f.Message, want) {
+					t.Errorf("message %q does not name %s", f.Message, want)
+				}
+			}
+		})
+	}
+}
+
+// A colocated consume with nothing to be placed beside, an optional one with
+// no provider in the deployment, holds the app to nothing.
+func TestAColocatedAppWithNoProviderIsQuiet(t *testing.T) {
+	cfg := loadWithBlueprint(t, colocatingBlueprint, "")
+	for name, app := range cfg.Apps {
+		if app.Blueprint == "synapse" {
+			delete(cfg.Apps, name)
+		}
+	}
+	if _, fired := linkFinding(validate.Check(cfg), "colocated-app-elsewhere"); fired {
+		t.Errorf("refused with no homeserver: %v", validate.Check(cfg).Findings)
+	}
+}

@@ -47,6 +47,14 @@ settings:
 storage:
   local_only: true
   local_only_reason: "the hub keeps its SQLite database and its key under /beszel_data"
+# Beszel emails an alert to the addresses each user lists in its settings
+# (internal/alerts/alerts.go:259-281), through PocketBase's mailer, which
+# sends over SMTP only when the hub's smtp settings are enabled and falls
+# back to a sendmail binary the image does not have (PocketBase
+# core/base.go:655-671 at v0.40.5). setup.sh writes those settings from the
+# deployment's smtp block. Nothing is seeded: an operator adds an address
+# and an alert rule in Beszel's UI.
+mail: reads
 # Beszel signs in through PocketBase's OAuth2 provider oidc, whose callback
 # is /api/oauth2-redirect (beszel-docs oauth.md:5-6). Every sign in sends an
 # S256 code challenge when the provider's pkce is true (PocketBase
@@ -82,3 +90,16 @@ secrets:
     # hub restart with them.
     - {name: hub_key, format: ed25519-openssh, group: hub, rotation_cost: restart}
     - {name: hub_key_public, format: ed25519-public, of: hub_key, group: hub, rotation_cost: restart}
+# The hub's API, to an app that consumes beszel-hub: the ops-notifier app,
+# which keeps each operator's Matrix alert URL in their settings. url is the
+# port published on the hub's mesh address, above. A consumer signs in with
+# a superuser of its own, whose password it shares as
+# beszel_superuser_password: setup.sh makes the superuser
+# paisans-link-<app>@<domain> from it at every start, and deletes any other
+# paisans-link- superuser, so removing the consumer removes its access. A
+# PocketBase superuser is unscoped: it can read and change everything in the
+# hub, every user's settings included.
+provides:
+  - role: beszel-hub
+    values:
+      url: "'http://' + app.mesh_address + ':8084'"

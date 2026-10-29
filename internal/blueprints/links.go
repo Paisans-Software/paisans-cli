@@ -38,12 +38,19 @@ type provided struct {
 // unset means: without it, a provider at the app's own hostname; with it, the
 // deployment's one provider of the role, or no provider when there is none.
 // SharedSecrets are the consumer's own self rotated secrets that its
-// provider's templates read too, through .Consumers.
+// provider's templates read too, through .Consumers. Colocate says the app
+// runs where its provider does: pinned to the provider's site, or clustered
+// beside a clustered provider. It is for an app that reaches what its
+// provider keeps on its own host, so that what it holds to do so stays on the
+// host that already holds the provider. A colocated consume that links to no
+// app in the deployment, an optional one with no provider or one naming a
+// server the deployment does not run, has nothing to be placed beside.
 type Consume struct {
 	Role          string   `yaml:"role"`
 	Setting       string   `yaml:"setting"`
 	Optional      bool     `yaml:"optional"`
 	SharedSecrets []string `yaml:"shared_secrets"`
+	Colocate      bool     `yaml:"colocate"`
 }
 
 // Link is where one app's consume of a role leads.
@@ -226,7 +233,7 @@ func linkValues(blueprint config.Blueprint, vars map[string]any, role string) (m
 	return nil, fmt.Errorf("%s does not provide the role %s", blueprint, role)
 }
 
-func checkLinks(provides []Provide, consumes []Consume) ([]provided, error) {
+func checkLinks(apiVersion string, provides []Provide, consumes []Consume) ([]provided, error) {
 	var out []provided
 	seen := map[string]bool{}
 	for i, p := range provides {
@@ -261,6 +268,9 @@ func checkLinks(provides []Provide, consumes []Consume) ([]provided, error) {
 		consumed[c.Role] = true
 		if c.Setting == "" {
 			return nil, fmt.Errorf("consumes[%d].setting: required, the setting naming the provider's hostname", i)
+		}
+		if c.Colocate && (apiVersion == APIVersionV1 || apiVersion == APIVersionV2 || apiVersion == APIVersionV3) {
+			return nil, fmt.Errorf("consumes[%d].colocate: needs apiVersion %s, the format that adds it, so a toolkit that cannot read it skips the release", i, APIVersionV4)
 		}
 	}
 	return out, nil

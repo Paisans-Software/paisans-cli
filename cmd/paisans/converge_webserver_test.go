@@ -55,6 +55,7 @@ func externalWatch(t *testing.T) {
 			cfg.Sites["watch"] = watch
 			// It hosts the uptime app alone.
 			delete(cfg.Apps, "stats")
+			delete(cfg.Apps, "notify") // it serves the hub
 		}
 		return cfg, st, err
 	}

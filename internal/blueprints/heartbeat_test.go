@@ -9,7 +9,8 @@ import (
 // the newest.
 var (
 	minimalV2 = strings.Replace(minimal, APIVersionV1, APIVersionV2, 1)
-	minimalV3 = strings.Replace(minimal, APIVersionV1, APIVersion, 1)
+	minimalV3 = strings.Replace(minimal, APIVersionV1, APIVersionV3, 1)
+	minimalV4 = strings.Replace(minimal, APIVersionV1, APIVersion, 1)
 )
 
 // A blueprint that declares a heartbeat gets the monitor's name and a
@@ -66,13 +67,13 @@ func TestABlueprintHeartbeatMistakeIsRefused(t *testing.T) {
 
 // Every format is read; any other is refused naming each.
 func TestEveryBlueprintFormatIsRead(t *testing.T) {
-	for _, doc := range []string{minimal, minimalV2, minimalV3, minimalV3 + "heartbeat: {name: settings}\nsecrets:\n  generate: [api_key]\n"} {
+	for _, doc := range []string{minimal, minimalV2, minimalV3, minimalV4, minimalV3 + "heartbeat: {name: settings}\nsecrets:\n  generate: [api_key]\n"} {
 		if _, err := Parse("example", []byte(doc), always); err != nil {
 			t.Error(err)
 		}
 	}
 	_, err := Parse("example", []byte(strings.Replace(minimal, APIVersionV1, "paisans.blueprint/v9", 1)), always)
-	if err == nil || !strings.Contains(err.Error(), APIVersionV1) || !strings.Contains(err.Error(), APIVersionV2) || !strings.Contains(err.Error(), APIVersion) {
+	if err == nil || !strings.Contains(err.Error(), APIVersionV1) || !strings.Contains(err.Error(), APIVersionV2) || !strings.Contains(err.Error(), APIVersionV3) || !strings.Contains(err.Error(), APIVersion) {
 		t.Errorf("%v", err)
 	}
 }

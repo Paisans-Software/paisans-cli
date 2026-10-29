@@ -107,6 +107,7 @@ func TestHostGoneSaysWhatTheOwnersWebServerStillCarries(t *testing.T) {
 	// still there.
 	delete(w.cfg.Apps, "health")
 	delete(w.cfg.Apps, "stats")
+	delete(w.cfg.Apps, "notify") // it serves the hub
 	p, err := w.build("watch", siteremove.Options{HostGone: true})
 	if err != nil {
 		t.Fatal(err)

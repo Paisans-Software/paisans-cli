@@ -264,6 +264,8 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 		"apps.auth.dns_email_hash_key",
 		"apps.digest.digest_signing_key",
 		"apps.digest.mas_admin_client_secret",
+		"apps.notify.mas_admin_client_secret",
+		"apps.notify.beszel_superuser_password",
 		"apps.talk.mercure_jwt_secret",
 		"apps.talk.valkey_password",
 		"storage.garage.admin_token",
@@ -1504,6 +1506,7 @@ func TestSecretsRotateRoutesABeszelToken(t *testing.T) {
 	}
 
 	delete(cfg.Apps, "stats")
+	delete(cfg.Apps, "notify") // it serves the hub
 	err = r.(secretsrotate.Prechecker).Precheck(secretsrotate.Env{Cfg: cfg})
 	if err == nil || !strings.Contains(err.Error(), "beszel") {
 		t.Errorf("no hub: %v, want a refusal naming beszel", err)
@@ -1522,6 +1525,7 @@ func TestSecretsRotateAllSkipsABeszelTokenWithNoHub(t *testing.T) {
 		t.Fatal(err)
 	}
 	delete(cfg.Apps, "stats")
+	delete(cfg.Apps, "notify") // it serves the hub
 	rs, _, err := rotateTargets(cfg, s, nil, true, rotateWiring{})
 	if err != nil {
 		t.Fatal(err)

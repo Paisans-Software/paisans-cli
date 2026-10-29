@@ -46,6 +46,8 @@ images:
   # catalog. Neither tag has a `v`, the same metadata-action pattern.
   beszel: "ghcr.io/henrygd/beszel/beszel:0.21.*"
   beszel-agent: "ghcr.io/henrygd/beszel/beszel-agent:0.21.*"
+  # 0.1, the first ops-notifier, which reads Beszel v0.21's settings.
+  ops-notifier: "ghcr.io/paisans-software/paisans-ops-notifier-service:0.1.*"
 # By Postgres major. A major is data, so a deployment's
 # cluster.postgres_version chooses it and no track moves it. Spilo
 # publishes one repository per major, each on its own release line.

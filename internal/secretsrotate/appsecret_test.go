@@ -295,8 +295,8 @@ func TestStaticAPIKeyReachesTheAccountApps(t *testing.T) {
 func TestAccountSessionKeyIsAnAppSelfSecret(t *testing.T) {
 	w := newSelfWorld(t)
 	w.cfg.Apps["account"] = config.App{Blueprint: config.BlueprintAccount, Placement: config.Placement{Mode: config.PlacementCluster}}
-	if blueprint, ok := AppSelfBlueprint("session_key"); !ok || blueprint != config.BlueprintAccount {
-		t.Fatalf("session_key is %v %v, want the account blueprint's", blueprint, ok)
+	if got := AppSelfBlueprints("session_key"); !slices.Equal(got, []config.Blueprint{config.BlueprintAccount}) {
+		t.Fatalf("session_key is %v, want the account blueprint's", got)
 	}
 	r := AppSelf("account", "session_key", CostOf(w.cfg, "account", "session_key"))
 	e := w.env()
@@ -458,8 +458,8 @@ func withDigest(t *testing.T) *selfWorld {
 // stack first: MAS must know the next secret before the digest presents it.
 func TestSharedSecretReachesTheProviderFirst(t *testing.T) {
 	w := withDigest(t)
-	if blueprint, ok := AppSelfBlueprint("mas_admin_client_secret"); !ok || blueprint != config.BlueprintEngagement {
-		t.Fatalf("mas_admin_client_secret is %v %v, want the engagement blueprint's", blueprint, ok)
+	if got := AppSelfBlueprints("mas_admin_client_secret"); !slices.Equal(got, []config.Blueprint{config.BlueprintEngagement, config.BlueprintOpsNotifier}) {
+		t.Fatalf("mas_admin_client_secret is %v, want the engagement and ops-notifier blueprints'", got)
 	}
 	r := AppSelf("digest", "mas_admin_client_secret", CostOf(w.cfg, "digest", "mas_admin_client_secret"))
 	if err := r.(Prechecker).Precheck(w.env()); err != nil {

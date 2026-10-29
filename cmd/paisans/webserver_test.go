@@ -128,6 +128,8 @@ func externalFixture(t *testing.T) string {
 	// It hosts the uptime app alone (web-server-external-serves-one-app), so
 	// the fixture's Beszel hub goes.
 	text = strings.Replace(text, "  stats:\n    blueprint: beszel\n    hostname: status.health.example.org\n    placement: { pinned: watch }\n", "", 1)
+	// The notifier serves that hub, so it goes too.
+	text = strings.Replace(text, "  notify:\n    blueprint: ops-notifier\n    hostname: notify.example.org\n    placement: { pinned: vm }\n", "", 1)
 	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 		t.Fatal(err)
