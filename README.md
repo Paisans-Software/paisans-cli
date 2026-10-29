@@ -1706,7 +1706,7 @@ decision):
   through Pocket ID, is never touched.
 
 **It runs beside the homeserver** (`colocate: true` on its
-`matrix-homeserver` consume, blueprint format v4). The MAS admin client
+`matrix-homeserver` consume, blueprint format v5). The MAS admin client
 secret it shares with the homeserver can make a token for any Matrix user, so
 it stays on the host that already runs MAS, which a takeover of the gateway
 does not reach.
@@ -1729,7 +1729,10 @@ reached over the mesh, where the notifier is.
 | more than one `ops-notifier` app | refused | `one-ops-notifier` |
 | an `ops-notifier` app placed unlike its homeserver | refused | `colocated-app-elsewhere` |
 
-Its hostname serves `GET /healthz` alone. Its state is one file in its data
+**It takes no hostname** (`hostname: none`): it serves no website, and its
+one route, `GET /healthz`, is for the monitor, which reads it over the mesh.
+The app declares no `hostname`, and validate refuses one. Its state is one
+file in its data
 directory, what it wrote in each operator's settings, which is what makes an
 opt out readable; losing it gives every operator the URL again. Its image
 track, `ops-notifier`, is optional in the core catalog's foundation.
@@ -3785,10 +3788,36 @@ silently, so the placement in `paisans-stack.yaml` stays the one that runs. A
 colocated consume that links to no app in the deployment, an optional one
 with no provider or one naming a server the deployment does not run, has
 nothing to be placed beside and holds the app to nothing. `colocate` is read
-only from `apiVersion: paisans.blueprint/v4`, which is
+only from `apiVersion: paisans.blueprint/v4` on, which is
 `paisans.blueprint/v3` with that one key, so a toolkit that cannot read it
 refuses the format by name and uses an older catalog release, rather than
 placing the app away from its provider.
+
+**A blueprint whose app serves no website says `hostname: none`**, Eg: a
+service that only dials out to other apps and answers a health route:
+
+```yaml
+apiVersion: paisans.blueprint/v5
+hostname: none
+health: {path: "/healthz", status: [200]}
+```
+
+Such an app takes no `hostname` in `paisans-stack.yaml`, and validate refuses
+one, because nothing would route that name or hold a certificate for it.
+Every other app still needs one. It is given no public name, no DNS record, no
+certificate and no route at the gateway or a monitor's web server, and the
+monitor checks it over the mesh: its health route on each site it runs on,
+sent no `Host` header, where every app publishes its port. What lives on a
+hostname is refused in the same blueprint when it is read: a
+`caddy.snippet.tmpl`, `oidc`, `hostname_roles`, a gateable gate, `storage.s3`
+(stored objects are served on a media hostname derived from the app's),
+`federation`, a consume that is not optional (an unset setting links by the
+app's own hostname), and a provided value that reads `app.hostname`. A
+template that reads `.PublicURL` gets an empty one. `hostname` is read only
+from `apiVersion: paisans.blueprint/v5`, which is `paisans.blueprint/v4` with
+that one key, so a toolkit that cannot read it refuses the format by name and
+uses an older catalog release, rather than requiring a hostname of an app that
+has nothing to serve on it.
 
 #### A blueprint ships a template set, not a single `.env`
 

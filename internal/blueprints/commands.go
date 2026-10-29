@@ -336,7 +336,12 @@ func Lint(dir string) (*Def, []string, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	for _, need := range []string{"compose.yaml.tmpl", "caddy.snippet.tmpl"} {
+	needs := []string{"compose.yaml.tmpl"}
+	if !d.Hostless {
+		// hostname: none ships no routing, and Parse refused one that does.
+		needs = append(needs, SnippetFor(PrimaryRole))
+	}
+	for _, need := range needs {
 		if _, err := os.Stat(filepath.Join(dir, need)); err != nil {
 			problems = append(problems, need+" is missing; every stack has one")
 		}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
@@ -13,10 +14,12 @@ import (
 // Caddy there or by the operator's own web server: a monitor reached only
 // through another machine's gateway goes dark at exactly the moment it is
 // needed. A monitor beside the gateway is served by that gateway's Caddy.
-// Every other app is the gateway's, and ServedBy returns false for it.
+// Every other app is the gateway's, and ServedBy returns false for it. So
+// does an app whose blueprint says hostname: none: no Caddy and no web server
+// serves it, wherever it runs.
 func ServedBy(cfg *config.Config, app string) (string, bool) {
 	a, ok := cfg.Apps[app]
-	if !ok || a.Placement.Mode != config.PlacementPinned {
+	if !ok || a.Placement.Mode != config.PlacementPinned || blueprints.Hostless(a.Blueprint) {
 		return "", false
 	}
 	site, ok := cfg.Sites[a.Placement.Site]

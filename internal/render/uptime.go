@@ -106,7 +106,7 @@ const unroutedStatuses = "200,301,302,303,307,308,401,403,404"
 func (p *planner) fallbackChecks(name string, app config.App, sites []string) []seedMonitor {
 	noRedirects := false
 	var out []seedMonitor
-	if !blueprints.HealthOf(app.Blueprint).TCP {
+	if !blueprints.HealthOf(app.Blueprint).TCP && !blueprints.Hostless(app.Blueprint) {
 		out = append(out, seedMonitor{
 			Name: PublicCheckName(name) + " (no health route)", MonitorType: "active", Method: "GET", CheckType: "status",
 			URL: "https://" + app.Hostname + "/", ExpectedStatus: unroutedStatuses, FollowRedirects: &noRedirects,
@@ -162,8 +162,11 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 		// the app still refuses an unsigned ActivityPub read, which an admin
 		// can turn off in the app with nothing in this configuration to say so.
 		// See docs/specs/2026-10-08-visibility-gate.md.
+		// An app with no hostname is checked over the mesh alone, below:
+		// there is no public name to check it at.
 		gated := app.Gated
-		if !gated || health.Path != "/" {
+		hostless := blueprints.Hostless(app.Blueprint)
+		if !hostless && (!gated || health.Path != "/") {
 			monitors = append(monitors, seedMonitor{
 				Name: PublicCheckName(name), MonitorType: "active", Method: "GET", CheckType: "status",
 				URL: "https://" + app.Hostname + health.Path, ExpectedStatus: health.Expect,
@@ -196,12 +199,17 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 		sites := append([]string(nil), placed[name]...)
 		sort.Strings(sites)
 		for _, site := range sites {
+			// What the gateway would send, minus the gateway; an app with no
+			// hostname is sent nothing, since no gateway is in front of it.
+			headers := map[string]string{"Host": app.Hostname, "X-Forwarded-Proto": "https"}
+			if hostless {
+				headers = nil
+			}
 			monitors = append(monitors, seedMonitor{
 				Name: directCheckName(name, site), MonitorType: "active", Method: "GET", CheckType: "status",
 				URL:            fmt.Sprintf("http://%s:%d%s", p.sites[site].Address, blueprints.Port(app.Blueprint), health.Path),
 				ExpectedStatus: health.Expect, FollowRedirects: &noRedirects,
-				// What the gateway would send, minus the gateway.
-				RequestHeaders:  map[string]string{"Host": app.Hostname, "X-Forwarded-Proto": "https"},
+				RequestHeaders:  headers,
 				IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
 			})
 			if probe := blueprints.GateFor(app.Blueprint).PrivateProbe; probe != nil && gated {

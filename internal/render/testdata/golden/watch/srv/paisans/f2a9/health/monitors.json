@@ -271,19 +271,6 @@
       "status_page_excluded": true
     },
     {
-      "name": "notify — public",
-      "monitor_type": "active",
-      "url": "https://notify.example.org/healthz",
-      "method": "GET",
-      "check_type": "status",
-      "expected_status": "200",
-      "follow_redirects": false,
-      "interval_seconds": 60,
-      "timeout_ms": 10000,
-      "failure_threshold": 2,
-      "status_page_excluded": false
-    },
-    {
       "name": "notify — direct (vm)",
       "monitor_type": "active",
       "url": "http://10.44.0.3:8085/healthz",
@@ -291,10 +278,6 @@
       "check_type": "status",
       "expected_status": "200",
       "follow_redirects": false,
-      "request_headers": {
-        "Host": "notify.example.org",
-        "X-Forwarded-Proto": "https"
-      },
       "interval_seconds": 60,
       "timeout_ms": 10000,
       "failure_threshold": 2,

@@ -32,11 +32,15 @@ const nullDSN = "null://null"
 func (v appValues) SMTPDSN() string { return mailerDSN(v.SMTP) }
 
 // SMTPSender is the From address of the app's mail: the resolved
-// from_address, else noreply at the app's own hostname, an address nothing
-// sends from while no mail server resolves.
+// from_address, else noreply at the app's own hostname, or the community's
+// domain for an app with none, an address nothing sends from while no mail
+// server resolves.
 func (v appValues) SMTPSender() string {
 	if v.SMTP.FromAddress != "" {
 		return v.SMTP.FromAddress
+	}
+	if v.Hostname == "" {
+		return "noreply@" + v.Domain
 	}
 	return "noreply@" + v.Hostname
 }

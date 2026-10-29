@@ -1788,10 +1788,11 @@ A change to the catalog that an older binary cannot read changes the
 `apiVersion` of what it changes, a blueprint's or the foundation's: an older
 binary then skips that release for the newest it reads. A new key counts,
 since both are decoded strictly, and so does a new value a template reads.
-Blueprints are read in four formats, `paisans.blueprint/v1`,
-`paisans.blueprint/v2`, `paisans.blueprint/v3` and `paisans.blueprint/v4`
-(`blueprints.APIVersionV1` to `blueprints.APIVersionV4`, the newest also
-`blueprints.APIVersion`). v4 adds a consume's `colocate`, which `Parse`
+Blueprints are read in five formats, `paisans.blueprint/v1`,
+`paisans.blueprint/v2`, `paisans.blueprint/v3`, `paisans.blueprint/v4` and
+`paisans.blueprint/v5` (`blueprints.APIVersionV1` to
+`blueprints.APIVersionV5`, the newest also `blueprints.APIVersion`). v5 adds
+`hostname: none`, and v4 a consume's `colocate`, each of which `Parse`
 refuses in an older format. v2 adds `heartbeat`,
 and `Parse` refuses that key in a v1 blueprint, so a blueprint that declares
 one also names the format an older binary skips. v3 adds two template values,
