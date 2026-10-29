@@ -1,0 +1,36 @@
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
+#
+# notify, pinned to vm beside the homeserver it runs its
+# bot on. Its state is one file, state.json, in state/: what it wrote in each
+# operator's Beszel settings, which is what makes an opt out readable. Losing
+# it gives every operator their alert URL again, opted out ones included.
+name: paisans-f2a9-notify
+
+services:
+  app:
+    labels:
+      community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
+    image: "ghcr.io/paisans-software/paisans-ops-notifier-service:0.1.*"
+    restart: unless-stopped
+    # The image declares its own healthcheck, the binary probing /healthz on
+    # OPS_NOTIFIER_LISTEN_ADDR's port, which apply's health gate reads.
+    env_file:
+      - .env
+    # The image's own user is distroless's nonroot, which under a rootless
+    # Docker is a subordinate uid that cannot write state/. Root in the
+    # container is the deployment user, who owns it.
+    user: "0:0"
+    # The mesh address only. The gateway, over the mesh, is the only thing
+    # that should reach it, and a port published on every interface would
+    # answer anything the host's firewall lets in.
+    ports:
+      - "10.44.0.3:8085:8085"
+    volumes:
+      - /srv/paisans/f2a9/notify/state:/data
+
+# Every network carries the deployment label too, so that what owns it is
+# read from the label rather than guessed from its name.
+networks:
+  default:
+    labels:
+      community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"

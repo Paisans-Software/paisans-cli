@@ -177,6 +177,10 @@ type appValues struct {
 	// (engagement.go). Populated only for that blueprint.
 	Engagement engagementValues
 
+	// OpsNotifier is the ops-notifier blueprint's operator list
+	// (opsnotifier.go). Populated only for that blueprint.
+	OpsNotifier opsNotifierValues
+
 	// OperatorsHeartbeat is true for a Pocket ID app in a deployment with a
 	// monitor, whose stack then runs the operators heartbeat pusher on
 	// HeartbeatImage (operatorsheartbeat.go).
@@ -517,6 +521,9 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 	}
 	if planned.Blueprint == config.BlueprintEngagement {
 		v.Engagement = p.engagementValuesFor(planned, dbHost, dbPort)
+	}
+	if planned.Blueprint == config.BlueprintOpsNotifier {
+		v.OpsNotifier = opsNotifierValuesFor(p.cfg)
 	}
 	for _, svc := range blueprints.ServicePorts(planned.Blueprint) {
 		if v.ServicePorts == nil {

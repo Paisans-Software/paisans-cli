@@ -399,6 +399,7 @@ func beszelAgentEnv(site string) string {
 func TestNoBeszelRendersNothing(t *testing.T) {
 	cfg, secrets := beszelFixture(t)
 	delete(cfg.Apps, "stats")
+	delete(cfg.Apps, "notify") // it serves the hub
 	real := foundationImage
 	t.Cleanup(func() { foundationImage = real })
 	resolved := 0

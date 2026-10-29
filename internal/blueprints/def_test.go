@@ -1,6 +1,7 @@
 package blueprints
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -48,13 +49,22 @@ func TestEveryRecordIsComplete(t *testing.T) {
 	}
 }
 
-// No two blueprints rotate a secret of the same name by re-rendering their own
-// stack, so the blueprint a key belongs to has one answer.
+// Two blueprints may rotate a secret of the same name only when both share it
+// with the provider of one role, which reads it under that name: the app's
+// own blueprint is then what says which rotation it is.
 func TestSelfRotatedSecretsAreUnique(t *testing.T) {
 	owner := map[string]config.Blueprint{}
+	shared := func(blueprint config.Blueprint, key string) bool {
+		for _, c := range Consumes(blueprint) {
+			if slices.Contains(c.SharedSecrets, key) {
+				return true
+			}
+		}
+		return false
+	}
 	for _, blueprint := range known() {
 		for _, key := range defs[blueprint].SelfRotated {
-			if other, ok := owner[key]; ok {
+			if other, ok := owner[key]; ok && !(shared(other, key) && shared(blueprint, key)) {
 				t.Errorf("%s is self rotated by both %s and %s", key, other, blueprint)
 			}
 			owner[key] = blueprint

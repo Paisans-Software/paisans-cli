@@ -267,7 +267,21 @@ consumes:
   `paisans-link-<app>@<domain>`, with that password, at every start. It
   deletes any other `paisans-link-` superuser, so removing the notifier
   removes its access. The break glass password never leaves the hub's site,
-  and rotating either credential touches only its holder and the hub.
+  and rotating either credential touches only its holder and the hub: a
+  rotation of `beszel_superuser_password` applies the hub's stack first,
+  then the notifier's, as `mas_admin_client_secret` applies the
+  homeserver's first. **A PocketBase superuser is unscoped within Beszel**:
+  the notifier's can read and change every user, setting and system in the
+  hub, which is why it is a credential of its own and not the break glass
+  one. PocketBase lets a superuser create, update and delete `_superusers`
+  records through the records API, and refuses only the deletion of the last
+  one (v0.40.5 `migrations/1640988000_init.go:291-313`,
+  `core/record_model_superusers.go:19-41`), which the break glass superuser
+  never is.
+* **`mas_admin_client_secret` keeps its name.** The synapse blueprint's
+  `mas.yaml` reads every consumer's secret under that name, so the notifier
+  shares it as the engagement app does, and `secrets rotate` tells the two
+  apart by the app's own blueprint.
 * **`beszel-hub` offers `url`**, `http://<the hub's mesh address>:8084`, the
   hub's published port. The notifier reaches the hub's API over the mesh.
 

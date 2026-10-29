@@ -228,6 +228,8 @@ func TestAColocatedAppIsPlacedAsItsProvider(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			cfg := loadWithBlueprint(t, colocatingBlueprint, "")
+			// The fixture's own colocated app, which this test is not about.
+			delete(cfg.Apps, "notify")
 			provider := placeApps(t, cfg, c.notes, c.provider)
 			result := validate.Check(cfg)
 			f, fired := linkFinding(result, "colocated-app-elsewhere")

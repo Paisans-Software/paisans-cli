@@ -41,6 +41,7 @@ const (
 	FoundationEngagement         = "engagement"
 	FoundationBeszel             = "beszel"
 	FoundationBeszelAgent        = "beszel-agent"
+	FoundationOpsNotifier        = "ops-notifier"
 	FoundationValkey             = "valkey"
 )
 
@@ -57,7 +58,7 @@ var foundationNames = map[string]bool{
 // do not publish. Requiring one would make this toolkit skip every such
 // release, so a deployment without that blueprint keeps reading them, and
 // one with it is refused when its image is resolved (FoundationImage).
-var optionalFoundationNames = map[string]bool{FoundationEngagement: true, FoundationBeszel: true, FoundationBeszelAgent: true}
+var optionalFoundationNames = map[string]bool{FoundationEngagement: true, FoundationBeszel: true, FoundationBeszelAgent: true, FoundationOpsNotifier: true}
 
 // knownFoundationName reports whether name is an image a foundation may
 // name, required or optional.

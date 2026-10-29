@@ -1,0 +1,36 @@
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
+#
+# {{ .App.Name }}, pinned to {{ .App.Site }} beside the homeserver it runs its
+# bot on. Its state is one file, state.json, in state/: what it wrote in each
+# operator's Beszel settings, which is what makes an opt out readable. Losing
+# it gives every operator their alert URL again, opted out ones included.
+name: {{ .Project }}
+
+services:
+  app:
+    labels:
+      {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
+    image: {{ yamlquote (.Image "app") }}
+    restart: unless-stopped
+    # The image declares its own healthcheck, the binary probing /healthz on
+    # OPS_NOTIFIER_LISTEN_ADDR's port, which apply's health gate reads.
+    env_file:
+      - .env
+    # The image's own user is distroless's nonroot, which under a rootless
+    # Docker is a subordinate uid that cannot write state/. Root in the
+    # container is the deployment user, who owns it.
+    user: "0:0"
+    # The mesh address only. The gateway, over the mesh, is the only thing
+    # that should reach it, and a port published on every interface would
+    # answer anything the host's firewall lets in.
+    ports:
+      - "{{ .MeshAddress }}:{{ .App.Port }}:{{ .App.Port }}"
+    volumes:
+      - {{ .DataPath }}/state:/data
+
+# Every network carries the deployment label too, so that what owns it is
+# read from the label rather than guessed from its name.
+networks:
+  default:
+    labels:
+      {{ .DeploymentLabel }}: "{{ .DeploymentID }}"

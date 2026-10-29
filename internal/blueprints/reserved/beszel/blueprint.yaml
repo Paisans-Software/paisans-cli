@@ -90,3 +90,16 @@ secrets:
     # hub restart with them.
     - {name: hub_key, format: ed25519-openssh, group: hub, rotation_cost: restart}
     - {name: hub_key_public, format: ed25519-public, of: hub_key, group: hub, rotation_cost: restart}
+# The hub's API, to an app that consumes beszel-hub: the ops-notifier app,
+# which keeps each operator's Matrix alert URL in their settings. url is the
+# port published on the hub's mesh address, above. A consumer signs in with
+# a superuser of its own, whose password it shares as
+# beszel_superuser_password: setup.sh makes the superuser
+# paisans-link-<app>@<domain> from it at every start, and deletes any other
+# paisans-link- superuser, so removing the consumer removes its access. A
+# PocketBase superuser is unscoped: it can read and change everything in the
+# hub, every user's settings included.
+provides:
+  - role: beszel-hub
+    values:
+      url: "'http://' + app.mesh_address + ':8084'"

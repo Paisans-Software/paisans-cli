@@ -464,6 +464,7 @@ func TestDoctorSelfCheckWithNoHostname(t *testing.T) {
 	cfg.Apps["health"] = health
 	// The Beszel hub is pinned there too, with a hostname of its own.
 	delete(cfg.Apps, "stats")
+	delete(cfg.Apps, "notify") // it serves the hub
 	saved := doctorSelfCheck
 	t.Cleanup(func() { doctorSelfCheck = saved })
 	doctorSelfCheck = func(context.Context, selfcheck.Target) error {

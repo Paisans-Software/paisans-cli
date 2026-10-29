@@ -312,17 +312,22 @@ func SelfRotated(blueprint config.Blueprint) []string {
 	return append([]string(nil), of(blueprint).SelfRotated...)
 }
 
-// SelfRotatedBlueprint is the blueprint whose secret key is, for each key
-// `secrets rotate` replaces by re-rendering the app's own stack, and false for
-// any other key. No two blueprints share such a key
-// (TestSelfRotatedSecretsAreUnique), so the answer is one blueprint.
-func SelfRotatedBlueprint(key string) (config.Blueprint, bool) {
+// SelfRotatedBlueprints is every blueprint, in name order, whose secret key
+// is one `secrets rotate` replaces by re-rendering the app's own stack, and
+// none for any other key. Two blueprints may share a key name: a secret a
+// consumer shares with its provider is read by the provider under the name
+// the provider's templates give it, so every consumer of that role names it
+// the same (mas_admin_client_secret, of the engagement and ops-notifier
+// apps). The app's own blueprint decides which one a rotation is.
+func SelfRotatedBlueprints(key string) []config.Blueprint {
+	var out []config.Blueprint
 	for _, blueprint := range known() {
 		for _, k := range of(blueprint).SelfRotated {
 			if k == key {
-				return blueprint, true
+				out = append(out, blueprint)
+				break
 			}
 		}
 	}
-	return "", false
+	return out
 }

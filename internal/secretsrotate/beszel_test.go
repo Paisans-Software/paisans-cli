@@ -74,6 +74,7 @@ func TestBeszelTokenLearnedByTheHubBeforeTheAgent(t *testing.T) {
 		t.Errorf("unknown site: %v", err)
 	}
 	delete(cfg.Apps, "stats")
+	delete(cfg.Apps, "notify") // it serves the hub
 	if err := r.(Prechecker).Precheck(e); err == nil || !strings.Contains(err.Error(), "beszel") {
 		t.Errorf("no hub: %v", err)
 	}
