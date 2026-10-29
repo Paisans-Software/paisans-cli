@@ -9,6 +9,13 @@
 # the gate's header, are the service's only pages. GET
 # /healthz is a probe, answering ok or 503, forwarded so the monitor's
 # public check sees the digest through the gateway. Nothing else is proxied.
+# The hostname has no page of its own. The front page and /d/ with no date
+# send a visitor to the account app, the community's front door: /d/ before
+# the gate, as an open path, and the front page once the gate admits them.
+@home path / /d /d/ /d/preview /d/preview/
+handle @home {
+	redir {{ .Engagement.HomeURL }} 302
+}
 @public expression `path('/u/*') || path('/d/*') || (method('GET') && path('/healthz'))`
 handle @public {
 	reverse_proxy{{ range .Upstreams }} {{ . }}{{ end }} {

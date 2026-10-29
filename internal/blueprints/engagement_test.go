@@ -28,8 +28,11 @@ func TestEngagementBlueprintParses(t *testing.T) {
 	if !GateFor(config.BlueprintEngagement).Gateable {
 		t.Error("engagement is not gateable, and its web digest names the member by the gate's header")
 	}
-	if open := OpenPathsFor(config.BlueprintEngagement); !slices.Equal(open, []string{"/u/*", "/healthz"}) {
-		t.Errorf("open paths %q, want /u/* and /healthz", open)
+	// /d/ with no date is open too: it only redirects to the account app, so
+	// nobody signs in to be sent there. The front page stays behind the gate.
+	want := []string{"/u/*", "/d", "/d/", "/d/preview", "/d/preview/", "/healthz"}
+	if open := OpenPathsFor(config.BlueprintEngagement); !slices.Equal(open, want) {
+		t.Errorf("open paths %q, want %q", open, want)
 	}
 	if !SendsMail(config.BlueprintEngagement) {
 		t.Error("engagement does not send mail")
