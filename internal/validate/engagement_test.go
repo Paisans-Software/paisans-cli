@@ -114,3 +114,57 @@ func TestEngagementWithMatrixNotGated(t *testing.T) {
 		}
 	}
 }
+
+// refusedAt is where rule refuses the engagement-valid fixture with the
+// digest app's settings replaced by settings, "" when it does not.
+func refusedAt(t *testing.T, rule string, settings map[string]any) string {
+	t.Helper()
+	cfg := load(t, "engagement-valid")
+	app := cfg.Apps["digest"]
+	app.Settings = settings
+	cfg.Apps["digest"] = app
+	for _, f := range validate.Check(cfg).Findings {
+		if f.Rule == rule {
+			if f.Level != validate.Refuse {
+				t.Errorf("%v: %s is a %s, want a refusal", settings, f.Rule, f.Level)
+			}
+			return f.Key
+		}
+	}
+	return ""
+}
+
+// The community room's name is one line a member reads, and it must leave
+// a letter or digit for the room's alias.
+func TestEngagementCommunityRoomName(t *testing.T) {
+	const key = "apps.digest.settings.community_room_name"
+	for name, refused := range map[string]bool{
+		"":               true,
+		"   ":            true,
+		"a\tb":           true,
+		"!!!":            true,
+		"Riverside Hall": false,
+	} {
+		at := refusedAt(t, "engagement-community-room-name-invalid", map[string]any{"community_room_name": name})
+		switch {
+		case refused && at != key:
+			t.Errorf("%q: refused at %q, want %s", name, at, key)
+		case !refused && at != "":
+			t.Errorf("%q: refused at %s", name, at)
+		}
+	}
+}
+
+// The daily welcome email reaches at least one member.
+func TestEngagementWelcomeLimit(t *testing.T) {
+	const key = "apps.digest.settings.welcome_email_daily_limit"
+	for limit, refused := range map[int]bool{0: true, -1: true, 1: false, 50: false} {
+		at := refusedAt(t, "engagement-welcome-limit-invalid", map[string]any{"welcome_email_daily_limit": limit})
+		switch {
+		case refused && at != key:
+			t.Errorf("%d: refused at %q, want %s", limit, at, key)
+		case !refused && at != "":
+			t.Errorf("%d: refused at %s", limit, at)
+		}
+	}
+}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
 // matrixLocalpart is the characters a Matrix user ID's localpart may hold.
@@ -59,6 +60,16 @@ func (c *checker) engagement() {
 			c.refuse("engagement-bot-display-name-invalid", fmt.Sprintf("apps.%s.settings.bot_display_name", name),
 				"the bot's display name is empty or holds a control character",
 				"is %q. Members see the bot by this name, and it is rendered into one .env line, so it must hold something besides spaces and no line break, tab or other control character. Write one line, or leave it unset for Community Bot.", display)
+		}
+		if room, ok := c.cfg.Apps[name].Settings["community_room_name"].(string); ok && (!displayName(room) || render.RoomAliasLocalpart(room) == "") {
+			c.refuse("engagement-community-room-name-invalid", fmt.Sprintf("apps.%s.settings.community_room_name", name),
+				"the community room's name is empty, holds a control character or has no letter or digit",
+				"is %q. Members see the room by this name, its alias is made from its letters and digits, and it is rendered into one .env line, so it must be one line holding at least one letter or digit. Write one, or leave it unset for the community's name plus Community.", room)
+		}
+		if limit, ok := c.cfg.Apps[name].Settings["welcome_email_daily_limit"].(int); ok && limit < 1 {
+			c.refuse("engagement-welcome-limit-invalid", fmt.Sprintf("apps.%s.settings.welcome_email_daily_limit", name),
+				"the daily welcome email limit is less than 1",
+				"is %d. It is how many members the daily welcome email reaches at most. Write a whole number of at least 1, or leave it unset for 50.", limit)
 		}
 		if !c.cfg.Apps[name].Gated && c.linksHomeserver(name) {
 			c.warn("engagement-not-gated", fmt.Sprintf("apps.%s.gated", name),
