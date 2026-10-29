@@ -38,7 +38,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/etc/snippets/stats.caddy",
-      "sha256": "d9e642931650ab889fcccc2aa447766da9336d5c4d4a0bc92384aa8c14d2e012",
+      "sha256": "42d0fecedea2cccf409172c6d44876853d6f8a5ab34f745fc98b25cf32e8a63c",
       "mode": "0644"
     },
     {
@@ -58,7 +58,7 @@
     },
     {
       "path": "srv/paisans/f2a9/stats/compose.yaml",
-      "sha256": "b53cce46947bd9a82b4278c9adfed52bc37ec67a2007ecba7ebdb96686673135",
+      "sha256": "bf7ec03ebcab6621641267cbfabb784a0080a694bea06184a643f05962aed2b4",
       "mode": "0644"
     },
     {
@@ -73,7 +73,7 @@
     },
     {
       "path": "srv/paisans/f2a9/stats/setup.sh",
-      "sha256": "4efed9681a8f75e574a15a199174e527f8e0017e4c1f3321b2d107c6dee6b30c",
+      "sha256": "f28b75b7a4a248b864d302fdb3be4e91e9cb8b1b21427acdf6e4a87a7018f1b8",
       "mode": "0600"
     }
   ],

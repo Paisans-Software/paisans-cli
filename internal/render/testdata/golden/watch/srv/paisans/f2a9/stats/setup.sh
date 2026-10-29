@@ -65,6 +65,13 @@ JSON
 # beszel-admin@ under community.domain, which holds only letters, digits,
 # hyphens and dots, so it is safe in the filter below. An operator who has
 # deleted the user keeps it deleted.
+#
+# Setting the password on every start, even to the value it already has,
+# stores a new bcrypt hash, and PocketBase gives an auth record a new token
+# key whenever its stored password changes (core/record_model.go,
+# onRecordSaveExecute), which signs out every break glass session. That is
+# intended: break glass is for while the identity provider is down, and a
+# session of it does not outlive the next apply or restart of this stack.
 users=$(curl -sS --fail-with-body -G "$hub/api/collections/users/records" \
 	-H "Authorization: $token" --data-urlencode "filter=email='beszel-admin@example.org'" --data-urlencode 'fields=id')
 id=$(printf '%s' "$users" | sed -n 's/.*"items":\[{"id":"\([^"]*\)".*/\1/p')

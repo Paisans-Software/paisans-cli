@@ -451,3 +451,41 @@ func TestBeszelHubWithoutASiteIsRefused(t *testing.T) {
 		t.Errorf("a hub on the cluster: %v", err)
 	}
 }
+
+// admin passes the password after "--": a generated password is base64url,
+// and one that begins with "-" would otherwise be read by the hub's command
+// line as an unknown flag, so admin would fail on every apply.
+func TestBeszelAdminEndsTheOptions(t *testing.T) {
+	compose := beszelFile(t, "compose.yaml").Content
+	want := `command: ["superuser", "upsert", "--", "${BESZEL_ADMIN_EMAIL:?set in .env}", "${BESZEL_ADMIN_PASSWORD:?set in .env}"]`
+	if !strings.Contains(compose, want) {
+		t.Errorf("admin's command is not %s:\n%s", want, compose)
+	}
+}
+
+// The superuser API, /api/collections/_superusers and everything under it,
+// is refused ahead of the proxy as the panel is, by the collection's name and
+// by its id, which PocketBase finds it by as well; the users collection, the
+// break glass sign in, is not matched.
+func TestBeszelSnippetRefusesTheSuperuserAPI(t *testing.T) {
+	snippet := ""
+	cfg, secrets := beszelFixture(t)
+	plan, err := Build(cfg, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range plan.Files {
+		if f.Path == "watch/srv/paisans/f2a9/infra/caddy/etc/snippets/stats.caddy" {
+			snippet = f.Content
+		}
+	}
+	matcher := strings.Index(snippet, "\n@superuser_api path /api/collections/_superusers /api/collections/_superusers/* /api/collections/pbc_3142635823 /api/collections/pbc_3142635823/*\n")
+	refusal := strings.Index(snippet, "\nrespond @superuser_api 404\n")
+	proxy := strings.Index(snippet, "\nreverse_proxy ")
+	if matcher < 0 || refusal < matcher || proxy < refusal {
+		t.Errorf("the snippet does not refuse the superuser API ahead of the proxy:\n%s", snippet)
+	}
+	if strings.Contains(snippet, "/api/collections/users") {
+		t.Errorf("the snippet matches the users collection, the break glass sign in:\n%s", snippet)
+	}
+}

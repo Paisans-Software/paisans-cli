@@ -56,13 +56,16 @@ services:
   # they are the one shot's arguments: for the moment it runs, the password
   # is in its argv, which /proc and `docker inspect` show to the deployment
   # user and to root. The command takes the password as an argument only,
-  # with no stdin or file form.
+  # with no stdin or file form. "--" ends the options first: a generated
+  # password is base64url, so about one in 64 begins with "-", which cobra
+  # would read as an unknown shorthand flag, and admin would exit 1 on every
+  # apply.
   admin:
     labels:
       {{ .DeploymentLabel }}: "{{ .DeploymentID }}"
     image: {{ yamlquote (.Image "admin") }}
     restart: "no"
-    command: ["superuser", "upsert", "${BESZEL_ADMIN_EMAIL:?set in .env}", "${BESZEL_ADMIN_PASSWORD:?set in .env}"]
+    command: ["superuser", "upsert", "--", "${BESZEL_ADMIN_EMAIL:?set in .env}", "${BESZEL_ADMIN_PASSWORD:?set in .env}"]
     volumes:
       - {{ .DataPath }}/data:/beszel_data
     depends_on:

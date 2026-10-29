@@ -1505,18 +1505,29 @@ from the hub's own image that runs `/beszel superuser upsert` once the hub is
 healthy, because `USER_PASSWORD` is read on a new install only and this is
 what makes a rotated `admin_password` take effect. The command takes the
 password as an argument, so while it runs the password is in its argv, which
-the deployment user and root can read. `setup` runs on the heartbeat image: it
+the deployment user and root can read. It runs as `superuser upsert --
+<email> <password>`: a generated password is base64url, so about one in 64
+begins with `-`, which the hub's command line would otherwise read as an
+unknown flag on every apply. `setup` runs on the heartbeat image: it
 writes the Pocket ID provider into PocketBase through its API and resets the
-break glass user's password. It carries `env_file: .env`, so a rotated
+break glass user's password. Setting it on every start gives the user a new
+token key, as PocketBase does on any password change, so a break glass
+session ends at the stack's next start, which is intended. It carries `env_file: .env`, so a rotated
 password recreates it; without that it would sleep through the rotation.
 `deployment apply`'s health gate, and its probe of a stopped stack, treat a
 service with `restart: "no"` that exited 0 as done, which is what `admin` is.
 
-**The Caddy snippet refuses `/_/`.** That path is PocketBase's superuser
-panel, which signs in with the superuser's password alone, and nothing an
-operator does day to day needs it from the internet. It stays reachable over
-the mesh on 8084. The UI, the sign in, the callback, and the API and realtime
-stream the UI reads pass, since the hub authenticates those itself.
+**The Caddy snippet refuses the superuser's panel and API.** It answers 404
+to `/_/` and everything under it, PocketBase's superuser panel, and to
+`/api/collections/_superusers` and everything under it, the superuser API the
+panel signs in through, by the collection's name and by its id,
+`pbc_3142635823`, which PocketBase derives the same on every hub and accepts
+in place of the name. Both sign in with the superuser's password alone, and
+nothing an operator does day to day needs either from the internet. They stay
+reachable over the mesh on 8084. Everything else passes: the UI, the sign in
+through Pocket ID, the callback, break glass through the `users` collection,
+and the API and realtime stream the UI reads, since the hub authenticates
+those itself.
 
 **The systems list is the whole truth.** The toolkit renders
 `/beszel_data/config.yml` with one system per site, in site name order, each
