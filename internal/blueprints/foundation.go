@@ -39,6 +39,8 @@ const (
 	FoundationUptime             = "uptime"
 	FoundationAccount            = "account"
 	FoundationEngagement         = "engagement"
+	FoundationBeszel             = "beszel"
+	FoundationBeszelAgent        = "beszel-agent"
 	FoundationValkey             = "valkey"
 )
 
@@ -55,7 +57,7 @@ var foundationNames = map[string]bool{
 // do not publish. Requiring one would make this toolkit skip every such
 // release, so a deployment without that blueprint keeps reading them, and
 // one with it is refused when its image is resolved (FoundationImage).
-var optionalFoundationNames = map[string]bool{FoundationEngagement: true}
+var optionalFoundationNames = map[string]bool{FoundationEngagement: true, FoundationBeszel: true, FoundationBeszelAgent: true}
 
 // knownFoundationName reports whether name is an image a foundation may
 // name, required or optional.
@@ -75,6 +77,8 @@ func knownFoundationName(name string) bool {
 //   - caddy: the Caddyfile the gateway is rendered with, Caddy 2.
 //   - oauth2-proxy: its flags and environment, v7.
 //   - spilo: Spilo's environment and Patroni's, the 3.x and 4.x lines.
+//   - beszel, beszel-agent: the hub and its agent, 0.x, which move together:
+//     a minor may change what they say to each other, so both stay on 0.21.
 var supportedTags = map[string][]string{
 	FoundationPocketID:    {"v2."},
 	FoundationEtcd:        {"v3."},
@@ -83,6 +87,8 @@ var supportedTags = map[string][]string{
 	FoundationCaddy:       {"2."},
 	FoundationOAuth2Proxy: {"v7."},
 	"spilo":               {"3.", "4."},
+	FoundationBeszel:      {"0.21."},
+	FoundationBeszelAgent: {"0.21."},
 }
 
 // postgresMajors are the Postgres major versions the toolkit knows where to

@@ -77,6 +77,8 @@ const (
 	BlueprintUptime      Blueprint = "uptime"
 	BlueprintAccount     Blueprint = "account"
 	BlueprintEngagement  Blueprint = "engagement"
+	// The server monitor: a hub, and an agent beside it on every site.
+	BlueprintBeszel Blueprint = "beszel"
 )
 
 // Config is a whole deployment, declared. It records intent and never status:
