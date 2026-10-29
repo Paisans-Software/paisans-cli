@@ -143,3 +143,22 @@ func TestOptionalHealthAndADumpParse(t *testing.T) {
 		t.Errorf("mysql: %+v, %v", d, err)
 	}
 }
+
+// An Ed25519 pair is two secrets in one group, the public half naming the
+// private one, and the private key has no passphrase.
+func TestParseEd25519Pair(t *testing.T) {
+	pair := "secrets:\n  generate:\n    - {name: hub_key, format: ed25519-openssh, group: hub}\n    - {name: hub_key_public, format: ed25519-public, of: hub_key, group: hub}\n"
+	if _, err := Parse("example", []byte(minimal+pair), always); err != nil {
+		t.Fatalf("a valid pair: %v", err)
+	}
+	for _, c := range []struct{ name, change, want string }{
+		{"a public half naming nothing", minimal + "secrets:\n  generate:\n    - {name: hub_key_public, format: ed25519-public, group: hub}\n", "names the ed25519-openssh secret"},
+		{"a public half naming an RSA keypair", minimal + "secrets:\n  generate:\n    - {name: p, group: hub}\n    - {name: k, format: rsa-keypair, passphrase: p, group: hub}\n    - {name: hub_key_public, format: ed25519-public, of: k, group: hub}\n", "names the ed25519-openssh secret"},
+		{"a private key with a passphrase", minimal + "secrets:\n  generate:\n    - {name: p, group: hub}\n    - {name: hub_key, format: ed25519-openssh, passphrase: p, group: hub}\n", "passphrase"},
+		{"a pair outside one group", minimal + "secrets:\n  generate:\n    - {name: hub_key, format: ed25519-openssh, group: hub}\n    - {name: hub_key_public, format: ed25519-public, of: hub_key}\n", "one group"},
+	} {
+		if _, err := Parse("example", []byte(c.change), always); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: got %v, want an error naming %q", c.name, err, c.want)
+		}
+	}
+}

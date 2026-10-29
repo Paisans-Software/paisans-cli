@@ -19,6 +19,7 @@
 package secretsgen
 
 import (
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -28,8 +29,10 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strings"
 
 	"golang.org/x/crypto/curve25519"
+	"golang.org/x/crypto/ssh"
 
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -334,9 +337,13 @@ func generate(format string) (string, error) {
 	return "", fmt.Errorf("a %s secret is made with the secret it depends on", format)
 }
 
-// keypair names the three secrets of an encrypted RSA keypair: the private
-// key, its public half and the passphrase it is encrypted under.
-type keypair struct{ private, public, passphrase string }
+// keypair names the secrets of a keypair: the private key, its public half
+// and, for an RSA pair, the passphrase it is encrypted under. An Ed25519 pair
+// has no passphrase, so its passphrase is empty and ed25519 is set.
+type keypair struct {
+	private, public, passphrase string
+	ed25519                     bool
+}
 
 type keypairList []keypair
 
@@ -356,12 +363,16 @@ func keypairs(blueprint config.Blueprint) keypairList {
 	var out keypairList
 	for _, s := range blueprints.AppSecrets(blueprint) {
 		spec, _ := blueprints.SecretOf(blueprint, s)
-		if spec.Format != blueprints.FormatRSAKeypair {
+		if spec.Format != blueprints.FormatRSAKeypair && spec.Format != blueprints.FormatEd25519OpenSSH {
 			continue
 		}
-		p := keypair{private: spec.Name, passphrase: spec.Passphrase}
+		p := keypair{private: spec.Name, passphrase: spec.Passphrase, ed25519: spec.Format == blueprints.FormatEd25519OpenSSH}
+		halfFormat := blueprints.FormatRSAPublic
+		if p.ed25519 {
+			halfFormat = blueprints.FormatEd25519Public
+		}
 		for _, t := range blueprints.AppSecrets(blueprint) {
-			if half, _ := blueprints.SecretOf(blueprint, t); half.Format == blueprints.FormatRSAPublic && half.Of == spec.Name {
+			if half, _ := blueprints.SecretOf(blueprint, t); half.Format == halfFormat && half.Of == spec.Name {
 				p.public = half.Name
 			}
 		}
@@ -380,6 +391,9 @@ func keypairs(blueprint config.Blueprint) keypairList {
 // private key, and one the passphrase beside it cannot open is refused rather
 // than regenerated, because Mbin would refuse it too, on the host.
 func fillKeypair(app string, entries map[string]any, pair keypair, note func(bool, string)) error {
+	if pair.ed25519 {
+		return fillEd25519(app, entries, pair, note)
+	}
 	privateKey, publicKey := pair.private, pair.public
 	passphrase, _ := entries[pair.passphrase].(string)
 	if passphrase == "" {
@@ -422,6 +436,81 @@ func fillKeypair(app string, entries map[string]any, pair keypair, note func(boo
 	entries[publicKey] = public
 	note(true, publicName)
 	return nil
+}
+
+// fillEd25519 generates an Ed25519 pair a blueprint declares when its private
+// key is unset. The key has no passphrase, so nothing else gates it, and like
+// the RSA pair it is never replaced here: the hosts that trust its public half
+// would stop trusting it. A missing public half is derived from the private
+// key kept, not a reason to make a new pair.
+func fillEd25519(app string, entries map[string]any, pair keypair, note func(bool, string)) error {
+	privateName := "apps." + app + "." + pair.private
+	publicName := "apps." + app + "." + pair.public
+
+	existing, _ := entries[pair.private].(string)
+	if existing == "" {
+		private, public, err := ed25519Keypair()
+		if err != nil {
+			return err
+		}
+		entries[pair.private] = private
+		note(true, privateName)
+		if pair.public != "" {
+			entries[pair.public] = public
+			note(true, publicName)
+		}
+		return nil
+	}
+	note(false, privateName)
+	if pair.public == "" {
+		return nil
+	}
+	if current, _ := entries[pair.public].(string); current != "" {
+		note(false, publicName)
+		return nil
+	}
+	public, err := Ed25519PublicOf(existing)
+	if err != nil {
+		return fmt.Errorf("%s cannot be read, so its public half cannot be derived: %w", privateName, err)
+	}
+	entries[pair.public] = public
+	note(true, publicName)
+	return nil
+}
+
+// ed25519Keypair is a new Ed25519 key in OpenSSH's PEM form, with no
+// passphrase, and its public half as one authorized_keys line without the
+// trailing newline.
+func ed25519Keypair() (private, public string, err error) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return "", "", fmt.Errorf("generating the Ed25519 key: %w", err)
+	}
+	block, err := ssh.MarshalPrivateKey(priv, "")
+	if err != nil {
+		return "", "", fmt.Errorf("encoding the Ed25519 key: %w", err)
+	}
+	sshPub, err := ssh.NewPublicKey(pub)
+	if err != nil {
+		return "", "", fmt.Errorf("encoding the Ed25519 public key: %w", err)
+	}
+	return string(pem.EncodeToMemory(block)), strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub))), nil
+}
+
+// Ed25519PublicOf is the authorized_keys line of an OpenSSH private key.
+func Ed25519PublicOf(privatePEM string) (string, error) {
+	raw, err := ssh.ParseRawPrivateKey([]byte(privatePEM))
+	if err != nil {
+		return "", err
+	}
+	signer, err := ssh.NewSignerFromKey(raw)
+	if err != nil {
+		return "", err
+	}
+	if signer.PublicKey().Type() != ssh.KeyAlgoED25519 {
+		return "", fmt.Errorf("not an Ed25519 key")
+	}
+	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey()))), nil
 }
 
 // oauthKeypairPEM is a 4096 bit RSA key, encrypted with the passphrase, and

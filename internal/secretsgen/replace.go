@@ -39,7 +39,8 @@ func ReplacementIn(cfg *config.Config, path string, s *config.Secrets) (string, 
 			switch {
 			case spec.NeverRotate != "":
 				return "", fmt.Errorf("%s: %s, so nothing here replaces it", path, spec.NeverRotate)
-			case spec.Format == blueprints.FormatRSAKeypair, spec.Format == blueprints.FormatRSAPublic:
+			case spec.Format == blueprints.FormatRSAKeypair, spec.Format == blueprints.FormatRSAPublic,
+				spec.Format == blueprints.FormatEd25519OpenSSH, spec.Format == blueprints.FormatEd25519Public:
 				return "", fmt.Errorf("%s: a keypair is replaced with the rest of apps.%s.%s", path, parts[1], spec.Group)
 			}
 			return generate(spec.Format)
@@ -81,4 +82,10 @@ func ReplacementIn(cfg *config.Config, path string, s *config.Secrets) (string, 
 // with it and not on its own.
 func ReplacementKeypair(passphrase string) (privatePEM, publicPEM string, err error) {
 	return oauthKeypairPEM(passphrase)
+}
+
+// ReplacementEd25519 is a new Ed25519 keypair, replaced together because the
+// public half is the private key's and not a value of its own.
+func ReplacementEd25519() (privatePEM, publicLine string, err error) {
+	return ed25519Keypair()
 }
