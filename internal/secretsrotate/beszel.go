@@ -94,3 +94,44 @@ func (r beszelToken) Users(e Env) []Use {
 	out := appUses(e, hub)
 	return append(out, Use{Site: r.site, Stacks: []string{"infra"}})
 }
+
+// BeszelKeyGroup is the group the beszel blueprint puts the hub's key pair
+// in, hub_key and hub_key_public.
+const BeszelKeyGroup = "hub"
+
+// beszelKey rotates a beszel hub's key pair, the hub group.
+type beszelKey struct {
+	appGroup
+}
+
+// BeszelKey is the rotation of apps.<app>.hub, the hub's Ed25519 key pair. It
+// is the unit AppGroup replaces, handed to more stacks: the hub keeps the
+// private half as data/id_ed25519, and every site's agent is given the
+// public half as KEY in its infrastructure stack's beszel-agent.env, and
+// refuses a hub that signs with any other key. So the hub's stack is applied
+// first, which restarts it on the new key, and then every site's
+// infrastructure stack, which recreates each agent with the new KEY. Each
+// site's graphs gap from the hub's restart until its own apply.
+func BeszelKey(cfg *config.Config, app string) Rotator {
+	return beszelKey{appGroup: appGroup{cfg: cfg, app: app, group: BeszelKeyGroup}}
+}
+
+// IsBeszelKey says whether apps.<app>.<group> is a beszel hub's key pair,
+// which BeszelKey rotates in place of AppGroup.
+func IsBeszelKey(cfg *config.Config, app, group string) bool {
+	return cfg != nil && cfg.Apps[app].Blueprint == config.BlueprintBeszel && group == BeszelKeyGroup
+}
+
+func (r beszelKey) Cost() Cost {
+	return Cost{Downtime: "the " + r.app + " stack and every site's beszel agent, for one restart each"}
+}
+
+// Users is the hub's stack on its site, then every site's infrastructure
+// stack, in site order.
+func (r beszelKey) Users(e Env) []Use {
+	out := appUses(e, r.app)
+	for _, site := range e.Cfg.SiteNames() {
+		out = append(out, Use{Site: site, Stacks: []string{"infra"}})
+	}
+	return out
+}

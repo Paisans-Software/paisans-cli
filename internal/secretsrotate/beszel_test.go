@@ -78,3 +78,33 @@ func TestBeszelTokenLearnedByTheHubBeforeTheAgent(t *testing.T) {
 		t.Errorf("no hub: %v", err)
 	}
 }
+
+// A hub's key pair is handed to the hub's stack and then to every site's
+// infra stack, whose agent checks the hub by its public half.
+func TestBeszelKeyReachesEverySitesAgent(t *testing.T) {
+	cfg := &config.Config{
+		Sites: map[string]config.Site{
+			"watch":  {Roles: []config.Role{config.RoleMonitor}, Address: "10.0.0.4"},
+			"home-a": {Roles: []config.Role{config.RoleData, config.RoleApps}, Address: "10.0.0.1"},
+			"home-b": {Roles: []config.Role{config.RoleData, config.RoleApps}, Address: "10.0.0.2"},
+		},
+		Apps: map[string]config.App{
+			"stats": {Blueprint: config.BlueprintBeszel, Hostname: "status.health.example.org", Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch"}},
+		},
+	}
+	e := Env{Cfg: cfg}
+	if !IsBeszelKey(cfg, "stats", "hub") || IsBeszelKey(cfg, "stats", "other") {
+		t.Fatal("IsBeszelKey misreads the hub's key group")
+	}
+	r := BeszelKey(cfg, "stats")
+	if r.Path() != "apps.stats.hub" {
+		t.Fatalf("path %q", r.Path())
+	}
+	if err := r.(Prechecker).Precheck(e); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"watch:stats", "home-a:infra", "home-b:infra", "watch:infra"}
+	if got := usesOf(e, r); !slices.Equal(got, want) {
+		t.Fatalf("users %v, want %v", got, want)
+	}
+}

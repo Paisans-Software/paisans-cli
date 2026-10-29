@@ -639,7 +639,7 @@ func declaredRotator(cfg *config.Config, path, app, key string) (secretsrotate.R
 	}
 	blueprint := cfg.Apps[app].Blueprint
 	if slices.Contains(blueprints.SecretGroups(blueprint), key) {
-		return secretsrotate.AppGroup(cfg, app, key), nil, true
+		return groupRotator(cfg, app, key), nil, true
 	}
 	spec, ok := blueprints.SecretOf(blueprint, key)
 	switch {
@@ -653,6 +653,16 @@ func declaredRotator(cfg *config.Config, path, app, key string) (secretsrotate.R
 		return secretsrotate.InApp(cfg, app, key), nil, true
 	}
 	return nil, nil, false
+}
+
+// groupRotator is the rotation of the unit of secrets an app's blueprint
+// groups as group: a beszel hub's key pair reaches every site's agent as well
+// as the hub, and every other unit only the app's own stack.
+func groupRotator(cfg *config.Config, app, group string) secretsrotate.Rotator {
+	if secretsrotate.IsBeszelKey(cfg, app, group) {
+		return secretsrotate.BeszelKey(cfg, app)
+	}
+	return secretsrotate.AppGroup(cfg, app, group)
 }
 
 // costOf is what rotating an app's own secret costs, read through its
@@ -749,7 +759,7 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 		groups := blueprints.SecretGroups(cfg.Apps[app].Blueprint)
 		for _, group := range groups {
 			if members := blueprints.SecretGroup(cfg.Apps[app].Blueprint, group); has("apps." + app + "." + members[0].Name) {
-				rs = append(rs, secretsrotate.AppGroup(cfg, app, group))
+				rs = append(rs, groupRotator(cfg, app, group))
 			}
 		}
 	}

@@ -1577,8 +1577,11 @@ stack. `apps.<hub>.hub_key` and `hub_key_public` are a pair in the group
 `hub`, in two secret formats this blueprint introduced: `ed25519-openssh`, an
 unencrypted OpenSSH private key written to `id_ed25519` at 0600, and
 `ed25519-public`, its public half, as `rsa-public` is for `rsa-keypair`
-(`of` names the private half). Rotating the pair restarts the hub and every
-agent.
+(`of` names the private half). `paisans secrets rotate apps.<hub>.hub`, and
+`--all`, apply the hub's stack and then every site's infra stack, because each
+agent's `KEY` is the public half and an agent refuses a hub that signs with
+another key. The hub and every agent restart, and each site's figures are
+missing from the hub's restart until its own infra apply.
 
 The image tracks `beszel` and `beszel-agent` in the core catalog are optional
 and held to `0.21.`: Beszel is 0.x, so the track is held to one minor, and a new minor is a
@@ -2946,6 +2949,7 @@ Finishing either command first costs nothing but its resume.
 | Pocket ID `operators_heartbeat_token`, `dns_super_admins_heartbeat_token`, `dns_2fa_heartbeat_token` | the monitor | the operators heartbeat on every site the app runs on | its pushes refused while the monitors restart and the pushers switch, normally within the grace before a heartbeat counts as missed |
 | `apps.<app>.heartbeat_token`, for a blueprint that declares a heartbeat | the monitor | the app, on every site it runs on | its pushes refused while the monitors restart and the app switches, normally within the grace before a heartbeat counts as missed |
 | `sites.<site>.beszel_token`, while a Beszel hub is declared | the hub, through its `config.yml` | the site's Beszel agent | the hub and the agent restart; the site's figures are missing until they reconnect |
+| Beszel `hub_key` and `hub_key_public`, as `apps.<app>.hub` | the hub, through its `id_ed25519` | every site's Beszel agent, as its `KEY` | the hub and every agent restart; each site's figures are missing until its infra stack is applied |
 | Pocket ID `dns_email_hash_key` | the reconciler | the reconciler, with the hashed mapping rendered under it | a restart of the Pocket ID stack on each site in turn |
 | engagement `mas_admin_client_secret`, and any secret a blueprint shares with its provider | MAS, through the synapse app's `mas.yaml` | the engagement app; the synapse stack is re-applied with it, first | none; a restart of both stacks |
 

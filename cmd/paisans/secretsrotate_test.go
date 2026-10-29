@@ -1532,3 +1532,54 @@ func TestSecretsRotateAllSkipsABeszelTokenWithNoHub(t *testing.T) {
 		}
 	}
 }
+
+// The hub's key pair is every agent's KEY as well as the hub's own key, so
+// rotating it applies the hub's stack and then every site's infra stack,
+// whose beszel-agent.env carries the public half. Named alone and under
+// --all alike.
+func TestSecretsRotateHandsTheBeszelKeyToEveryAgent(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := config.LoadDeploymentSecrets(fixtureSecretsPath(), cfg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := secretsrotate.Env{Cfg: cfg}
+	want := []string{"watch:stats"}
+	for _, site := range cfg.SiteNames() {
+		want = append(want, site+":infra")
+	}
+	usersOf := func(r secretsrotate.Rotator) []string {
+		var out []string
+		for _, u := range r.Users(e) {
+			out = append(out, u.Site+":"+strings.Join(u.Stacks, ","))
+		}
+		return out
+	}
+	r, err := rotatorFor("apps.stats.hub", rotateWiring{cfg: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := usersOf(r); !slices.Equal(got, want) {
+		t.Errorf("apps.stats.hub users %v, want %v", got, want)
+	}
+	rs, _, err := rotateTargets(cfg, s, nil, true, rotateWiring{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, r := range rs {
+		if r.Path() != "apps.stats.hub" {
+			continue
+		}
+		found = true
+		if got := usersOf(r); !slices.Equal(got, want) {
+			t.Errorf("--all apps.stats.hub users %v, want %v", got, want)
+		}
+	}
+	if !found {
+		t.Error("--all does not rotate apps.stats.hub")
+	}
+}
