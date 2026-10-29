@@ -53,9 +53,9 @@ func withUnreadable(h *fakeHost) *fakeHost {
 }
 
 var sysctlCases = addCases(
-	goldenCase{name: "sysctl-endpoint-and-low-ports", focus: []string{"sysctl"}, site: "watch", flags: hostadmit.Flags{PublicPorts: true}, host: home},
+	goldenCase{name: "sysctl-endpoint-and-low-ports", focus: []string{"sysctl"}, site: "home-a", flags: hostadmit.Flags{Watchdog: true, PublicPorts: true}, host: home},
 	goldenCase{name: "sysctl-no-endpoint", focus: []string{"admission record"}, site: "vm", host: home},
-	goldenCase{name: "sysctl-forwarding-on-already", focus: []string{"sysctl"}, site: "watch", flags: hostadmit.Flags{PublicPorts: true}, host: func() *fakeHost { return home().with("ip-forward", "1") }},
+	goldenCase{name: "sysctl-forwarding-on-already", focus: []string{"sysctl"}, site: "home-a", flags: hostadmit.Flags{Watchdog: true, PublicPorts: true}, host: func() *fakeHost { return home().with("ip-forward", "1") }},
 	goldenCase{name: "sysctl-shared-with-another", focus: []string{"admission record"}, site: "vm", host: func() *fakeHost {
 		return withOther(home(), true, true).with("port-start", "80").with("ip-forward", "1").
 			withFile("/etc/sysctl.d/60-paisans.conf", hostadmit.SysctlFile(true, true), "644", 0).
@@ -68,7 +68,7 @@ func TestSysctlPlans(t *testing.T) { runGolden(t, sysctlCases) }
 // The low ports are announced as what they are: every local user may bind
 // them; forwarding as routing between every interface.
 func TestSysctlWarningsSayWhatTheyGrant(t *testing.T) {
-	plan, err := hostadmit.Build(home(), input(t, "watch", hostadmit.Flags{PublicPorts: true}))
+	plan, err := hostadmit.Build(home(), input(t, "home-a", hostadmit.Flags{Watchdog: true, PublicPorts: true}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,9 +91,9 @@ func TestSysctlBeforeFileMustHoldNumbers(t *testing.T) {
 }
 
 // A record admit cannot read turns nothing on: a request needing neither
-// grant changes nothing, and the warning names the record.
+// grant nor forwarding changes nothing, and the warning names the record.
 func TestUnreadableRecordTurnsNothingOn(t *testing.T) {
-	plan, err := hostadmit.Build(withUnreadable(home()), input(t, "vm", hostadmit.Flags{}))
+	plan, err := hostadmit.Build(withUnreadable(home()), input(t, "store", hostadmit.Flags{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestUnreadableRecordKeepsWhatTheFileHolds(t *testing.T) {
 
 // The first admit to set a key records the host's value.
 func TestFirstAdmitRecordsTheHostsValues(t *testing.T) {
-	plan, err := hostadmit.Build(home(), input(t, "watch", hostadmit.Flags{PublicPorts: true}))
+	plan, err := hostadmit.Build(home(), input(t, "home-a", hostadmit.Flags{Watchdog: true, PublicPorts: true}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestSecondAdmitRecordsNothing(t *testing.T) {
 			if before != "" {
 				h.file("/etc/paisans/sysctl.before", before)
 			}
-			plan, err := hostadmit.Build(h, input(t, "watch", hostadmit.Flags{PublicPorts: true}))
+			plan, err := hostadmit.Build(h, input(t, "home-a", hostadmit.Flags{Watchdog: true, PublicPorts: true}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -170,7 +170,7 @@ func TestSecondAdmitRecordsNothing(t *testing.T) {
 func TestTheFirstExecuteRecordsForwardingAsItWasBeforeDocker(t *testing.T) {
 	for _, outside := range []bool{false, true} {
 		h := newBlank()
-		in := input(t, "watch", hostadmit.Flags{PublicPorts: true})
+		in := input(t, "home-a", hostadmit.Flags{Watchdog: true, PublicPorts: true})
 		h.onRun = func(h *fakeHost, command string) {
 			switch {
 			case strings.Contains(command, registry.LockPath):
@@ -221,10 +221,10 @@ func TestTheFirstExecuteRecordsForwardingAsItWasBeforeDocker(t *testing.T) {
 // sysctl --system, since a file read after 60-paisans.conf could set one
 // back.
 func TestRestoreRunsBeforeTheValueIsForgotten(t *testing.T) {
-	h := admittedHost(requestFor("watch"), hostadmit.Flags{PublicPorts: true}).file("/etc/paisans/sysctl.before", beforeFile)
-	req := requestFor("watch")
+	h := admittedHost(requestFor("home-a"), hostadmit.Flags{Watchdog: true, PublicPorts: true}).file("/etc/paisans/sysctl.before", beforeFile)
+	req := requestFor("home-a")
 	req.Grants.PublicPorts = false
-	plan, err := hostadmit.Build(h, hostadmit.Input{Request: req, Digest: admission.Digest(admission.Encode(req)), Now: admitted})
+	plan, err := hostadmit.Build(h, hostadmit.Input{Request: req, Digest: admission.Digest(admission.Encode(req)), Flags: hostadmit.Flags{Watchdog: true}, Now: admitted})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestRestoreRunsBeforeTheValueIsForgotten(t *testing.T) {
 		t.Errorf("restore is step %d and the before file is rewritten at %d:\n%s", restore, forget, plan.Text())
 	}
 
-	plan, err = hostadmit.Build(home(), input(t, "watch", hostadmit.Flags{PublicPorts: true}))
+	plan, err = hostadmit.Build(home(), input(t, "home-a", hostadmit.Flags{Watchdog: true, PublicPorts: true}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +270,7 @@ func TestRestoreRunsBeforeTheValueIsForgotten(t *testing.T) {
 // host's own value. A value recorded already is kept, whatever the host
 // reads now.
 func TestTheBeforeValuesAreRecordedAheadOfDocker(t *testing.T) {
-	plan, err := hostadmit.Build(newBlank(), input(t, "watch", hostadmit.Flags{PublicPorts: true}))
+	plan, err := hostadmit.Build(newBlank(), input(t, "home-a", hostadmit.Flags{Watchdog: true, PublicPorts: true}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +290,7 @@ func TestTheBeforeValuesAreRecordedAheadOfDocker(t *testing.T) {
 	// before file holds what the host had.
 	h := current().withFile("/etc/paisans/sysctl.before", beforeFile, "644", 0).file("/etc/paisans/sysctl.before", beforeFile).
 		withDir("/etc/paisans", "drwxr-xr-x", 0, 0).with("ip-forward", "1")
-	plan, err = hostadmit.Build(h, input(t, "watch", hostadmit.Flags{PublicPorts: true}))
+	plan, err = hostadmit.Build(h, input(t, "home-a", hostadmit.Flags{Watchdog: true, PublicPorts: true}))
 	if err != nil {
 		t.Fatal(err)
 	}

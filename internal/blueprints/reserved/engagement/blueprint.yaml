@@ -21,9 +21,15 @@ config:
   file: ".env"
 # paisans-engagement-service's /healthz answers 200 when its database does.
 health: {path: "/healthz", status: [200]}
-# A member clicking unsubscribe from an inbox may not be signed in, and a
-# member gate would stop them unsubscribing.
-gate: {gateable: false}
+# Gateable, and gated wherever the bot runs: the web digest, /d/<week>,
+# names the member by the gate's X-Auth-Request-User, the Pocket ID subject,
+# so the link carries no secret and no member's id, and members-only content
+# never sits behind a bearer link. The unsubscribe links stay open: a member
+# clicking one from an inbox may not be signed in, and the signed token in it
+# is what names them. /healthz is open as the health route.
+gate:
+  gateable: true
+  open_paths: ["/u/*"]
 mail: reads
 # The homeserver the Digest Bot runs on. Optional: with homeserver unset the
 # app links to the deployment's one matrix-homeserver, and with none the bot
@@ -35,8 +41,11 @@ settings:
   # The homeserver's hostname, unset meaning the deployment's one.
   homeserver: {type: string}
   # The bot's localpart. A setting because MAS takes members' localparts
-  # from Pocket ID, so a member may already hold the default.
-  bot_localpart: {type: string, default: "digest-bot"}
+  # from Pocket ID, so a member may already hold the default. Changing it
+  # gives the bot a new account and abandons the old one's rooms.
+  bot_localpart: {type: string, default: "community-bot"}
+  # The name members see the bot by, which it sets on its account at start.
+  bot_display_name: {type: string, default: "Community Bot"}
 secrets:
   required:
     - {key: "digest_signing_key", why: "paisans-engagement-service refuses to start without ENGAGEMENT_SIGNING_KEY"}

@@ -194,6 +194,19 @@
       "status_page_excluded": false
     },
     {
+      "name": "digest — gate",
+      "monitor_type": "active",
+      "url": "https://digest.example.org/",
+      "method": "GET",
+      "check_type": "string",
+      "expected_string": "Sign in required by the visibility gate.",
+      "follow_redirects": false,
+      "interval_seconds": 60,
+      "timeout_ms": 10000,
+      "failure_threshold": 2,
+      "status_page_excluded": true
+    },
+    {
       "name": "digest — direct (home-a)",
       "monitor_type": "active",
       "url": "http://10.44.0.1:8083/healthz",

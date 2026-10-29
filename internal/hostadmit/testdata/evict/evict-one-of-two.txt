@@ -85,22 +85,30 @@ step 17: remove ufw rule 443/udp
   run:
     $ ufw delete allow 443/udp comment 'paisans-f2a9: public ports, HTTP/3'
 
-step 18: remove the admission record
+step 18: rewrite /etc/sysctl.d/60-paisans.conf
+  evict: only what the other admitted deployments need
+  write /etc/sysctl.d/60-paisans.conf mode 0644:
+    | # Written by paisans site admit, for every admitted deployment that needs
+    | # it; paisans site evict restores each value once none does.
+    | net.ipv4.ip_unprivileged_port_start = 80
+    | net.ipv4.ip_forward = 1
+
+step 19: remove the admission record
   evict: /etc/paisans/admitted.f2a9.json
   run:
     $ rm -f /etc/paisans/admitted.f2a9.json
 
-step 19: remove /srv/paisans
+step 20: remove /srv/paisans
   evict: it holds nothing once this deployment's files are gone
   run:
     $ rmdir /srv/paisans
 
-step 20: remove /usr/local/libexec/paisans
+step 21: remove /usr/local/libexec/paisans
   evict: it holds nothing once this deployment's files are gone
   run:
     $ rmdir /usr/local/libexec/paisans
 
-step 21: remove the registry entry
+step 22: remove the registry entry
   evict: deployment f2a9 from /var/lib/paisans/registry.json
   run:
     $ set -e; umask 077; [ -f /var/lib/paisans/registry.json ] || exit 0; exec 9>>/var/lib/paisans/registry.lock; flock -w 60 9 || { echo 'paisans: another command holds /var/lib/paisans/registry.lock'; exit 1; }; tmp=$(mktemp /var/lib/paisans/.registry.XXXXXX); trap 'rm -f "$tmp"' EXIT; awk '-v' 'id=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01' '-v' 'header={"version":1,"deployments":{' '-v' 'footer=}}' '-v' 'unreadable=paisans-registry-unreadable' '

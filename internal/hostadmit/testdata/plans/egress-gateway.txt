@@ -139,15 +139,16 @@ step 20: install the helper's sudoers line
 step 21: allow 22/tcp
 step 22: allow 51820/udp
 step 23: allow all inbound on psns-f2a9
-step 24: allow 80/tcp
-step 25: allow 443/tcp
-step 26: allow 443/udp
-step 27: load softdog
-step 28: load softdog at boot
-step 29: give the watchdog to paisans-f2a9
-step 30: set the host's sysctls
-step 31: write the admission record
-step 32: add the operators' keys
+step 24: allow routed from psns-f2a9 back out psns-f2a9
+step 25: allow 80/tcp
+step 26: allow 443/tcp
+step 27: allow 443/udp
+step 28: load softdog
+step 29: load softdog at boot
+step 30: give the watchdog to paisans-f2a9
+step 31: set the host's sysctls
+step 32: write the admission record
+step 33: add the operators' keys
 
 present: swap: on
 present: docker: Engine 29.9.1
@@ -177,4 +178,4 @@ warning: watchdog: paisans-f2a9's Patroni can reboot this machine
 warning: public ports: every local user on this host may bind ports 80 to 1023
   net.ipv4.ip_unprivileged_port_start = 80 is host wide: no user's process needs root for a port from 80 up, the deployment's Caddy among them.
 warning: forwarding: this turns on routing between every interface on this host
-  The site has an endpoint, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's forward policy governs what is routed.
+  Other sites dial this one, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's route rule relays the mesh, and its forward policy governs every other route.

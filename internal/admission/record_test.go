@@ -110,6 +110,11 @@ func TestNewRecord(t *testing.T) {
 	if store := admission.NewRecord(build(t, "store"), admission.Grants{}, "", at); store.Forwarding || store.Ports.WireGuard != 0 {
 		t.Errorf("store: %+v", store)
 	}
+	// Dialled, but not the relay: home-a comes first, so nothing passes
+	// through the witness and it does not forward.
+	if vm := admission.NewRecord(build(t, "vm"), admission.Grants{}, "", at); vm.Forwarding {
+		t.Errorf("vm: forwarding, and the relay is home-a: %+v", vm)
+	}
 }
 
 // Read reads /etc/paisans/admitted.<token>.json through the transport it is
@@ -399,6 +404,37 @@ func TestDifferences(t *testing.T) {
 	}
 	if d := rec.Differences(cfg, "home-b"); len(d) == 0 || !strings.Contains(d[0], "admitted as site home-a") {
 		t.Errorf("another site's record: %q", d)
+	}
+}
+
+// The relay admitted without forwarding differs, since its peers route each
+// other through it and it drops what they route; that holds for a relay
+// dialled on its public_address alone. A site admitted with forwarding it no
+// longer needs does not: forwarding left on relays nothing, and refusing it
+// would hold up every apply until its owner admits it again.
+func TestDifferencesForwarding(t *testing.T) {
+	cfg := fixture(t)
+	for _, name := range []string{"home-a", "status"} {
+		s := cfg.Sites[name]
+		s.Endpoint, s.PublicAddress = "", ""
+		cfg.Sites[name] = s
+	}
+	if cfg.Relay() != "vm" {
+		t.Fatalf("the relay is %q, want vm, dialled on its public_address", cfg.Relay())
+	}
+	rec := admission.NewRecord(build(t, "vm"), admission.Grants{}, "", at)
+	want := "forwarding is off on the host, and the site relays the mesh between sites that cannot dial each other"
+	if d := rec.Differences(cfg, "vm"); len(d) != 1 || d[0] != want {
+		t.Errorf("the relay without forwarding: differences %q, want [%q]", d, want)
+	}
+	rec.Forwarding = true
+	if d := rec.Differences(cfg, "vm"); len(d) != 0 {
+		t.Errorf("the relay with forwarding: differences %q", d)
+	}
+	rec = admission.NewRecord(build(t, "watch"), admission.Grants{PublicPorts: true}, "", at)
+	rec.Forwarding = true
+	if d := rec.Differences(cfg, "watch"); len(d) != 0 {
+		t.Errorf("forwarding left on a site that does not relay: differences %q", d)
 	}
 }
 

@@ -98,7 +98,7 @@ step 19: remove /etc/modules-load.d/paisans.conf
 step 20: remove the host's paisans sysctls
   evict: no admitted deployment needs them; set each back to what it was before admit
   run:
-    $ sysctl -w net.ipv4.ip_unprivileged_port_start=1024 net.ipv4.ip_forward=0 >/dev/null && rm -f /etc/sysctl.d/60-paisans.conf /etc/paisans/sysctl.before
+    $ sysctl -w net.ipv4.ip_unprivileged_port_start=1024 >/dev/null && rm -f /etc/sysctl.d/60-paisans.conf /etc/paisans/sysctl.before
 
 step 21: remove /etc/paisans/installed
   evict: the list of what admit created here

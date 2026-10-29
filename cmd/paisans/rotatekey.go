@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 
@@ -34,7 +35,13 @@ func runStorageRotateKey(args []string) error {
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	appName := fs.String("app", "", "the app whose S3 key to replace, by the name it has in the configuration")
 	execute := fs.Bool("execute", false, "actually run the stages, stopping at the first gate that fails")
+	breakLease := breakLeaseFlag(fs)
+	answers := yesFlag(fs)
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	ans, err := answers()
+	if err != nil {
 		return err
 	}
 	r := reporter()
@@ -102,6 +109,11 @@ func runStorageRotateKey(args []string) error {
 		if _, err := admittedSites(r, cfg, union(cfg.Storage.Garage.Sites[:1], render.AppSites(cfg)[*appName])...); err != nil {
 			return err
 		}
+		release, err := guardSites(r, cfg, union(cfg.Storage.Garage.Sites[:1], render.AppSites(cfg)[*appName]), func(name string) apply.Transport { return transports[name] }, "storage rotate-key --app "+*appName, guard{execute: *execute, lease: leaseOptions{breakLease: *breakLease, answers: ans, stdin: os.Stdin, stdout: os.Stdout}})
+		if err != nil {
+			return err
+		}
+		defer release()
 	}
 	plan, err := ui.Get(r, "read "+*appName+"'s key", func() (*rotatekey.Plan, error) {
 		return rotatekey.Build(rotatekey.Options{

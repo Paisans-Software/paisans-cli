@@ -212,3 +212,26 @@ func TestAListenPortIsMovedOnlyWhenAsked(t *testing.T) {
 		t.Errorf("Build = %v, want the refusal", err)
 	}
 }
+
+// A host another deployment of which a newer paisans claimed refuses
+// admit before anything is planned, naming the release to upgrade to, as
+// it refuses evict; one this release or an older claimed is admitted.
+func TestAdmitRefusesAHostANewerToolkitClaimed(t *testing.T) {
+	reg := portHolders("apps", 51899)
+	if !strings.Contains(reg, `"toolkit_version":"0.3.0-dev"`) {
+		t.Fatalf("the registry does not hold the build this test rewrites:\n%s", reg)
+	}
+	for _, c := range []struct {
+		theirs  string
+		refused bool
+	}{{"99.0.0", true}, {version.Version, false}, {"0.0.1", false}} {
+		h := home().file(registry.Path, strings.Replace(reg, `"toolkit_version":"0.3.0-dev"`, `"toolkit_version":"`+c.theirs+`"`, 1))
+		_, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+		switch {
+		case c.refused && (err == nil || !strings.Contains(err.Error(), "Upgrade paisans to 99.0.0 or later, and run site admit again")):
+			t.Errorf("beside %s: Build = %v", c.theirs, err)
+		case !c.refused && err != nil:
+			t.Errorf("beside %s: %v", c.theirs, err)
+		}
+	}
+}

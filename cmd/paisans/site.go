@@ -41,6 +41,7 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually run the stages, stopping at the first gate that fails")
 	answers := yesFlag(fs)
+	breakLease := breakLeaseFlag(fs)
 	// The site may come before or after the flags. flag stops at the first
 	// argument that is not one, so a leading name is taken off first.
 	var site string
@@ -117,6 +118,11 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	if down := sites.Down(); len(down) > 0 {
 		return &ui.Problem{Hint: "site add " + site + ": a site joins once every joined site answers", Explain: "The join changes every joined site's mesh and HAProxy files, and " + strings.Join(down, ", ") + " does not answer:\n" + topology.DownLine(down[0]) + "\nNothing was changed."}
 	}
+	release, err := guardSites(r, cfg, readySites(cfg, sites), func(name string) apply.Transport { return transports[name] }, "site add "+site, guard{execute: *execute, lease: leaseOptions{breakLease: *breakLease, answers: ans, stdin: stdin, stdout: stdout}})
+	if err != nil {
+		return err
+	}
+	defer release()
 	// The new site's architecture is recorded as site prepare records it;
 	// preflight compares it with the data sites'.
 	read, err := readArchitectures(r, cfg, []string{site}, func(name string) hostarch.Runner { return transports[name] })

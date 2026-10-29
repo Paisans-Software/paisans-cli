@@ -10,6 +10,28 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+## [0.3.0-rc.15] - 2026-10-29
+
+### Added
+
+- Every command that changes sites, not only `deployment apply` and `deployment publish`, holds the deployment lease on them with `--execute`, and checks for a newer paisans under it.
+- `deployment apply`, `deployment publish` and every other command that changes a site refuse, before changing anything, when a newer paisans release last applied any of its sites, naming each and the release to upgrade to.
+- `site admit` refuses a host any deployment of which a newer paisans claimed, as `site evict` already does.
+
+### Changed
+
+- The `engagement` blueprint is gateable with `/u/*` and `/healthz` open, so its web digest can name the member by the gate; `validate` warns when an app linked to a homeserver is not `gated`.
+- The `engagement` blueprint's bot defaults to the account `community-bot`, was `digest-bot`, and takes the name members see from a new `bot_display_name` setting, `Community Bot` by default; `validate` refuses a blank or multi-line one.
+- `deployment apply` without `--site` leaves alone a site whose plan has nothing to do, no pull or install steps, recording the version there, unless the run founds, joins or moves the gateway.
+
+### Fixed
+
+- A gated hostname runs the gate before its app's snippet, in a `route` of its own: Caddy ordered the snippet's `handle` ahead of the gate, so engagement's web digest reached the app ungated.
+- `site admit` turns on forwarding on the relay, the first site by name dialled on its `public_address` or `endpoint`, and no other site, matching the WireGuard render; apply refuses only a relay without it.
+- A build of `develop`, `X.Y.Z-dev`, meets a blueprint's `requires_toolkit` of any `X.Y.Z` pre-release, and `site evict` and `site remove` accept it on hosts a release candidate set up.
+- `site admit` gives a relay `ufw route allow in on psns-<token> out on psns-<token>`, since ufw's default DROP forward policy otherwise drops the mesh traffic it relays, and `site evict` removes it.
+- `dns prune` removes the sender DMARC policy `dns init` writes at a send-only mail name once the configuration no longer sends mail from that name, instead of keeping it forever.
+
 ## [0.3.0-rc.14] - 2026-10-28
 
 ### Added
@@ -353,7 +375,8 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.
 - The gateway refuses any request to Pocket ID that carries an `X-API-Key` header with 403, so Pocket ID's API keys work only on the mesh.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.14...develop
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.15...develop
+[0.3.0-rc.15]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.14...v0.3.0-rc.15
 [0.3.0-rc.14]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.13...v0.3.0-rc.14
 [0.3.0-rc.13]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.12...v0.3.0-rc.13
 [0.3.0-rc.12]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.11...v0.3.0-rc.12

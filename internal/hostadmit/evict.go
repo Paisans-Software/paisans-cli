@@ -75,25 +75,27 @@ func claimedWithoutRecord(e *evictor) []string {
 }
 
 // refuseNewer refuses a host where any deployment's registry entry, this
-// one's or another's, was claimed by a newer paisans: evict removes what
-// admit installed and decides what host-wide is still needed from what
-// this binary knows, and a newer release may have installed or need what
-// it does not. The refusal names the highest release, the one to upgrade
-// to. A release this binary cannot order is refused as a newer one is. An
-// entry that does not say which build claimed the host (noBuild) orders
-// nothing, and is skipped.
-func refuseNewer(r registry.Registry, noBuild *registry.NoBuildError) error {
+// one's or another's, was claimed by a newer paisans, as version.Newer
+// judges it: evict removes what admit installed and decides what host-wide
+// is still needed from what this binary knows, admit installs what
+// host-wide it knows of, and a newer release may have installed or need
+// what it does not. by is the command, site evict or site admit, the
+// refusal says to run again. The refusal names the highest release, the
+// one to upgrade to. A release this binary cannot order is refused as a
+// newer one is. An entry that does not say which build claimed the host
+// (noBuild) orders nothing, and is skipped.
+func refuseNewer(r registry.Registry, noBuild *registry.NoBuildError, by string) error {
 	highest, newerOnes := "", []string{}
 	for _, id := range sortedKeys(r.Deployments) {
 		e := r.Deployments[id]
 		if noBuild != nil && slices.Contains(noBuild.IDs, id) {
 			continue
 		}
-		newer, err := version.Compare(e.Build.Version, version.Version)
+		newer, err := version.Newer(e.Build.Version, version.Version)
 		if err != nil {
-			return fmt.Errorf("%s records that paisans %q claimed this host for deployment %s, which is not a release this paisans %s can order, so it may be a newer one that installed what this one does not know about. Nothing was changed. Upgrade paisans, and run site evict again", registry.Path, ui.Visible(e.Build.Version), ui.Visible(e.Token), version.Version)
+			return fmt.Errorf("%s records that paisans %q claimed this host for deployment %s, which is not a release this paisans %s can order, so it may be a newer one that installed what this one does not know about. Nothing was changed. Upgrade paisans, and run %s again", registry.Path, ui.Visible(e.Build.Version), ui.Visible(e.Token), version.Version, by)
 		}
-		if newer <= 0 {
+		if !newer {
 			continue
 		}
 		newerOnes = append(newerOnes, ui.Visible(e.Token)+" ("+e.Build.Version+")")
@@ -108,7 +110,7 @@ func refuseNewer(r registry.Registry, noBuild *registry.NoBuildError) error {
 	if len(newerOnes) > 1 {
 		which = "deployments "
 	}
-	return fmt.Errorf("%s records that a newer paisans claimed this host for %s%s, and this is paisans %s, so it may not know everything those releases installed or need. Nothing was changed. Upgrade paisans to %s or later, and run site evict again", registry.Path, which, strings.Join(newerOnes, ", "), version.Version, highest)
+	return fmt.Errorf("%s records that a newer paisans claimed this host for %s%s, and this is paisans %s, so it may not know everything those releases installed or need. Nothing was changed. Upgrade paisans to %s or later, and run %s again", registry.Path, which, strings.Join(newerOnes, ", "), version.Version, highest, by)
 }
 
 // evictParts are evict's stages in the order they run. The user's manager
@@ -173,7 +175,7 @@ func BuildEvict(t apply.Transport, in EvictInput) (*Plan, error) {
 	if err != nil {
 		return nil, shown(err)
 	}
-	if err := refuseNewer(reg, noBuild); err != nil {
+	if err := refuseNewer(reg, noBuild, "site evict"); err != nil {
 		return nil, err
 	}
 	content, found, err := t.ReadFile("/etc/os-release")
@@ -597,7 +599,11 @@ func (e *evictor) firewall() error {
 	}
 	for _, st := range s.Steps {
 		if st.Label == "remove" {
-			e.remove(st.Title, "delete `"+strings.TrimPrefix(st.Command, "ufw delete ")+"`, which site admit added for the deployment", st.Command)
+			rule := strings.TrimPrefix(st.Command, "ufw delete ")
+			if route, ok := strings.CutPrefix(st.Command, "ufw route delete "); ok {
+				rule = "route " + route
+			}
+			e.remove(st.Title, "delete `"+rule+"`, which site admit added for the deployment", st.Command)
 		}
 	}
 	for _, w := range s.Warnings {

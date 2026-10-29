@@ -22,8 +22,14 @@ func TestEngagementBlueprintParses(t *testing.T) {
 	if got := Port(config.BlueprintEngagement); got != 8083 {
 		t.Errorf("port %d, want 8083", got)
 	}
-	if GateFor(config.BlueprintEngagement).Gateable {
-		t.Error("engagement is gateable, and a member unsubscribing from an inbox may not be signed in")
+	// Gateable, so the web digest reads the member from the gate, with the
+	// unsubscribe links and the health probe open: a member unsubscribing
+	// from an inbox may not be signed in.
+	if !GateFor(config.BlueprintEngagement).Gateable {
+		t.Error("engagement is not gateable, and its web digest names the member by the gate's header")
+	}
+	if open := OpenPathsFor(config.BlueprintEngagement); !slices.Equal(open, []string{"/u/*", "/healthz"}) {
+		t.Errorf("open paths %q, want /u/* and /healthz", open)
 	}
 	if !SendsMail(config.BlueprintEngagement) {
 		t.Error("engagement does not send mail")
@@ -93,8 +99,11 @@ func TestEngagementBlueprintConsumesAHomeserver(t *testing.T) {
 	if s, ok := settings["homeserver"]; !ok || s.Type != "string" {
 		t.Errorf("homeserver setting %+v (declared %v), want a string", s, ok)
 	}
-	if s, ok := settings["bot_localpart"]; !ok || s.Type != "string" || s.Default != "digest-bot" {
-		t.Errorf("bot_localpart setting %+v (declared %v), want a string defaulting to digest-bot", s, ok)
+	if s, ok := settings["bot_localpart"]; !ok || s.Type != "string" || s.Default != "community-bot" {
+		t.Errorf("bot_localpart setting %+v (declared %v), want a string defaulting to community-bot", s, ok)
+	}
+	if s, ok := settings["bot_display_name"]; !ok || s.Type != "string" || s.Default != "Community Bot" {
+		t.Errorf("bot_display_name setting %+v (declared %v), want a string defaulting to Community Bot", s, ok)
 	}
 }
 

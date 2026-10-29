@@ -75,8 +75,9 @@ nothing. Their dry runs show the same review and ask nothing (see *`deployment a
 Every command that asks for a confirmation takes `--yes`: `deployment apply`,
 `deployment apply --site`, `site prepare`, `site admit`, `site evict`, `site add`,
 `site remove`, `gateway move`, `deployment publish`, `deployment pull`,
-`deployment recover`, `operator register`, `secrets prune`, `secrets rotate` and
-`app remove`. No other command takes it.
+`deployment recover`, `operator register`, `secrets prune`, `secrets rotate`,
+`app remove`, `mesh rekey`, `prune`, `storage init`, `storage add`,
+`storage rotate-key` and `oidc client create`. No other command takes it.
 
 * **What it answers:** every word a command asks to have typed (`approve`,
   `create`, `rollback`, `prune`, `sign out`, `revoked`,
@@ -105,6 +106,19 @@ Every command that asks for a confirmation takes `--yes`: `deployment apply`,
 
 Apply without `--site` hands `--yes` on to its `deployment apply` and `gateway move`
 steps, and `gateway move` to its hand-off's `deployment apply`.
+
+### `--break-lease` takes over the deployment lease
+
+Every command that changes sites takes the deployment lease with `--execute`
+and takes `--break-lease`: `deployment apply`, with or without `--site`,
+`deployment publish`, `operator register`, `site add`, `site prepare`,
+`site remove`, `app remove`, `gateway move`, `mesh rekey`, `prune`,
+`storage init`, `storage add`, `storage rotate-key`, `secrets rotate` and
+`oidc client create`. `--break-lease` takes over another command's live lease
+once you know that command is no longer running, after the word `break`,
+which `--yes` types. Under the lease each refuses a site a newer paisans last
+applied. See *One command changes a deployment at a time* and *A site a newer
+paisans applied is left to it* in `README.md`.
 
 A site that leaves `ssh.user` out is reached as the deployment's own user,
 `paisans-<token>`. Any run with `--execute` that logs in to it writes that
@@ -1308,7 +1322,9 @@ paisans site request --site home-a > home-a.admit   # the digest is on stderr
 * **The request:** YAML holding nothing secret: the deployment's id, the
   site's name and its roles, sorted, the site's user, its SSH and WireGuard
   ports (`listen_port: 0` when no site dials it), its mesh address and the
-  subnet, whether it has an endpoint, the grants its roles need (`watchdog`
+  subnet, whether it is the deployment's relay (the first site by name
+  dialled on a `public_address` or an `endpoint`, once two sites are not
+  dialled), the grants its roles need (`watchdog`
   for a data site, `public_ports` for a gateway or a monitor running the
   toolkit's Caddy), the apps a monitor behind the owner's web server hands
   it, and each operator's public keys, without their comments. Two runs
@@ -1474,7 +1490,8 @@ paisans site admit --site home-a --ssh owner@home-a.example.org --execute   # fr
   skips `wg-quick@psns-<token>` at boot until `deployment apply` writes its conf; ufw
   rules tagged `paisans-<token>:`; with `--watchdog`, the device for the user;
   with `--public-ports`, `ip_unprivileged_port_start` of 80 and 80/tcp,
-  443/tcp and 443/udp open; for a site with an endpoint, forwarding; the
+  443/tcp and 443/udp open; for the relay, forwarding and the ufw route rule
+  relaying the mesh back out of `psns-<token>`; the
   admission record; the registry claim; the operators' keys in the user's
   `authorized_keys`. `/etc/paisans` is root's, at mode 755.
 * **The egress table:** fences the deployment's user off the owner's machine.
@@ -1585,7 +1602,9 @@ when it has work; `site prepare` on every host at once; a pull of every site's
 images on every host at once, so no install waits on a download; `dns init`; the
 founding applies (each gateway outside `etcd.members` with `--hold-apps`
 before the data members, whose apps reach Pocket ID through it), `site add`, the other sites (a site that joined with the `apps` role first,
-then the gateway), storage and pass two; `gateway
+then the gateway), storage and pass two, leaving alone a site whose plan
+has nothing to do when the run founds no member, joins none and moves no
+gateway; `gateway
 move`, when a site without the gateway role still serves as the gateway; the
 `pocket id` step, which makes each operator a user of every running Pocket ID
 app and issues a login link to one with no passkey; and, for each app behind the operator's own web
@@ -1620,6 +1639,10 @@ images it superseded* in `README.md`).
   ready site before its gather and holds it to its end; another command's live
   lease refuses it, and `--break-lease` takes one over after the word `break`
   (see *One command changes a deployment at a time* in `README.md`).
+* **Newer paisans:** a site a newer release last applied refuses the run
+  before anything changes, and again under the lease, naming the release to
+  upgrade to (see *A site a newer paisans applied is left to it* in
+  `README.md`). Every other command that changes a site does the same.
 * **Stopped after the publish:** the stop says the revision is published and
   not applied on every site, and names `deployment log`, which shows what each
   site runs (see *A published version is not a deployed one* in `README.md`).
@@ -2098,7 +2121,10 @@ the commit its pseudo-version carries. A build with none prints the version
 alone, and refuses every command that writes a record. The version is the constant in `internal/version`: a release,
 or on `develop` the next one's pre-release, as `0.3.0-dev`, which orders after
 `0.2.0` and before `0.3.0`. A blueprint's `requires_toolkit` is checked
-against it. Every record paisans writes on a host or in the configuration's
+against it, ordered the same way, except that a `-dev` version also meets
+every pre-release of its own release (`0.3.0-dev` meets `>= 0.3.0-rc.14`, and
+not `>= 0.3.0`): `main` is an ancestor of `develop`, so `develop` holds every
+release candidate already cut. Every record paisans writes on a host or in the configuration's
 store names this build: the version, the commit, and whether the tree was
 modified.
 

@@ -15,7 +15,7 @@ import (
 // into main carrying a Version with no matching tag is released as
 // v<Version>. Once a release is cut, `make dev` moves develop to the next
 // -dev, so a build of develop never reports a release it is not.
-const Version = "0.3.0-rc.14"
+const Version = "0.3.0-rc.15"
 
 // Compare orders two versions, MAJOR.MINOR.PATCH with an optional
 // -<pre-release> and no v, as semantic versioning orders them: negative when
@@ -64,6 +64,20 @@ func Valid(v string) bool {
 
 // IsPreRelease reports whether v, a valid version, is a pre-release.
 func IsPreRelease(v string) bool { return strings.Contains(v, "-") }
+
+// Newer reports whether recorded, the release that last wrote a record, is
+// newer than have, this binary's, as Compare orders them. A build of
+// develop, X.Y.Z-dev, counts as every pre-release of X.Y.Z, as it meets a
+// blueprint's requires_toolkit of one: develop holds every release
+// candidate cut from it. A version Compare cannot order is an error.
+func Newer(recorded, have string) (bool, error) {
+	c, err := Compare(recorded, have)
+	if err != nil || c <= 0 {
+		return false, err
+	}
+	core, dev := strings.CutSuffix(have, "-dev")
+	return !(dev && IsPreRelease(recorded) && strings.HasPrefix(recorded, core+"-")), nil
+}
 
 type parsed struct {
 	release [3]int

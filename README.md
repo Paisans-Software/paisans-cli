@@ -901,16 +901,26 @@ Mbin. The design is in `docs/specs/2026-10-24-engagement-digest.md`.
   no Matrix variable is rendered. Linked, the service runs a Digest Bot that
   sends the week as a direct message to each member who has a Matrix account
   linked to the same Pocket ID subject (`docs/specs/2026-10-27-engagement-matrix.md`).
-  The bot's localpart is `settings.bot_localpart`, `digest-bot` by default.
+  The bot's localpart is `settings.bot_localpart`, `community-bot` by default,
+  and the name members see it by is `settings.bot_display_name`, `Community
+  Bot` by default. A changed localpart is a new account: the bot abandons the
+  old one and its rooms.
   The MAS admin client it looks members up with is declared by the synapse
   app, with a secret the two apps share. A synapse blueprint that does not
   offer `mas_admin_url` leaves the bot off.
 * **What the gateway forwards.** `/u/*`, the unsubscribe links, `/d/*`, the
   web digests the Matrix message links to, and
   `GET /healthz`, which answers ok or 503, for the monitor's public check;
-  everything else on the hostname answers 404. The route has no Pocket ID
-  gate (`gateable: false`) because a member clicking from an inbox may not be
-  signed in, and the signed token in the link is what names them.
+  everything else on the hostname answers 404.
+* **Gated, with the unsubscribe links open.** The web digest, `/d/<week>`,
+  names the member by the gate's `X-Auth-Request-User`, their Pocket ID
+  subject, so the link carries no secret and no member's id, and a forwarded
+  link shows members-only content to nobody. The blueprint is gateable with
+  `/u/*` open: a member clicking unsubscribe from an inbox may not be signed
+  in, and the signed token in that link is what names them. `/healthz` is
+  open as the health route. Ungated, the service gets no header and every
+  web digest answers not found, so `validate` warns (`engagement-not-gated`)
+  when the app links to a homeserver and is not gated.
 
 ```yaml
 apps:
@@ -922,6 +932,7 @@ apps:
     blueprint: engagement
     hostname: digest.example.org
     placement: cluster
+    gated: true
 ```
 
 The service's own database, in the cluster's Postgres, holds only
@@ -942,6 +953,8 @@ app*).
 | `engagement-source-not-clustered` | the `mbin` app is pinned. Refused: the reader role is created in the cluster's Postgres, and a pinned Mbin runs against a Postgres of its own on its site, where no such role exists |
 | `engagement-without-smtp` | the app resolves no SMTP host or `from_address`. Warned: it is an email and cannot send without them |
 | `engagement-bot-localpart-invalid` | `settings.bot_localpart` is not a Matrix localpart, lowercase letters, digits and `._=/-` only. Refused: MAS would not create the bot's account |
+| `engagement-not-gated` | the app links to a Matrix homeserver and is not `gated`. Warned: the bot's links to the web digest, which names the member by the gate's header, all answer not found |
+| `engagement-bot-display-name-invalid` | `settings.bot_display_name` is blank or holds a line break, tab or other control character. Refused: it is rendered into one `.env` line |
 | `link-provider-ambiguous` | an optional link with its setting unset while several apps provide the role. Refused: it could not tell which to use. Applies to any blueprint's link, the engagement app's `homeserver` being one |
 | `link-shared-secret-outside` | a link that shares a secret, leading to a hostname no app in the deployment provides: the one its setting names, or the app's own when a link without `optional` leaves it unset. Refused: the secret can be handed only to an app the deployment renders. Applies to any blueprint's link, the engagement app's being the one that shares a secret |
 | `link-unresolvable` | a link the toolkit cannot resolve for any other reason, reported with that reason. Refused: the app's templates could not read their provider |
@@ -3775,6 +3788,13 @@ publishes: `talk` above is `gated: true`, and its stack publishes port 8080,
 so anything that can open that port reaches Mbin with no gate in front of it at
 all. The same is true of every gated app.
 
+**The gate runs before anything of the app's.** A gated hostname's
+catch-all is `handle { route { import gate; import <app snippet> } }`. Caddy
+sorts the directives of a block by its directive order, which puts `handle`
+ahead of `route`, and the gate is a `route`; an app snippet that routes with
+`handle`, as engagement's does, would otherwise match first and reach the app
+with no gate at all. Inside a `route`, directives run as written.
+
 **So every published port binds the site's mesh address and nothing else**
 (Eg: `"10.44.0.1:8080:8080"`, never `"8080:8080"`). The gateway reaches every
 app over the mesh, so the mesh is the only interface a port needs, and the
@@ -4930,15 +4950,21 @@ Two operators running `deployment apply` from one version both pass their
 gathers, so the fork the store refuses is found only by the next command, while
 both runs go on changing hosts. The deployment's lock serialises one write of a
 record and nothing longer. So every command that publishes or changes the
-deployment as a whole, `deployment apply` (with or without `--site`) and
-`deployment publish`, first takes the **deployment lease**:
+deployment first takes the **deployment lease**: `deployment apply` (with or
+without `--site`), `deployment publish`, `operator register`, `site add`,
+`site prepare`, `site remove`, `app remove`, `gateway move`, `mesh rekey`,
+`prune`, `storage init`, `storage add`, `storage rotate-key`,
+`secrets rotate` and `oidc client create`.
 
 * **It is a file on every site,** `/srv/paisans/<token>/.paisans/lease`,
   written under the deployment's lock: a fresh id for the command, who ran it
   (the workstation's user and host), the command, when it was taken and when it
-  was last renewed. It is taken on every ready site at once, before the gather,
-  which may merge the draft forward, and held to the end of the run; a step the
-  run takes, such as `apply --site` inside `apply`, takes none of its own.
+  was last renewed. `deployment apply` and `deployment publish` take it on
+  every ready site at once, before the gather, which may merge the draft
+  forward; every other command takes it on each site it changes. It is held to
+  the end of the run; a command run inside another, such as `apply --site`
+  inside `apply` or `storage rotate-key` inside `secrets rotate`, takes none of
+  its own.
 * **A live lease of another command refuses the run,** naming the command, who
   ran it and since when, and nothing is changed. A refusal on any site
   releases the sites already taken, so the two commands never each hold half.
@@ -4956,6 +4982,31 @@ deployment as a whole, `deployment apply` (with or without `--site`) and
   from another workstation that reaches only the sites this one could not is
   not stopped by it; the store's fork check is still there behind it.
 * **A dry run takes none,** since it changes nothing.
+
+### A site a newer paisans applied is left to it
+
+Every apply records in the site's manifest, `.paisans-manifest.json`, the
+release and commit of paisans that wrote it. A newer release may put on a host
+what an older one does not know about, and an older one would write over it.
+So each command that takes the lease, and `deployment apply` once more before
+it, reads the manifest of every site it changes and refuses when a newer
+release last applied one:
+
+* **The refusal names each such site** and the release that applied it, says
+  nothing was changed, and names the release to upgrade to, the newest of them.
+* **The check is made under the lease,** so no newer release can apply a site
+  between the check and the command's last write. Each apply of a site reads
+  the manifest once more just before it writes.
+* **The same release built from another commit passes,** as do an older
+  release and a site never applied. A build of `develop`, `X.Y.Z-dev`, counts
+  as every pre-release of `X.Y.Z`.
+* **`deployment publish`, `operator register`, `gateway move` and
+  `site prepare --all` pass over a site that does not answer,** with a
+  warning: publish and register push it nothing, a gateway move's two
+  gateways have answered already, and each host's own prepare refuses one
+  that does not answer.
+* **`site admit` and `site evict` refuse a host** a newer paisans claimed for
+  any deployment, judged by the host's registry, `/etc/paisans`, the same way.
 
 ### A folder holds a draft
 
@@ -5272,7 +5323,9 @@ from a request: `paisans site request --site <site> > <site>.admit` writes
 it, and the owner admits the site from that file. The request holds what
 admission needs and nothing secret: the deployment's id, the site's name
 and its roles, sorted, the site's user, its SSH and WireGuard ports, its
-mesh address and the mesh subnet, whether it has an endpoint, the grants
+mesh address and the mesh subnet, whether it is the deployment's relay
+(the first site by name dialled on a `public_address` or an `endpoint`, once
+two sites are not dialled), the grants
 its roles need (the watchdog for a data site, ports 80 and 443 for a
 gateway or a monitor running the toolkit's Caddy), the apps a monitor
 behind the owner's web server hands it, and each operator's public keys.
@@ -6756,7 +6809,7 @@ it:
 | joining | `site add <s>` | the cluster runs and a data member has not joined it; a joining witness is joined by that `site add`, and gets one of its own only when no data member joins, which stops the run |
 | other sites | `deployment apply --site <s>`, monitor sites last | first each site that joined with `roles: [data, apps]`, which starts its apps, and then each gateway in `etcd.members`, so its routes gain the new apps site; then every site not in `etcd.members`, and then every Garage site no earlier step applies or joins, since storage works through Garage's container |
 | storage | `storage init --site <g>` for one Garage site, `storage add` for several | any Garage site |
-| pass two | `deployment apply --site <s>` for every site, monitor sites last, a monitor in `etcd.members` too | always: it resumes a founding stop or a replica's wait for the databases, and moves what earlier steps changed |
+| pass two | `deployment apply --site <s>` for every site, monitor sites last, a monitor in `etcd.members` too | always: it resumes a founding stop or a replica's wait for the databases, and moves what earlier steps changed; a site with nothing to do is left alone (below) |
 | gateway | `gateway move` | a site without the gateway role still holds this deployment's gateway (see *Moving the gateway*) |
 
 **The configuration is published once the stores exist.** The version `deployment apply`
@@ -6811,6 +6864,26 @@ its module has to be in the binary*), and an apply resolves each tag once for
 the whole run, so the build pulled here is the one every later step plans,
 even if the tag moves in between. A registry that refuses an image,
 `unauthorized` or `denied`, is reported as a private image, with what to do.
+
+**A site with nothing to do is left alone.** In a run that founds or joins
+no etcd member and moves no gateway, each site's pull decides from the plan it
+makes whether the site's apply would do anything: write or replace a file,
+bring up a stack (a container that stopped included), change the mesh or the
+source mark, run an action a stopped apply still owes, sweep an old image, run
+a database grant, or pull an image. A file edited on the host counts too, so
+its apply refuses it as usual, and so does a file left over, so its apply
+warns about it. So does a review entry approved for the site, and an OIDC
+client or signup group its apps need made or changed at Pocket ID, which the
+pull asks Pocket ID about, read only; a Pocket ID that could not be asked
+counts as well. A site with none of these is not applied: its pull line and
+its install line end `unchanged`. The install line does what its apply would
+have done at its end: on a gateway it writes the deployment record and asks
+the gateway from outside (see *The gateway answers as itself*), and then it
+records the version applied, with what was granted.
+`site prepare`, `dns init` and storage still run. A step that publishes
+another version partway through, by recording what it made at Pocket ID,
+may change what such a site renders, so each one is then applied after the
+other steps instead.
 
 **Every Garage site is applied before storage.** `storage init` and `storage
 add` read and change Garage's layout through its running container. A
@@ -6907,7 +6980,7 @@ install
 ```
 
 The pull lines are drawn the same way, each ending with how many images its
-host pulled, or `nothing to pull`; `-v` lists each image under its site's line
+host pulled, `nothing to pull`, or `unchanged` for a site left alone; `-v` lists each image under its site's line
 with the time it took. Under each line, at every verbosity, is every image whose
 build that site's apply moves, with the builds it goes between, as a dry run of
 the one site lists it. The install lines say only how long each site took, so
@@ -9416,6 +9489,19 @@ daemon and no coordination service, which is why plain WireGuard was chosen.
 The cost is latency: with `synchronous_mode: true` every commit waits a round
 trip, so writes pay home-a → VM → home-b. Siting the VM near the homes largely
 mitigates that and costs nothing, so site it there and then measure.
+
+The relay is the first site by name that others dial, on its
+`public_address` or its `endpoint`, because the WireGuard render routes the
+whole mesh subnet to it from each site that is not dialled. There is one only
+once two sites are not dialled: a lone one peers with every dialled site
+directly. So `site admit` gives the relay, and no other site, two things a
+relay needs and nothing else does: `net.ipv4.ip_forward`,
+since a host that does not forward drops the packet it was handed, and
+`ufw route allow in on psns-<token> out on psns-<token>`, since ufw's default
+forward policy is DROP and would drop it too. Forwarding is host wide, and the
+route rule is what keeps it to the mesh: traffic in on the mesh interface and
+back out of it is relayed, and every other route stays the owner's forward
+policy.
 
 The relay carries traffic; it must not carry quorum. When both homes are
 voters beside the VM, the VM is the one path between them, and its loss

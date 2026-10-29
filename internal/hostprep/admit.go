@@ -63,17 +63,22 @@ func PlanWatchdog(t Transport, d deployment.Deployment, profile Profile) (Sectio
 	return planWatchdog(t, d, profile, config.Site{Roles: []config.Role{config.RoleData}, Watchdog: config.WatchdogAuto}, "admit")
 }
 
-// AdmitRules are the inbound rules site admit gives a deployment: the SSH
-// port first, as site prepare orders them; the mesh's UDP port when one is
-// admitted; everything on the mesh interface; and 80 and 443 with the
+// AdmitRules are the rules site admit gives a deployment: the SSH port
+// first, as site prepare orders them; the mesh's UDP port when one is
+// admitted; everything on the mesh interface; for a relay, the mesh
+// routed back out of the mesh interface, since ufw's default forward
+// policy drops it and nothing else is routed; and 80 and 443 with the
 // public ports grant, 443 for UDP too, which HTTP/3 runs on. No br-+ rule: a rootless container's traffic to the
 // mesh address leaves through the user's own process, not a host bridge.
-func AdmitRules(d deployment.Deployment, sshPort, listenPort int, public bool) []Rule {
+func AdmitRules(d deployment.Deployment, sshPort, listenPort int, public, relay bool) []Rule {
 	rules := []Rule{{Port: sshPort, Proto: "tcp", Why: sshWhy, SSH: true}}
 	if listenPort != 0 {
 		rules = append(rules, Rule{Port: listenPort, Proto: "udp", Why: "WireGuard, the mesh"})
 	}
 	rules = append(rules, Rule{Interface: d.Interface(), Why: "the mesh: etcd, Patroni, Garage, HAProxy"})
+	if relay {
+		rules = append(rules, Rule{Interface: d.Interface(), Route: true, Why: "the mesh, relayed between sites that cannot dial each other"})
+	}
 	if public {
 		rules = append(rules, Rule{Port: 80, Proto: "tcp", Why: "public ports, HTTP"}, Rule{Port: 443, Proto: "tcp", Why: "public ports, HTTPS"},
 			Rule{Port: 443, Proto: "udp", Why: "public ports, HTTP/3"})

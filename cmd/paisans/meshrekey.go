@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -58,6 +59,8 @@ func runMeshRekey(args []string) error {
 	id := idFlag(fs)
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually rekey, one site at a time, stopping at the first gate that fails")
+	breakLease := breakLeaseFlag(fs)
+	answers := yesFlag(fs)
 	all := fs.Bool("all", false, "rekey every site the configuration declares, in its order")
 	var sites []string
 	for len(args) > 0 && !strings.HasPrefix(args[0], "-") {
@@ -127,6 +130,17 @@ func runMeshRekey(args []string) error {
 	if _, err := admittedSites(r, cfg, withoutNames(cfg.SiteNames(), plan.Joining)...); err != nil {
 		return err
 	}
+	// The rekey saves its next key and pauses Patroni before its first
+	// apply, so a site a newer paisans last applied refuses it before then.
+	ans, err := answers()
+	if err != nil {
+		return err
+	}
+	release, err := guardSites(r, cfg, withoutNames(cfg.SiteNames(), plan.Joining), func(name string) apply.Transport { return transports[name] }, "mesh rekey", guard{execute: *execute, lease: leaseOptions{breakLease: *breakLease, answers: ans, stdin: os.Stdin, stdout: os.Stdout}})
+	if err != nil {
+		return err
+	}
+	defer release()
 	if !*execute {
 		r.Result("Nothing changed. Re-run with --execute to rekey.")
 		return nil

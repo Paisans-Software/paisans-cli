@@ -219,16 +219,33 @@ chat.example.org {
 }
 
 
+# Gated. Every request goes to the gate except the
+# classes that carry their own authentication, which the app verifies. Each is
+# its own handle with a named matcher, and Caddy keeps those in the order they
+# are written, so this is the order they are matched in. See
+# docs/specs/2026-10-08-visibility-gate.md in the toolkit.
 digest.example.org {
 	import paisans_self
 	import upstream_unavailable
-	# Stripped here as on a gated hostname: nothing that reaches an app may
-	# name a user unless the gate put the name there, and an ungated app that
-	# trusted the header would otherwise trust whoever sent the request.
+	# Nothing upstream of the gate may name a user: these headers are only
+	# ever the gate's verified answer.
 	request_header -X-Auth-Request-*
 
-	handle {
+	# Open paths: the sign-in itself, federation discovery and what those
+	# pages load. They hold no private content.
+	@open path /u/* /healthz
+	handle @open {
 		import /etc/caddy/snippets/digest.caddy
+	}
+
+	# A route of its own, so the gate runs before the app's snippet: Caddy
+	# sorts a block's directives, putting handle ahead of route, so a snippet
+	# that routes with handle would otherwise match before the gate ran.
+	handle {
+		route {
+			import gate
+			import /etc/caddy/snippets/digest.caddy
+		}
 	}
 }
 
@@ -410,9 +427,14 @@ talk.example.org {
 		import /etc/caddy/snippets/talk.caddy
 	}
 
+	# A route of its own, so the gate runs before the app's snippet: Caddy
+	# sorts a block's directives, putting handle ahead of route, so a snippet
+	# that routes with handle would otherwise match before the gate ran.
 	handle {
-		import gate
-		import /etc/caddy/snippets/talk.caddy
+		route {
+			import gate
+			import /etc/caddy/snippets/talk.caddy
+		}
 	}
 }
 

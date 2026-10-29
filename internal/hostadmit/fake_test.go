@@ -383,7 +383,7 @@ func admittedOn(h *fakeHost, req admission.Request, flags hostadmit.Flags) *fake
 					owner = uid
 				}
 				h.withDir(strings.Trim(w[len(w)-1], "'"), modeString(w[3]), owner, owner)
-			case strings.HasPrefix(f, "ufw allow "):
+			case strings.HasPrefix(f, "ufw allow "), strings.HasPrefix(f, "ufw route allow "):
 				rules = append(rules, "rule "+strings.TrimPrefix(f, "ufw "))
 			case strings.HasPrefix(f, "mv -f /"):
 				w := strings.Fields(f) // mv -f TMP FINAL || ...

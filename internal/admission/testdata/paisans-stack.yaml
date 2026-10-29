@@ -22,7 +22,8 @@ operators:
       ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB bob@desk
       ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC bob@phone
 sites:
-  # data, apps and the gateway, with an endpoint: both grants, forwarding.
+  # data, apps and the gateway, with an endpoint: both grants, and
+  # forwarding, as the first dialled site by name, the relay.
   home-a:
     roles: [data, apps, gateway]
     address: 10.44.0.1
@@ -40,7 +41,7 @@ sites:
       port: 2222
       keys: [bob]
   # the witness, dialled on its public address with no endpoint: a
-  # WireGuard port, no forwarding, no grant.
+  # WireGuard port, no forwarding, since home-a is the relay, and no grant.
   vm:
     roles: [witness]
     address: 10.44.0.3
