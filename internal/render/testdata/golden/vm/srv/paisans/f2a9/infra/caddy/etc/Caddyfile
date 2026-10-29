@@ -233,7 +233,7 @@ digest.example.org {
 
 	# Open paths: the sign-in itself, federation discovery and what those
 	# pages load. They hold no private content.
-	@open path /u/* /healthz
+	@open path /u/* /d /d/ /d/preview /d/preview/ /healthz
 	handle @open {
 		import /etc/caddy/snippets/digest.caddy
 	}

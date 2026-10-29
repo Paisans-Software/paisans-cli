@@ -910,8 +910,13 @@ Mbin. The design is in `docs/specs/2026-10-24-engagement-digest.md`.
   offer `mas_admin_url` leaves the bot off.
 * **What the gateway forwards.** `/u/*`, the unsubscribe links, `/d/*`, the
   web digests the Matrix message links to, and
-  `GET /healthz`, which answers ok or 503, for the monitor's public check;
-  everything else on the hostname answers 404.
+  `GET /healthz`, which answers ok or 503, for the monitor's public check.
+  The front page and `/d/` with no date redirect to the account app, or to
+  the community's domain without one, since the hostname has no page of its
+  own. `/d/` with no date is an open path, so nobody signs in to be sent
+  there; the front page redirects past the gate, which no gateable
+  blueprint opens its front page to. Everything
+  else on the hostname answers 404.
 * **Gated, with the unsubscribe links open.** The web digest, `/d/<week>`,
   names the member by the gate's `X-Auth-Request-User`, their Pocket ID
   subject, so the link carries no secret and no member's id, and a forwarded

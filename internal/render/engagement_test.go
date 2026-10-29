@@ -229,3 +229,24 @@ func TestEngagementWithoutHomeserverRendersNoMatrix(t *testing.T) {
 		t.Errorf("the digest's .env with no homeserver:\n%s\nwant the linked one without its Matrix block:\n%s", env, want)
 	}
 }
+
+// The digest's hostname has no page of its own: the front page and /d/ with
+// no date redirect to the account app, or to the community's domain in a
+// deployment without one.
+func TestEngagementRedirectsHome(t *testing.T) {
+	want := "@home path / /d /d/ /d/preview /d/preview/\nhandle @home {\n\tredir https://account.example.org 302\n}"
+	snippet := planFiles(build(t))["vm/srv/paisans/f2a9/infra/caddy/etc/snippets/digest.caddy"]
+	if !strings.Contains(snippet, want) {
+		t.Errorf("digest.caddy does not redirect home to the account app:\n%s", snippet)
+	}
+	cfg := fixture(t)
+	delete(cfg.Apps, "account")
+	plan, err := render.Build(cfg, fixtureSecrets(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snippet = planFiles(plan)["vm/srv/paisans/f2a9/infra/caddy/etc/snippets/digest.caddy"]
+	if !strings.Contains(snippet, "redir https://example.org 302") {
+		t.Errorf("with no account app, digest.caddy does not redirect to the community's domain:\n%s", snippet)
+	}
+}
