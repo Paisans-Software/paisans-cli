@@ -10,6 +10,8 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+## [0.3.0-rc.15] - 2026-10-29
+
 ### Added
 
 - Every command that changes sites, not only `deployment apply` and `deployment publish`, holds the deployment lease on them with `--execute`, and checks for a newer paisans under it.
@@ -373,7 +375,8 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.
 - The gateway refuses any request to Pocket ID that carries an `X-API-Key` header with 403, so Pocket ID's API keys work only on the mesh.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.14...develop
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.15...develop
+[0.3.0-rc.15]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.14...v0.3.0-rc.15
 [0.3.0-rc.14]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.13...v0.3.0-rc.14
 [0.3.0-rc.13]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.12...v0.3.0-rc.13
 [0.3.0-rc.12]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.11...v0.3.0-rc.12
