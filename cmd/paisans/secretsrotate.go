@@ -812,9 +812,12 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 			rs = append(rs, secretsrotate.Heartbeat(site))
 		}
 	}
-	for _, site := range cfg.SiteNames() {
-		if has("sites." + site + ".beszel_token") {
-			rs = append(rs, secretsrotate.BeszelToken(site))
+	// A token outlives the hub until secrets prune, and nothing reads it.
+	if cfg.BeszelApp() != "" {
+		for _, site := range cfg.SiteNames() {
+			if has("sites." + site + ".beszel_token") {
+				rs = append(rs, secretsrotate.BeszelToken(site))
+			}
 		}
 	}
 	for _, app := range appsOf(config.BlueprintPocketID) {

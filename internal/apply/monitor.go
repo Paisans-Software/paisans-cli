@@ -44,9 +44,9 @@ type MonitorReseed struct {
 // pinned to a site holding the monitor role, reading each monitor site and
 // changing none. The hub renders data/config.yml from the sites the same way
 // the monitor renders its seed, one system per site, so a site that joins or
-// leaves moves it too. A deployment with no monitor site plans none. Every monitor site must have a
-// transport: the monitor is written to, so a command that cannot reach it
-// cannot finish.
+// leaves moves it too. A deployment with no monitor site plans none. Every
+// monitor site must have a transport: the monitor is written to, so a command
+// that cannot reach it cannot finish.
 func PlanMonitorReseeds(cfg *config.Config, rendered *render.Plan, acmeModule string, transports map[string]Transport) ([]*MonitorReseed, error) {
 	var out []*MonitorReseed
 	for _, site := range cfg.MonitorSites() {
@@ -126,7 +126,7 @@ func (m *MonitorReseed) Steps() []MonitorStep {
 			verb = "recreate"
 		}
 		why := "so the monitor reconciles its managed monitors from the seed, adding what is new and deleting what is gone"
-		if m.seedRel() != "monitors.json" {
+		if m.blueprint == config.BlueprintBeszel {
 			why = "so the hub reads the systems the sites now make"
 		}
 		out = append(out, MonitorStep{verb, fmt.Sprintf("%s, %s: %s", m.App, why, a.Command(m.dep()))})

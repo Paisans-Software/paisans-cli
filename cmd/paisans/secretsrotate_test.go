@@ -1509,3 +1509,26 @@ func TestSecretsRotateRoutesABeszelToken(t *testing.T) {
 		t.Errorf("no hub: %v, want a refusal naming beszel", err)
 	}
 }
+
+// A beszel_token left in the secrets file after the hub is removed is an
+// orphan for secrets prune: --all does not rotate it, and does not fail on it.
+func TestSecretsRotateAllSkipsABeszelTokenWithNoHub(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := config.LoadDeploymentSecrets(fixtureSecretsPath(), cfg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(cfg.Apps, "stats")
+	rs, _, err := rotateTargets(cfg, s, nil, true, rotateWiring{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rs {
+		if strings.HasSuffix(r.Path(), ".beszel_token") {
+			t.Errorf("--all rotates %s with no hub declared", r.Path())
+		}
+	}
+}

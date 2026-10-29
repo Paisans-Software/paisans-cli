@@ -77,7 +77,8 @@ func (p *Plan) buildMonitor() (*Stage, error) {
 }
 
 // reseeded reports whether a rendered file on site is the monitor's own
-// stack or the beszel hub's, which stage 5 applies whole rather than stage 2 listing it as owed.
+// stack or the beszel hub's, which stage 5 applies whole rather than stage 2
+// listing it as owed.
 func (p *Plan) reseeded(site, rel string) bool {
 	if !p.end.Sites[site].Has(config.RoleMonitor) {
 		return false
