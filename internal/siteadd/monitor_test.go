@@ -32,6 +32,10 @@ func TestTheJoinReseedsTheMonitorLast(t *testing.T) {
 	if w.hosts["watch"].ran("/srv/paisans/f2a9/health/compose.yaml restart") != 1 {
 		t.Error("the monitor was not restarted on the new seed")
 	}
+	// The hub lists a system per site, so it is re-rendered in the same stage.
+	if !strings.Contains(w.hosts["watch"].files["/srv/paisans/f2a9/stats/data/config.yml"], "home-b") {
+		t.Errorf("the beszel hub was not re-rendered with home-b:\n%s", w.hosts["watch"].files["/srv/paisans/f2a9/stats/data/config.yml"])
+	}
 	again := build(t, w)
 	if n := len(steps(again, last.Number)); n != 0 {
 		t.Errorf("a finished join still plans %d monitor step(s): %v", n, steps(again, last.Number))

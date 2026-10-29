@@ -46,3 +46,51 @@ func (r beszelAdmin) Checked(e Env, next string) error { return nil }
 func (r beszelAdmin) Accepts(e Env, next string) (bool, error) { return true, nil }
 
 func (r beszelAdmin) Users(e Env) []Use { return appUses(e, r.app) }
+
+// beszelToken rotates the token a site's agent registers with.
+type beszelToken struct {
+	Generated
+	site string
+}
+
+// BeszelToken is the rotation of sites.<site>.beszel_token. The hub learns it
+// first: it lists one system per site with that site's token in
+// data/config.yml, so its stack is applied with the next value, which
+// rewrites the file and restarts the hub on it. Then the site's
+// infrastructure stack, whose beszel-agent.env changes and so recreates the
+// agent with it. Until that second apply the agent presents the old token,
+// which the hub refuses, so the site's graphs gap for the length of the two
+// applies and nothing else is affected.
+func BeszelToken(site string) Rotator {
+	return beszelToken{Generated: Generated{SecretPath: "sites." + site + ".beszel_token"}, site: site}
+}
+
+func (r beszelToken) Cost() Cost { return Cost{} }
+
+// Precheck refuses a site the configuration does not declare, and a
+// deployment with no beszel hub, whose tokens nothing reads.
+func (r beszelToken) Precheck(e Env) error {
+	if _, ok := e.Cfg.Sites[r.site]; !ok {
+		return fmt.Errorf("the configuration declares no site %q", r.site)
+	}
+	if e.Cfg.BeszelApp() == "" {
+		return fmt.Errorf("sites.%s.beszel_token is a secret of %s, and the configuration declares no app of it", r.site, config.BlueprintBeszel)
+	}
+	return nil
+}
+
+// Checked has nothing to do: the hub takes the token from its config file.
+func (r beszelToken) Checked(e Env, next string) error { return nil }
+
+func (r beszelToken) Accepts(e Env, next string) (bool, error) { return true, nil }
+
+// Users is the hub's stack on its site, then the site's infrastructure
+// stack.
+func (r beszelToken) Users(e Env) []Use {
+	hub := e.Cfg.BeszelApp()
+	if hub == "" {
+		return nil
+	}
+	out := appUses(e, hub)
+	return append(out, Use{Site: r.site, Stacks: []string{"infra"}})
+}

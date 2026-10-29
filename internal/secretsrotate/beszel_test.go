@@ -45,3 +45,36 @@ func TestBeszelAdminRotatesOnTheHubsSite(t *testing.T) {
 		}
 	}
 }
+
+// A site's beszel_token is handed to the hub's stack first and then to the
+// site's infra stack; a site the configuration lacks and a deployment with no
+// hub are refused.
+func TestBeszelTokenLearnedByTheHubBeforeTheAgent(t *testing.T) {
+	cfg := &config.Config{
+		Sites: map[string]config.Site{
+			"watch":  {Roles: []config.Role{config.RoleMonitor}, Address: "10.0.0.4"},
+			"home-a": {Roles: []config.Role{config.RoleData, config.RoleApps}, Address: "10.0.0.1"},
+		},
+		Apps: map[string]config.App{
+			"stats": {Blueprint: config.BlueprintBeszel, Hostname: "status.health.example.org", Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch"}},
+		},
+	}
+	e := Env{Cfg: cfg}
+	r := BeszelToken("home-a")
+	if r.Path() != "sites.home-a.beszel_token" {
+		t.Fatalf("path %q", r.Path())
+	}
+	if err := r.(Prechecker).Precheck(e); err != nil {
+		t.Fatal(err)
+	}
+	if got := usesOf(e, r); !slices.Equal(got, []string{"watch:stats", "home-a:infra"}) {
+		t.Fatalf("users %v", got)
+	}
+	if err := BeszelToken("nowhere").(Prechecker).Precheck(e); err == nil || !strings.Contains(err.Error(), "declares no site") {
+		t.Errorf("unknown site: %v", err)
+	}
+	delete(cfg.Apps, "stats")
+	if err := r.(Prechecker).Precheck(e); err == nil || !strings.Contains(err.Error(), "beszel") {
+		t.Errorf("no hub: %v", err)
+	}
+}

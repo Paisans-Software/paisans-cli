@@ -272,6 +272,10 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 		"sites.home-b.heartbeat_token",
 		"sites.vm.heartbeat_token",
 		"sites.watch.heartbeat_token",
+		"sites.home-a.beszel_token",
+		"sites.home-b.beszel_token",
+		"sites.vm.beszel_token",
+		"sites.watch.beszel_token",
 		"apps.auth.operators_heartbeat_token",
 		"apps.auth.dns_super_admins_heartbeat_token",
 		"apps.auth.dns_2fa_heartbeat_token",
@@ -1471,5 +1475,37 @@ func TestSecretsRotateRoutesABeszelAdminPassword(t *testing.T) {
 	}
 	if err := r.(secretsrotate.Prechecker).Precheck(e); err != nil {
 		t.Fatalf("the monitor's admin_password is refused: %v", err)
+	}
+}
+
+// A site's beszel_token is rotated by BeszelToken: the hub's stack on its
+// site first, which holds the token in its config file, then the site's
+// infra stack, whose agent presents it. A deployment with no hub is refused
+// by name.
+func TestSecretsRotateRoutesABeszelToken(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := secretsrotate.Env{Cfg: cfg}
+	r, err := rotatorFor("sites.home-a.beszel_token", rotateWiring{cfg: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.(secretsrotate.Prechecker).Precheck(e); err != nil {
+		t.Fatal(err)
+	}
+	var users []string
+	for _, u := range r.Users(e) {
+		users = append(users, u.Site+":"+strings.Join(u.Stacks, ","))
+	}
+	if want := []string{"watch:stats", "home-a:infra"}; !slices.Equal(users, want) {
+		t.Errorf("users %v, want %v", users, want)
+	}
+
+	delete(cfg.Apps, "stats")
+	err = r.(secretsrotate.Prechecker).Precheck(secretsrotate.Env{Cfg: cfg})
+	if err == nil || !strings.Contains(err.Error(), "beszel") {
+		t.Errorf("no hub: %v, want a refusal naming beszel", err)
 	}
 }

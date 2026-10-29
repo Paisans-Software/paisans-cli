@@ -588,6 +588,8 @@ func rotatorFor(path string, w rotateWiring) (secretsrotate.Rotator, error) {
 		return secretsrotate.ClusterRole(strings.TrimSuffix(last, "_password")), nil
 	case len(parts) == 3 && parts[0] == "sites" && last == "heartbeat_token":
 		return secretsrotate.Heartbeat(parts[1]), nil
+	case len(parts) == 3 && parts[0] == "sites" && last == "beszel_token":
+		return secretsrotate.BeszelToken(parts[1]), nil
 	case len(parts) == 3 && parts[0] == "oidc_clients" && last == "client_secret":
 		return secretsrotate.OIDCClient(parts[1], w.oidcRun, w.oidcRetire), nil
 	case len(parts) == 3 && parts[0] == "apps":
@@ -808,6 +810,11 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 	for _, site := range cfg.SiteNames() {
 		if has("sites." + site + ".heartbeat_token") {
 			rs = append(rs, secretsrotate.Heartbeat(site))
+		}
+	}
+	for _, site := range cfg.SiteNames() {
+		if has("sites." + site + ".beszel_token") {
+			rs = append(rs, secretsrotate.BeszelToken(site))
 		}
 	}
 	for _, app := range appsOf(config.BlueprintPocketID) {

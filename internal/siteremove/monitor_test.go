@@ -108,3 +108,28 @@ func TestNoMonitorSiteSkipsTheReseed(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// The hub's config.yml lists a system per site, so the last stage applies
+// the hub's stack with the monitor's, and once home-b is out the file no
+// longer names it.
+func TestTheRemovalReseedsTheBeszelHub(t *testing.T) {
+	w := setup(t)
+	cfgPath := root + "/stats/data/config.yml"
+	if !strings.Contains(w.hosts["watch"].files[cfgPath], "home-b") {
+		t.Fatalf("the hub does not list home-b before the removal: %q", w.hosts["watch"].files[cfgPath])
+	}
+	p := w.mustBuild("home-b", siteremove.Options{})
+	last := p.Stages[len(p.Stages)-1]
+	if !hasStep(p, last.Number, "watch", "update", "stats/data/config.yml") {
+		t.Fatalf("the last stage does not re-render the hub's config:\n%v", last.Steps)
+	}
+	if remains := strings.Join(p.Remains(), "\n"); strings.Contains(remains, "config.yml") {
+		t.Errorf("the hub's config is still reported as owed to an apply:\n%s", remains)
+	}
+	if err := siteremove.Execute(p); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(w.hosts["watch"].files[cfgPath], "home-b") {
+		t.Errorf("the hub still lists home-b:\n%s", w.hosts["watch"].files[cfgPath])
+	}
+}

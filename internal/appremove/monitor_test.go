@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -17,7 +18,7 @@ import (
 const seed = "/srv/paisans/f2a9/health/monitors.json"
 
 // watched is world with the monitor site applied while blog was still
-// declared, so its seed carries blog' checks.
+// declared, so its seed carries blog' checks, and the beszel hub beside it.
 func watched(t *testing.T) (*config.Config, *config.Secrets, map[string]*host) {
 	t.Helper()
 	cfg, hosts := world(t)
@@ -33,7 +34,7 @@ func watched(t *testing.T) (*config.Config, *config.Secrets, map[string]*host) {
 	var entries []render.ManifestFile
 	for _, f := range before.Files {
 		rel, ok := strings.CutPrefix(f.Path, "watch/")
-		if !ok || rel == render.ManifestName || !strings.HasPrefix(rel, "srv/paisans/f2a9/health/") {
+		if !ok || rel == render.ManifestName || !(strings.HasPrefix(rel, "srv/paisans/f2a9/health/") || strings.HasPrefix(rel, "srv/paisans/f2a9/stats/")) {
 			continue
 		}
 		watch.files["/"+rel] = applytest.Pinned(f.Content)
@@ -103,8 +104,14 @@ func TestTheRemovalReseedsTheMonitorLast(t *testing.T) {
 		t.Fatal(err)
 	}
 	monitors(t, cfg, secrets, hosts, again)
-	if len(again.Monitors) != 1 || again.Monitors[0].Pending() {
-		t.Error("a reseeded monitor still plans work")
+	// The monitor and the beszel hub beside it, neither owed anything.
+	if len(again.Monitors) != 2 {
+		t.Fatalf("want the monitor and the hub reseeded, got %d", len(again.Monitors))
+	}
+	for _, m := range again.Monitors {
+		if m.Pending() {
+			t.Errorf("a reseeded %s still plans work: %v", m.App, m.Steps())
+		}
 	}
 	if err := executor(hosts).Execute(again); err != nil {
 		t.Errorf("a second run fails the monitor's gate: %v", err)
@@ -175,4 +182,22 @@ func TestAnUnhealthyMonitorNamesItsCauseAndTheApply(t *testing.T) {
 	}
 	// as the command wraps it
 	shortAndVerbose(t, fmt.Errorf("app remove: %w", err), "stack health is not healthy", "The app is removed", "paisans deployment apply --site watch --only health --execute")
+}
+
+// The beszel hub is reseeded with the monitor, so that a removal that moves
+// the sites' systems re-renders its config.
+func TestTheRemovalPlansTheBeszelHubWithTheMonitor(t *testing.T) {
+	cfg, secrets, hosts := watched(t)
+	p, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	monitors(t, cfg, secrets, hosts, p)
+	var apps []string
+	for _, m := range p.Monitors {
+		apps = append(apps, m.App)
+	}
+	if !slices.Contains(apps, "stats") {
+		t.Errorf("the reseeds are %v, without the beszel hub", apps)
+	}
 }
