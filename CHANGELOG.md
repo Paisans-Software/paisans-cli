@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Changed
+
+- `deployment apply` without `--site` leaves alone a site whose plan has nothing to do, no pull or install steps, recording the version there, unless the run founds, joins or moves the gateway.
+
 ### Fixed
 
 - `site admit` turns on forwarding on the relay, the first site by name dialled on its `public_address` or `endpoint`, and no other site, matching the WireGuard render; apply refuses only a relay without it.

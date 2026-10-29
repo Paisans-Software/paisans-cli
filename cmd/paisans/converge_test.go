@@ -481,7 +481,10 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 	var full [][]string
 	savedRun, savedRead, savedCheck := convergeRun, convergeReadInitial, convergeCheck
 	savedPrepare, savedAtOnce := convergePrepare, prepareAtOnce
-	savedPullPlan, savedPull := convergePullPlan, convergePullImage
+	savedPullPlan, savedPull, savedIdleClients := convergePullPlan, convergePullImage, convergeIdleClients
+	// A site left alone asks Pocket ID nothing more of its clients; here
+	// none has one to make. fakeIdleClients says otherwise.
+	convergeIdleClients = func(*config.Config, *config.Secrets, string, string) bool { return true }
 	// Each site's pull reads the plan its apply would make, which reaches a
 	// host; here every image is present. fakePulls says otherwise.
 	convergePullPlan = func(_ *config.Config, _ *config.Secrets, site string, _ apply.Transport, _ ...apply.Option) (*apply.Plan, error) {
@@ -555,7 +558,7 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 		convergeHost = savedHost
 		convergeRun, convergeReadInitial, convergeCheck = savedRun, savedRead, savedCheck
 		convergePrepare, prepareAtOnce = savedPrepare, savedAtOnce
-		convergePullPlan, convergePullImage = savedPullPlan, savedPull
+		convergePullPlan, convergePullImage, convergeIdleClients = savedPullPlan, savedPull, savedIdleClients
 		registryHost = savedRegistry
 		convergeRecord, convergeGrantHost, convergeRender = savedRecord, savedGrantHost, savedRender
 	})
@@ -2566,6 +2569,7 @@ func TestConvergeSkipsADownSitesSteps(t *testing.T) {
 		return initial("home-a", "home-b", "vm"), true, nil
 	}
 	classifyWith(t, classifyHosts([]string{"home-b"}, "home-a", "home-b", "vm", "watch"))
+	everySiteBusy(t)
 	rec := recordConverge(t)
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatalf("%v: %s", err, problemText(err))
@@ -2607,6 +2611,7 @@ func TestConvergeJoinWaitsWhileASiteIsDown(t *testing.T) {
 		return initial("home-a", "vm"), true, nil
 	}
 	classifyWith(t, classifyHosts([]string{"watch"}, "home-a", "vm", "watch"))
+	everySiteBusy(t)
 	rec := recordConverge(t)
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatalf("%v: %s\n%s", err, problemText(err), rec.Lines())
@@ -2804,7 +2809,7 @@ func TestADualSiteFoundingRunsEveryFoundingApplyBeforeARevisit(t *testing.T) {
 	)
 	ran := foundingEtcd(t, cfg)
 	rec := &ui.Recorder{}
-	if err := convergeInstall(rec, install, convergeOptions{}); err != nil {
+	if err := convergeInstall(rec, install, convergeOptions{}, idleSites{}); err != nil {
 		t.Fatalf("%v\n%s", err, rec.Lines())
 	}
 	sameLines(t, *ran, []string{

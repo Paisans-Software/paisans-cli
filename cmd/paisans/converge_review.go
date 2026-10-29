@@ -103,7 +103,7 @@ func convergeReview(r ui.Reporter, cfg *config.Config, o convergeOptions) (map[s
 	if err := approveReviews(r, o.answers, o.stdin, o.stdout, all, progname.Cmd()+" deployment apply --execute"); err != nil {
 		return nil, 0, err
 	}
-	run := &runReview{approved: map[string]grant.Review{}}
+	run := &runReview{approved: map[string]grant.Review{}, sites: out}
 	for site, s := range out {
 		run.approved[site] = s.review
 	}
