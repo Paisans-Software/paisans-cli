@@ -133,6 +133,12 @@ type pruneRules struct {
 	wanted map[string][]string
 	// wantedBy names the configuration rule 5 compares against.
 	wantedBy string
+	// senders are the DMARC names of mail names below the registrable
+	// domain, the names dns init writes dmarcSender at: "_dmarc." + name ->
+	// the keys that give the name mail. Their policy is advisory, so rule 5
+	// does not see it, and a dmarcSender record is kept only while its name
+	// is here.
+	senders map[string][]string
 	// mail admits rule 2's no-mail records. site remove leaves them alone:
 	// a site leaving changes which addresses exist, not which names have
 	// mail, and dns prune removes a no-mail record a removed name leaves.
@@ -161,6 +167,7 @@ func BuildPrune(ctx context.Context, provider Provider, cfg *config.Config, want
 		notOurs:    "is not any site's public_address or public_address6, so it does not point at this deployment",
 		wanted:     wantedSet(wants),
 		wantedBy:   "this configuration",
+		senders:    map[string][]string{},
 		mail:       true,
 	}
 	if rules.domain == "" {
@@ -168,6 +175,11 @@ func BuildPrune(ctx context.Context, provider Provider, cfg *config.Config, want
 	}
 	for _, n := range vouched {
 		rules.vouched[normalise(n)] = true
+	}
+	for _, w := range wants {
+		if w.Advisory && !w.Parent && w.Type == "TXT" && strings.HasPrefix(w.Name, "_dmarc.") {
+			rules.senders[w.Name] = w.Sources
+		}
 	}
 	cache := map[string]zone{}
 	parent, rest := splitParent(wants)
@@ -389,7 +401,9 @@ func planPrune(ctx context.Context, provider Provider, cfg *config.Config, rules
 			case !rules.mail:
 				reasons = append(reasons, fmt.Sprintf("it is a %s record; site remove removes only A and AAAA records, and dns prune removes a no-mail record nothing wants any more", typ))
 			case typ == "TXT" && strings.HasPrefix(name, "_dmarc.") && strings.Join(strings.Fields(txtText(r.Content)), " ") == dmarcSender:
-				reasons = append(reasons, "it is the DMARC policy dns init writes for a domain that sends mail and receives none, and that mail depends on it")
+				if sources, ok := rules.senders[name]; ok {
+					reasons = append(reasons, fmt.Sprintf("it is the DMARC policy dns init writes for a domain that sends mail and receives none, and %s still sends mail from it (%s)", rules.wantedBy, strings.Join(sources, ", ")))
+				}
 			case !isLockdown(r):
 				reasons = append(reasons, fmt.Sprintf("it is a %s record holding something other than the no-mail content dns init writes at this kind of name; prune removes only A and AAAA records and those", typ))
 			}
