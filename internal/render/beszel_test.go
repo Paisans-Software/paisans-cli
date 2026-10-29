@@ -195,3 +195,85 @@ func TestBeszelSetupWritesTheProvider(t *testing.T) {
 		t.Error("the provider leaves PKCE off, which the client at Pocket ID requires")
 	}
 }
+
+// setup.sh signs in as the superuser with the break glass address and
+// admin_password (PocketBase apis/record_auth_with_password.go:102-105), and
+// sets the break glass user's password to the same.
+func TestBeszelSetupSignsInAndResetsThePassword(t *testing.T) {
+	f := beszelFile(t, "setup.sh")
+	_, secrets := beszelFixture(t)
+	password, _ := secrets.Apps["stats"]["admin_password"].(string)
+	line := func(prefix string) string {
+		for _, l := range strings.Split(f.Content, "\n") {
+			if strings.HasPrefix(l, prefix) {
+				return l
+			}
+		}
+		t.Fatalf("setup.sh has no body starting %s:\n%s", prefix, f.Content)
+		return ""
+	}
+	var auth struct {
+		Identity string `json:"identity"`
+		Password string `json:"password"`
+	}
+	dec := json.NewDecoder(strings.NewReader(line(`{"identity":`)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&auth); err != nil {
+		t.Fatalf("the sign in body is not the JSON PocketBase reads: %v", err)
+	}
+	if auth.Identity != "beszel-admin@example.org" || auth.Password != password {
+		t.Errorf("signs in as %q with %q, want beszel-admin@example.org with apps.stats.admin_password", auth.Identity, auth.Password)
+	}
+	var reset struct {
+		Password        string `json:"password"`
+		PasswordConfirm string `json:"passwordConfirm"`
+	}
+	dec = json.NewDecoder(strings.NewReader(line(`{"password":`)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&reset); err != nil {
+		t.Fatalf("the password reset body is not the JSON PocketBase reads: %v", err)
+	}
+	if reset.Password != password || reset.PasswordConfirm != password {
+		t.Errorf("resets the user's password to %q / %q, want apps.stats.admin_password twice", reset.Password, reset.PasswordConfirm)
+	}
+}
+
+// setup takes the hub's .env, so a changed .env, a rotated admin_password
+// among them, recreates it under `up -d` and setup.sh runs again.
+func TestBeszelSetupTakesTheEnv(t *testing.T) {
+	f := beszelFile(t, "compose.yaml")
+	var compose struct {
+		Services map[string]struct {
+			EnvFile []string `yaml:"env_file"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal([]byte(f.Content), &compose); err != nil {
+		t.Fatalf("compose.yaml is not YAML: %v", err)
+	}
+	for _, service := range []string{"app", "setup"} {
+		if got := compose.Services[service].EnvFile; len(got) != 1 || got[0] != ".env" {
+			t.Errorf("%s's env_file is %v, want [.env]", service, got)
+		}
+	}
+}
+
+// PocketBase's superuser panel is refused at the edge, ahead of the proxy.
+func TestBeszelSnippetRefusesTheSuperuserPanel(t *testing.T) {
+	cfg, secrets := beszelFixture(t)
+	plan, err := Build(cfg, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snippet string
+	for _, f := range plan.Files {
+		if f.Path == "watch/srv/paisans/f2a9/infra/caddy/etc/snippets/stats.caddy" {
+			snippet = f.Content
+		}
+	}
+	matcher := strings.Index(snippet, "\n@superuser_panel path /_ /_/*\n")
+	refusal := strings.Index(snippet, "\nrespond @superuser_panel 404\n")
+	proxy := strings.Index(snippet, "\nreverse_proxy ")
+	if matcher < 0 || refusal < matcher || proxy < refusal {
+		t.Errorf("the snippet does not refuse /_/ ahead of the proxy:\n%s", snippet)
+	}
+}

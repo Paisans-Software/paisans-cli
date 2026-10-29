@@ -2,9 +2,19 @@
 #
 # Routing for stats, imported by the host block for
 # status.health.example.org in the Caddy on the monitor's own site.
-# Everything passes: the UI, its sign in and the OAuth2 callback, and the API
-# and realtime stream the UI reads, all of which the hub authenticates
-# itself. The agents dial the hub on the mesh, never through here.
+# The UI, its sign in and the OAuth2 callback, and the API and realtime
+# stream the UI reads pass, all of which the hub authenticates itself. The
+# agents dial the hub on the mesh, never through here.
+#
+# PocketBase's superuser panel, /_/ and everything under it, is refused here:
+# it signs in with the superuser's password alone, and nothing an operator
+# does day to day needs it from the internet. It stays reachable over the
+# mesh, on the hub's port 8084 at the monitor's mesh address.
+# Break glass when the identity provider is down is Beszel's own password
+# sign in, which passes. Caddy's path matcher already ignores case, and /_/*
+# matches /_/ itself.
+@superuser_panel path /_ /_/*
+respond @superuser_panel 404
 reverse_proxy 10.44.0.4:8084 {
 	header_up X-Forwarded-Proto https
 }

@@ -51,9 +51,12 @@ services:
 
   # PocketBase's `superuser upsert <email> <password>` (cmd/superuser.go:32-66
   # at v0.40.5), from the hub's own binary: sets the superuser's password to
-  # admin_password, so a rotated one takes effect on the next apply. The
-  # values come from .env, which compose reads beside this file, so the
-  # password is never written here.
+  # admin_password, so a rotated one takes effect on the next apply. Compose
+  # interpolates both from .env, so this file never holds the password, but
+  # they are the one shot's arguments: for the moment it runs, the password
+  # is in its argv, which /proc and `docker inspect` show to the deployment
+  # user and to root. The command takes the password as an argument only,
+  # with no stdin or file form.
   admin:
     labels:
       community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
@@ -72,12 +75,21 @@ services:
   # setup.sh is 0600 because it carries both, and root in a rootless
   # container is the deployment user that owns it; the image's own user is
   # not. It dials the hub on this project's network and listens for nothing.
+  #
+  # It reads nothing from .env, and takes it all the same: apply answers a
+  # changed .env with `up -d`, which recreates only a service whose own
+  # configuration changed. Without the env_file a rotated admin_password
+  # would recreate app and admin and leave this container asleep, so the
+  # break glass user would keep the old password. A changed setup.sh alone
+  # restarts the whole stack, which starts it again.
   setup:
     labels:
       community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
     image: "docker.io/curlimages/curl:8.*.*"
     restart: on-failure
     user: "0:0"
+    env_file:
+      - .env
     entrypoint: ["/bin/sh", "/setup.sh"]
     volumes:
       - /srv/paisans/f2a9/stats/setup.sh:/setup.sh:ro
