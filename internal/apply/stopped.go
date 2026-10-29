@@ -26,8 +26,8 @@ var exitedZero = regexp.MustCompile(`^Exited \(0\)( |$)`)
 // one was paused by somebody, on purpose.
 var downStates = map[string]bool{"exited": true, "created": true, "dead": true}
 
-// composeServices returns the services a rendered compose file declares.
-func composeServices(content string) ([]string, error) {
+// ComposeServices returns the services a compose file declares.
+func ComposeServices(content string) ([]string, error) {
 	var doc struct {
 		Services map[string]yaml.Node `yaml:"services"`
 	}
@@ -40,6 +40,25 @@ func composeServices(content string) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// DeclaredServices is the services each stack this site renders declares, by
+// stack, read from its rendered compose file. apply's "left over" section
+// compares it with the host's containers, since compose leaves running a
+// service its file no longer declares.
+func (p *Plan) DeclaredServices() (map[string][]string, error) {
+	declared := map[string][]string{}
+	for _, c := range p.renderedChanges {
+		if !isStackCompose(c) {
+			continue
+		}
+		services, err := ComposeServices(c.content)
+		if err != nil {
+			return nil, fmt.Errorf("reading the services %s declares: %w", c.Path, err)
+		}
+		declared[c.Stack] = services
+	}
+	return declared, nil
 }
 
 // composeRestartPolicies returns each service's restart key in a rendered
@@ -80,7 +99,7 @@ func (p *Plan) probeStopped(t Transport) (map[string]string, error) {
 		if c.Stack == "" || !isStackCompose(c) {
 			continue
 		}
-		services, err := composeServices(c.content)
+		services, err := ComposeServices(c.content)
 		if err != nil {
 			return nil, fmt.Errorf("reading the services %s declares: %w", c.Path, err)
 		}

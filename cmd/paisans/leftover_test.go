@@ -18,7 +18,9 @@ import (
 
 // apply's plan output ends with a "left over" section naming this
 // deployment's stacks and files the site no longer renders, saying apply
-// leaves them and naming `paisans app remove` for each app they belong to. A whole plan shows what it is about to mark; a
+// leaves them and naming `paisans app remove` for each app they belong to,
+// and each container of a stack still rendered for a service its compose
+// file no longer declares, naming `paisans site prune` for it. A whole plan shows what it is about to mark; a
 // partial one shows the manifest's marks. Nothing left over prints nothing.
 func TestTheApplyPlanListsLeftovers(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
@@ -42,6 +44,7 @@ func TestTheApplyPlanListsLeftovers(t *testing.T) {
 		Containers: []hostcheck.Container{
 			{Name: "paisans-f2a9-talk-app-1", Deployment: id, Project: "paisans-f2a9-talk", PID: 1},
 			{Name: "paisans-f2a9-docs-app-1", Deployment: id, Project: "paisans-f2a9-docs", PID: 2},
+			{Name: "paisans-f2a9-talk-rabbitmq-1", Deployment: id, Project: "paisans-f2a9-talk", Service: "rabbitmq", PID: 3},
 		},
 		ManifestFiles: []render.ManifestFile{{Path: "srv/paisans/f2a9/docs/.env", Leftover: true, LeftoverSince: "2026-10-01T00:00:00Z"}},
 	}
@@ -58,7 +61,9 @@ func TestTheApplyPlanListsLeftovers(t *testing.T) {
 		!warned(rec, "`paisans app remove docs`", "") ||
 		!rec.Has("detail", "left over: this deployment's, no longer rendered for home-a. apply leaves each one in place.") ||
 		!rec.Has("detail", "`paisans app remove docs` takes docs's off every site") ||
-		strings.Contains(rec.Lines(), "talk") {
+		!warned(rec, "left over: service rabbitmq of stack talk (`paisans site prune home-a`)", "service rabbitmq of stack talk (compose project paisans-f2a9-talk, 1 of 1 running): paisans-f2a9-talk-rabbitmq-1") ||
+		!rec.Has("detail", "`paisans site prune home-a` removes the containers of each left over service") ||
+		strings.Contains(rec.Lines(), "talk-app") || strings.Contains(rec.Lines(), "app remove talk") {
 		t.Errorf("whole plan:\n%s", rec.Lines())
 	}
 	if strings.Contains(rec.Lines(), "docs/.env") {
@@ -290,5 +295,22 @@ func TestDoctorLeftoversUseTheManifestsView(t *testing.T) {
 	p = gatherLeftovers(cfg, "home-a", leftoverHost{container, `{"version":1,"files":[]}`})
 	if p.Err != "" || len(p.Report.Stacks) != 0 {
 		t.Errorf("nothing pending: %+v", p)
+	}
+}
+
+// A left over etcd, Patroni or Garage is listed with why site prune keeps it,
+// and without site prune named for it. home-a renders an infra stack holding
+// only the heartbeat, so a Patroni there is left over.
+func TestALeftOverClusterServiceIsListedAsKept(t *testing.T) {
+	cfg := heartbeatConfig(t)
+	inv := infraInventory(cfg)
+	inv.Containers = append(inv.Containers, hostcheck.Container{Name: "paisans-f2a9-infra-patroni-1", Deployment: cfg.Deployment().ID, Project: "paisans-f2a9-infra", Service: "patroni", PID: 4})
+	rec := &ui.Recorder{Verbose_: true}
+	if err := printLeftovers(rec, cfg, "home-a", inv, heartbeatPlan(t, cfg)); err != nil {
+		t.Fatal(err)
+	}
+	if !warned(rec, "left over: service patroni of stack infra", "It is a member of the Patroni cluster") ||
+		rec.Has("warn", "site prune") || rec.Has("detail", "site prune") {
+		t.Errorf("kept Patroni:\n%s", rec.Lines())
 	}
 }

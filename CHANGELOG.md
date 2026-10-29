@@ -13,6 +13,12 @@ changes share a bullet. Detailed notes are on the corresponding
 ### Added
 
 - The `beszel` blueprint runs Beszel's hub on the monitor site, signed in through Pocket ID only, and an agent in every site's infra stack; `paisans create` offers it; run `site prepare` on hosts prepared earlier.
+- `deployment apply` lists, under `left over`, each container of a stack still rendered whose service the stack no longer declares.
+- `site prune` removes those containers, keeping etcd, Patroni and Garage, then this deployment's dangling volumes; `deployment prune` runs it on every site.
+
+### Removed
+
+- `prune --site`, whose volume removal `site prune` now does.
 
 ## [0.3.0-rc.16] - 2026-10-29
 

@@ -76,8 +76,9 @@ Every command that asks for a confirmation takes `--yes`: `deployment apply`,
 `deployment apply --site`, `site prepare`, `site admit`, `site evict`, `site add`,
 `site remove`, `gateway move`, `deployment publish`, `deployment pull`,
 `deployment recover`, `operator register`, `secrets prune`, `secrets rotate`,
-`app remove`, `mesh rekey`, `prune`, `storage init`, `storage add`,
-`storage rotate-key` and `oidc client create`. No other command takes it.
+`app remove`, `mesh rekey`, `site prune`, `deployment prune`, `storage init`,
+`storage add`, `storage rotate-key` and `oidc client create`. No other command
+takes it.
 
 * **What it answers:** every word a command asks to have typed (`approve`,
   `create`, `rollback`, `prune`, `sign out`, `revoked`,
@@ -112,8 +113,8 @@ steps, and `gateway move` to its hand-off's `deployment apply`.
 Every command that changes sites takes the deployment lease with `--execute`
 and takes `--break-lease`: `deployment apply`, with or without `--site`,
 `deployment publish`, `operator register`, `site add`, `site prepare`,
-`site remove`, `app remove`, `gateway move`, `mesh rekey`, `prune`,
-`storage init`, `storage add`, `storage rotate-key`, `secrets rotate` and
+`site remove`, `app remove`, `gateway move`, `mesh rekey`, `site prune`,
+`deployment prune`, `storage init`, `storage add`, `storage rotate-key`, `secrets rotate` and
 `oidc client create`. `--break-lease` takes over another command's live lease
 once you know that command is no longer running, after the word `break`,
 which `--yes` types. Under the lease each refuses a site a newer paisans last
@@ -1580,21 +1581,43 @@ paisans site evict --site home-a --ssh owner@home-a.example.org --execute
 
 See *A host's owner admits a site from a request* in `README.md`.
 
-### `paisans prune`
+### `paisans site prune`
 
-Lists one site's dangling Docker volumes, with size and top level entries, and
-says which carry this deployment's label.
+Lists what one site holds that the deployment no longer runs there, and with
+`--execute` removes it: the containers of each left over service, then the
+dangling volumes carrying this deployment's label.
 
-* **Alone:** always, for volumes that accumulated before `deployment apply` removed its
-  own. Sizes are Docker's own accounting (`docker system df -v`), since the
-  deployment's user cannot read a directory a container's user owns.
-* **Flags:** `--site <name>` (required), `--config`, `--ssh`, `--execute`.
+```sh
+paisans site prune home-b             # lists remove and keep, with reasons
+paisans site prune home-b --execute   # removes the containers, then the volumes
+```
+
+* **Alone:** always. `deployment apply` lists left over services and never
+  removes them.
+* **Flags:** the site (required), `--config`, `--ssh`, `--break-lease`,
+  `--execute`, `--yes`.
 * **Hosts:** the one site's.
-* **`--execute`:** removes the volumes labelled with this deployment's id;
-  every other volume is kept.
+* **Judged against:** each stack's compose file on the host, as the last apply
+  wrote it, so it needs no secrets. A container of this deployment's whose
+  service that file no longer declares is left over, and every container of an
+  infrastructure stack the manifest marks left over.
+* **Kept:** etcd, Patroni and Garage, each listed with why: `site remove`
+  takes a site out of them. An app's whole stack is `app remove`'s. Every
+  volume without this deployment's label. Volume sizes are Docker's own
+  accounting (`docker system df -v`), since the deployment's user cannot read a
+  directory a container's user owns.
 
-See *Every volume an image declares is mounted, and `deployment apply` checks it* in
-`README.md`.
+See *`site prune` removes what a site no longer runs* and *Every volume an
+image declares is mounted, and `deployment apply` checks it* in `README.md`.
+
+### `paisans deployment prune`
+
+`site prune` on every site `paisans-stack.yaml` declares.
+
+* **Alone:** always.
+* **Flags:** `--config`, `--break-lease`, `--execute`, `--yes`.
+* **Hosts:** every site's. Each is checked and leased before any is changed; a
+  site that fails does not stop the others, and the run fails naming it.
 
 ## Applying
 

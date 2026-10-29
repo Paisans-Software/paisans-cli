@@ -88,7 +88,7 @@ func (p *Plan) planPatroni(f patroniFacts, refresh map[string]bool, t Transport)
 		case a.Force:
 			// An owed `up -d` that named the other services stays narrowed.
 		case a.Recreate && must == "":
-			up, err := composeServices(f.composeAfterOr(p))
+			up, err := ComposeServices(f.composeAfterOr(p))
 			if err != nil {
 				return fmt.Errorf("reading the services the infrastructure compose file declares: %w", err)
 			}
