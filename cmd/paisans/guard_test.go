@@ -25,7 +25,7 @@ func guardEvents(t *testing.T, newer map[string]string) *[]string {
 		events = append(events, "check "+site)
 		return savedCheck(site, h, d)
 	}
-	t.Cleanup(func() { leaseTake, toolkitCheck = savedTake, savedCheck })
+	t.Cleanup(func() { leaseTake, toolkitCheck, runLease = savedTake, savedCheck, nil })
 	return &events
 }
 

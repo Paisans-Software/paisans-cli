@@ -1421,6 +1421,8 @@ type hostPrepareOptions struct {
 	// shown is set once a run of --all has shown the configuration's
 	// findings, so each later site does not show them again.
 	shown bool
+	// guarded is set by a run of --all, which guards every site itself.
+	guarded bool
 }
 
 // hostPrepareFlags registers site prepare's own flags on fs.
@@ -1505,11 +1507,13 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 		transport.RetryLog = env.retries
 	}
 	r.Section(fmt.Sprintf("%s (%s)", o.site, transport.Describe()))
-	release, err := guardSites(r, cfg, []string{o.site}, func(string) apply.Transport { return transport }, "site prepare --site "+o.site, guard{execute: o.execute, lease: leaseOptions{breakLease: o.breakLease, answers: env.answers, stdin: env.stdin, stdout: env.stdout}})
-	if err != nil {
-		return err
+	if !o.guarded {
+		release, err := guardSites(r, cfg, []string{o.site}, func(string) apply.Transport { return transport }, "site prepare --site "+o.site, guard{execute: o.execute, lease: leaseOptions{breakLease: o.breakLease, answers: env.answers, stdin: env.stdin, stdout: env.stdout}})
+		if err != nil {
+			return err
+		}
+		defer release()
 	}
-	defer release()
 	// See runApply: site prepare records its own site's architecture, which
 	// the next apply publishes. As a step of apply without --site, where
 	// every host prepares at once, the run recorded every key already and
@@ -1611,9 +1615,18 @@ func hostPrepareAll(env prepareEnv, o hostPrepareOptions) error {
 		return refused(o.config, len(result.Refusals()), "")
 	}
 	names := cfg.SiteNames()
+	// One lease over every site for the whole run, so nothing else changes
+	// a host between one site's prepare and the next; each site's own
+	// prepare then takes none. A host that does not answer yet is left to
+	// its own prepare to refuse.
+	release, err := guardSites(env.r, cfg, names, func(name string) apply.Transport { return siteTransport(name, cfg.Sites[name], "") }, "site prepare --all", guard{execute: o.execute, skipUnread: true, lease: leaseOptions{breakLease: o.breakLease, answers: env.answers, stdin: env.stdin, stdout: env.stdout}})
+	if err != nil {
+		return err
+	}
+	defer release()
 	for _, name := range names {
 		site := o
-		site.all, site.site, site.shown = false, name, true
+		site.all, site.site, site.shown, site.guarded = false, name, true, true
 		if err := hostPrepare(env, site); err != nil {
 			next := "Run " + progname.Cmd() + " site prepare --all again to resume."
 			if o.execute {

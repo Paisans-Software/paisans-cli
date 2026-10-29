@@ -108,7 +108,7 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) (err 
 			if *keyPath != "" || *root != "" {
 				return &ui.Problem{Hint: "--key and --root do not apply to a join", Explain: "The pending invite names the key you sign with and the root trust starts from."}
 			}
-			return joinInvite(reporter(), d, invite, *execute, ans, stdin, stdout)
+			return joinInvite(reporter(), d, invite, *execute, *breakLease, ans, stdin, stdout)
 		}
 	}
 	sys, sites, r, done, err := registerSystem(reporter(), *configPath, *id, d, *root, *execute)

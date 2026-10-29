@@ -107,7 +107,7 @@ func pendingList(ids []string) string {
 // refused. Once the system copy is made the invite is no longer pending,
 // since from then on register in d.Dir is plain register; the age binding
 // is kept.
-func joinInvite(r ui.Reporter, d draft.Draft, invite operatorinvite.Invite, execute bool, ans answerer, stdin io.Reader, stdout io.Writer) error {
+func joinInvite(r ui.Reporter, d draft.Draft, invite operatorinvite.Invite, execute, breakLease bool, ans answerer, stdin io.Reader, stdout io.Writer) error {
 	key, _, err := config.ParseKeyLine(invite.Key)
 	if err != nil {
 		return err
@@ -166,7 +166,7 @@ func joinInvite(r ui.Reporter, d draft.Draft, invite operatorinvite.Invite, exec
 	if err != nil {
 		return done(err)
 	}
-	return done(attest(staged, sys, cfg, invite.Key, invite.Root, execute, false, ans, stdin, stdout))
+	return done(attest(staged, sys, cfg, invite.Key, invite.Root, execute, breakLease, ans, stdin, stdout))
 }
 
 // notAppliedProblem is a join refused because the inviter's acceptance has

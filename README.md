@@ -4993,8 +4993,11 @@ release last applied one:
 * **The same release built from another commit passes,** as do an older
   release and a site never applied. A build of `develop`, `X.Y.Z-dev`, counts
   as every pre-release of `X.Y.Z`.
-* **`deployment publish` and `operator register` pass over a site that does
-  not answer,** with a warning, since they push it nothing.
+* **`deployment publish`, `operator register`, `gateway move` and
+  `site prepare --all` pass over a site that does not answer,** with a
+  warning: publish and register push it nothing, a gateway move's two
+  gateways have answered already, and each host's own prepare refuses one
+  that does not answer.
 * **`site admit` and `site evict` refuse a host** a newer paisans claimed for
   any deployment, judged by the host's registry, `/etc/paisans`, the same way.
 
