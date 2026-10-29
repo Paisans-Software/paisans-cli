@@ -3788,6 +3788,13 @@ publishes: `talk` above is `gated: true`, and its stack publishes port 8080,
 so anything that can open that port reaches Mbin with no gate in front of it at
 all. The same is true of every gated app.
 
+**The gate runs before anything of the app's.** A gated hostname's
+catch-all is `handle { route { import gate; import <app snippet> } }`. Caddy
+sorts the directives of a block by its directive order, which puts `handle`
+ahead of `route`, and the gate is a `route`; an app snippet that routes with
+`handle`, as engagement's does, would otherwise match first and reach the app
+with no gate at all. Inside a `route`, directives run as written.
+
 **So every published port binds the site's mesh address and nothing else**
 (Eg: `"10.44.0.1:8080:8080"`, never `"8080:8080"`). The gateway reaches every
 app over the mesh, so the mesh is the only interface a port needs, and the
