@@ -657,13 +657,22 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	// On its own, apply --site holds the deployment's lease on every ready
 	// site, as apply without --site does: it publishes the version it
 	// applies to all of them. As a step of that run, the run holds it.
+	// Before the lease, a site a newer paisans last applied refuses it:
+	// every ready site, since the version is published to all of them. As a
+	// step of the run, the run checked them.
+	readyHost := func(name string) apply.Transport {
+		if name == *site {
+			return siteTransport(name, cfg.Sites[name], *destination)
+		}
+		return convergeHost(name, cfg.Sites[name])
+	}
+	if reviewedByRun == nil {
+		if err := refuseNewerToolkit(r, cfg, readySites(cfg, sites), readyHost, "deployment apply --site "+*site, false); err != nil {
+			return err
+		}
+	}
 	if *execute && reviewedByRun == nil {
-		release, err := takeLease(r, cfg, readySites(cfg, sites), func(name string) apply.Transport {
-			if name == *site {
-				return siteTransport(name, cfg.Sites[name], *destination)
-			}
-			return convergeHost(name, cfg.Sites[name])
-		}, "deployment apply --site "+*site, leaseOptions{breakLease: *breakLease, answers: ans, stdin: stdin, stdout: stdout})
+		release, err := takeLease(r, cfg, readySites(cfg, sites), readyHost, "deployment apply --site "+*site, leaseOptions{breakLease: *breakLease, answers: ans, stdin: stdin, stdout: stdout})
 		if err != nil {
 			return err
 		}
@@ -1352,6 +1361,12 @@ func runStorageInit(args []string) error {
 	if _, err := admittedHosts(r, cfg, map[string]registry.Runner{*site: transport}); err != nil {
 		return err
 	}
+	// As a step of apply, the run checked every site already.
+	if reviewedByRun == nil {
+		if err := refuseNewerToolkit(r, cfg, []string{*site}, func(string) apply.Transport { return transport }, "storage init --site "+*site, false); err != nil {
+			return err
+		}
+	}
 	plan, err := ui.Get(r, "read Garage", func() (*garage.Plan, error) {
 		return garage.Build(*site, cfg, secrets, transport)
 	})
@@ -1493,6 +1508,12 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 		transport.RetryLog = env.retries
 	}
 	r.Section(fmt.Sprintf("%s (%s)", o.site, transport.Describe()))
+	// As a step of apply, the run checked every site already.
+	if reviewedByRun == nil {
+		if err := refuseNewerToolkit(r, cfg, []string{o.site}, func(string) apply.Transport { return transport }, "site prepare --site "+o.site, false); err != nil {
+			return err
+		}
+	}
 	// See runApply: site prepare records its own site's architecture, which
 	// the next apply publishes. As a step of apply without --site, where
 	// every host prepares at once, the run recorded every key already and

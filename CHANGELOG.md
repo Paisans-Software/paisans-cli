@@ -10,6 +10,11 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Added
+
+- `deployment apply`, `deployment publish` and every other command that changes a site refuse, before changing anything, when a newer paisans release last applied any of its sites, naming each and the release to upgrade to.
+- `site admit` refuses a host any deployment of which a newer paisans claimed, as `site evict` already does.
+
 ### Changed
 
 - The `engagement` blueprint is gateable with `/u/*` and `/healthz` open, so its web digest can name the member by the gate; `validate` warns when an app linked to a homeserver is not `gated`.
@@ -19,7 +24,7 @@ changes share a bullet. Detailed notes are on the corresponding
 ### Fixed
 
 - `site admit` turns on forwarding on the relay, the first site by name dialled on its `public_address` or `endpoint`, and no other site, matching the WireGuard render; apply refuses only a relay without it.
-- A build of `develop`, `X.Y.Z-dev`, meets a blueprint's `requires_toolkit` of any `X.Y.Z` pre-release, so it uses the catalog releases a release candidate would.
+- A build of `develop`, `X.Y.Z-dev`, meets a blueprint's `requires_toolkit` of any `X.Y.Z` pre-release, and `site evict` and `site remove` accept it on hosts a release candidate set up.
 - `site admit` gives a relay `ufw route allow in on psns-<token> out on psns-<token>`, since ufw's default DROP forward policy otherwise drops the mesh traffic it relays, and `site evict` removes it.
 - `dns prune` removes the sender DMARC policy `dns init` writes at a send-only mail name once the configuration no longer sends mail from that name, instead of keeping it forever.
 

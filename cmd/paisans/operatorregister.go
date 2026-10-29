@@ -463,6 +463,11 @@ func attest(r ui.Reporter, l configstore.Local, cfg *config.Config, key, pin str
 	// before; with neither, the sites' history alone is never trusted.
 	anchor := configstore.Anchor{Root: pin, Signers: []string{k.Fingerprint}}
 	sites := configTransports(cfg)
+	// As publish: the attestation is pushed to every site that answers, so
+	// a site a newer paisans last applied refuses it first.
+	if err := refuseNewerToolkit(r, cfg, cfg.SiteNames(), func(name string) apply.Transport { return sites[name] }, "operator register", true); err != nil {
+		return err
+	}
 	m := gatherMode{
 		execute:  execute,
 		answers:  ans,

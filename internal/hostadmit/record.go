@@ -35,6 +35,11 @@ func planClaim(p *planner) error {
 	if err != nil {
 		return shown(err)
 	}
+	// What admit installs host-wide is what this release knows of, so a
+	// host a newer paisans claimed for any deployment refuses it.
+	if err := refuseNewer(r, noBuild, "site admit"); err != nil {
+		return err
+	}
 	mine, claimed := r.Deployments[id]
 	if claimed && registry.AnotherSite(mine, e) {
 		// A claim from before entries named their site has its address alone.

@@ -65,6 +65,20 @@ func Valid(v string) bool {
 // IsPreRelease reports whether v, a valid version, is a pre-release.
 func IsPreRelease(v string) bool { return strings.Contains(v, "-") }
 
+// Newer reports whether recorded, the release that last wrote a record, is
+// newer than have, this binary's, as Compare orders them. A build of
+// develop, X.Y.Z-dev, counts as every pre-release of X.Y.Z, as it meets a
+// blueprint's requires_toolkit of one: develop holds every release
+// candidate cut from it. A version Compare cannot order is an error.
+func Newer(recorded, have string) (bool, error) {
+	c, err := Compare(recorded, have)
+	if err != nil || c <= 0 {
+		return false, err
+	}
+	core, dev := strings.CutSuffix(have, "-dev")
+	return !(dev && IsPreRelease(recorded) && strings.HasPrefix(recorded, core+"-")), nil
+}
+
 type parsed struct {
 	release [3]int
 	pre     []string

@@ -85,6 +85,12 @@ func runStorageAdd(args []string) error {
 	if _, err := admittedSites(r, cfg, sites...); err != nil {
 		return err
 	}
+	// As a step of apply, the run checked every site already.
+	if reviewedByRun == nil {
+		if err := refuseNewerToolkit(r, cfg, sites, func(name string) apply.Transport { return transports[name] }, "storage add", false); err != nil {
+			return err
+		}
+	}
 	plan, err := ui.Get(r, "read every Garage site", func() (*storageadd.Plan, error) {
 		return storageadd.Build(cfg, secrets, transports, storageadd.Options{
 			ChangeReplication: *changeReplication,

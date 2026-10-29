@@ -308,11 +308,11 @@ func (p *Plan) checkToolkit(inv *hostcheck.Inventory) error {
 // refuseNewer is checkToolkit's refusal of the release theirs, recorded in
 // the manifest at path.
 func (p *Plan) refuseNewer(path, theirs string) error {
-	newer, err := version.Compare(theirs, version.Version)
+	newer, err := version.Newer(theirs, version.Version)
 	if err != nil {
 		return fmt.Errorf("site remove %s: %s records that paisans %q last applied deployment %s here, which is not a release this paisans %s can order, so it may be a newer one that put things on the host this one does not know about. Nothing was changed. Upgrade paisans, and run site remove again", p.Site, path, theirs, p.dep().ID, version.Version)
 	}
-	if newer > 0 {
+	if newer {
 		return fmt.Errorf("site remove %s: deployment %s was last applied here by paisans %s, and this is paisans %s, so it may not know everything that release put on the host. Nothing was changed. Upgrade paisans to %s or later, and run site remove again", p.Site, p.dep().ID, theirs, version.Version, theirs)
 	}
 	return nil

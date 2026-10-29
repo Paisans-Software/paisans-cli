@@ -200,6 +200,11 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err := reachEverySite(r, cfg, transports); err != nil {
 		return err
 	}
+	// A rotation changes Postgres and Garage before its applies, so a site
+	// a newer paisans last applied refuses it before anything changes.
+	if err := refuseNewerToolkit(r, cfg, cfg.SiteNames(), func(name string) apply.Transport { return transports[name] }, "secrets rotate", false); err != nil {
+		return err
+	}
 	if err := ui.Run(r, "check etcd and Patroni", func() error { return meshrekey.ClusterHealth(cfg, transports) }); err != nil {
 		return fmt.Errorf("secrets rotate: %w. A password changed on a limping cluster can leave a member unable to rejoin, so nothing is rotated until it is healthy. Nothing was changed", err)
 	}

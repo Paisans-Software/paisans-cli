@@ -1265,6 +1265,13 @@ func Execute(plan *Plan, t Transport) error {
 	if err := Refusal(plan); err != nil {
 		return err
 	}
+	// The command checked every site before it planned, which is what
+	// keeps a command that applies several sites from stopping part way;
+	// this reads the manifest again at the last moment, so an apply by a
+	// newer paisans since then is refused before this one writes over it.
+	if err := CheckToolkit(plan.Site, t, plan.Deployment); err != nil {
+		return err
+	}
 	if err := settleOwedVolumes(plan, t); err != nil {
 		return err
 	}
@@ -1720,7 +1727,7 @@ func readManifest(t Transport, d deployment.Deployment) (map[string]render.Manif
 	var m render.Manifest
 	content, found, err := t.ReadFile(manifestPath(d))
 	if err != nil {
-		return nil, m, err
+		return nil, m, &unreadError{err}
 	}
 	if !found {
 		return map[string]render.ManifestFile{}, m, nil
