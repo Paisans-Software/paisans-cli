@@ -3336,6 +3336,14 @@ what is stuck and how to recover*). Both name `paisans app remove <app>` for
 each app the leftovers belong to, which is the command that takes them off
 (see *`app remove` takes an app off its hosts*).
 
+A service taken out of a stack that still runs is left over the same way.
+Compose starts and updates only the services a stack's file declares, so a
+service the toolkit stops rendering keeps its container running: Patroni on a
+site that drops the `data` role, or Mbin's broker after the queue moves to
+Postgres. apply's `left over` section lists each such container with the
+`docker rm -f` that takes it off, run as the deployment's user once nothing
+relies on it. Its data under the stack's directory stays.
+
 #### A blueprint can come from a catalog
 
 The blueprints built into the toolkit are the reserved five (`pocket-id`, the

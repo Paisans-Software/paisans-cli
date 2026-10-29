@@ -36,6 +36,25 @@ func composeServices(content string) ([]string, error) {
 	return out, nil
 }
 
+// DeclaredServices is the services each stack this site renders declares, by
+// stack, read from its rendered compose file. apply's "left over" section
+// compares it with the host's containers, since compose leaves running a
+// service its file no longer declares.
+func (p *Plan) DeclaredServices() (map[string][]string, error) {
+	declared := map[string][]string{}
+	for _, c := range p.renderedChanges {
+		if !isStackCompose(c) {
+			continue
+		}
+		services, err := composeServices(c.content)
+		if err != nil {
+			return nil, fmt.Errorf("reading the services %s declares: %w", c.Path, err)
+		}
+		declared[c.Stack] = services
+	}
+	return declared, nil
+}
+
 // probeStopped returns, for each rendered stack with a declared service that
 // has no running container, why it is owed an `up -d`. Files that match the
 // render are no evidence that a stack runs: a host that rebooted with a
@@ -45,16 +64,9 @@ func composeServices(content string) ([]string, error) {
 // converged with its apps down. Building the plan only reads the host, so a
 // dry run shows the start without making it.
 func (p *Plan) probeStopped(t Transport) (map[string]string, error) {
-	declared := map[string][]string{}
-	for _, c := range p.renderedChanges {
-		if c.Stack == "" || !isStackCompose(c) {
-			continue
-		}
-		services, err := composeServices(c.content)
-		if err != nil {
-			return nil, fmt.Errorf("reading the services %s declares: %w", c.Path, err)
-		}
-		declared[c.Stack] = services
+	declared, err := p.DeclaredServices()
+	if err != nil {
+		return nil, err
 	}
 	if len(declared) == 0 {
 		return nil, nil

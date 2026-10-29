@@ -387,7 +387,11 @@ directory is the only way something foreign is served by it. `deployment apply` 
 its plan (`printLeftovers` in `cmd/paisans/leftover.go`); `doctor` runs
 `hostcheck.Inspect` on each site that answered and reports them as `WARN`,
 and the foreign users as `info`. Both name `paisans app remove <app>` for
-each app the leftovers belong to (`Report.Apps`). Its allow list takes the inventory's probes
+each app the leftovers belong to (`Report.Apps`). apply also lists each
+container of a stack still rendered whose service that stack's compose file
+no longer declares (`ownership.UndeclaredServices`, against
+`apply.Plan.DeclaredServices`), with the `docker rm -f` that takes it off;
+`doctor`, which renders nothing, does not. Its allow list takes the inventory's probes
 from `hostcheck.ReadCommands`.
 
 `render`, `deployment apply`, `site add` and `site remove` refuse a site running the

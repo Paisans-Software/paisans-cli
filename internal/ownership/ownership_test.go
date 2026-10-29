@@ -144,3 +144,48 @@ func TestLeftoversNameTheirApps(t *testing.T) {
 		t.Errorf("Apps = %v, want %v", got, want)
 	}
 }
+
+// A container of a stack still rendered whose service its compose file no
+// longer declares is left over: a removed broker beside the app that stayed.
+// A declared service, another deployment's, an unlabelled container and a
+// stack the render does not judge are not.
+func TestUndeclaredServicesAreLeftOver(t *testing.T) {
+	cfg := fixture(t)
+	inv := &hostcheck.Inventory{Containers: []hostcheck.Container{
+		container("paisans-f2a9-talk-app-1", ours, "paisans-f2a9-talk", "app", 10),
+		container("paisans-f2a9-talk-rabbitmq-1", ours, "paisans-f2a9-talk", "rabbitmq", 11),
+		container("paisans-f2a9-talk-amqproxy-1", ours, "paisans-f2a9-talk", "amqproxy", 0),
+		container("paisans-f2a9-infra-patroni-1", ours, "paisans-f2a9-infra", "patroni", 12),
+		container("paisans-f2a9-infra-caddy-1", ours, "paisans-f2a9-infra", "caddy", 13),
+		container("paisans-0c1d-talk-rabbitmq-1", theirs, "paisans-0c1d-talk", "rabbitmq", 14),
+		container("paisans-f2a9-talk-hand-1", ours, "paisans-f2a9-talk", "", 15),
+		container("paisans-f2a9-docs-redis-1", ours, "paisans-f2a9-docs", "redis", 16),
+	}}
+	declared := map[string][]string{"talk": {"app"}, "infra": {"caddy"}}
+	got := ownership.UndeclaredServices(cfg.Deployment(), inv, declared)
+	want := []ownership.Service{
+		{Stack: "infra", Project: "paisans-f2a9-infra", Name: "patroni", Containers: []string{"paisans-f2a9-infra-patroni-1"}, Running: 1},
+		{Stack: "talk", Project: "paisans-f2a9-talk", Name: "amqproxy", Containers: []string{"paisans-f2a9-talk-amqproxy-1"}},
+		{Stack: "talk", Project: "paisans-f2a9-talk", Name: "rabbitmq", Containers: []string{"paisans-f2a9-talk-rabbitmq-1"}, Running: 1},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("services = %+v, want %+v", got, want)
+	}
+
+	r := ownership.Report{Services: got}
+	if !r.Leftover() {
+		t.Error("a report with only left over services is not left over")
+	}
+	if len(r.Apps()) != 0 {
+		t.Errorf("left over services name apps to remove: %v", r.Apps())
+	}
+	lines := strings.Join(r.LeftoverLines(), "\n")
+	for _, want := range []string{
+		"service patroni of stack infra (compose project paisans-f2a9-infra, 1 of 1 running): paisans-f2a9-infra-patroni-1",
+		"service amqproxy of stack talk (compose project paisans-f2a9-talk, stopped): paisans-f2a9-talk-amqproxy-1",
+	} {
+		if !strings.Contains(lines, want) {
+			t.Errorf("lines lack %q:\n%s", want, lines)
+		}
+	}
+}

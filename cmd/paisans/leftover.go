@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -14,8 +15,9 @@ import (
 )
 
 // printLeftovers is apply's "left over" section: this deployment's stacks
-// still on the host that the site no longer renders, and its files that no
-// apply renders any more. A whole plan's left over files are what it is about
+// still on the host that the site no longer renders, its files that no apply
+// renders any more, and its containers for a service a stack's rendered
+// compose file no longer declares, which compose leaves running. A whole plan's left over files are what it is about
 // to record; a scoped or partial plan marks nothing, so the manifest's marks
 // from the last whole apply are shown. Each is a warning naming `paisans app
 // remove` for the app it belongs to, which is what takes it off, so the
@@ -39,12 +41,18 @@ func printLeftovers(r ui.Reporter, cfg *config.Config, site string, inv *hostche
 	if err != nil {
 		return err
 	}
+	declared, err := plan.DeclaredServices()
+	if err != nil {
+		return err
+	}
+	report.Services = ownership.UndeclaredServices(cfg.Deployment(), inv, declared)
 	lines := report.LeftoverLines()
 	if len(lines) == 0 {
 		return nil
 	}
 	r.Detail("left over: this deployment's, no longer rendered for %s. apply leaves each one in place.", site)
-	// LeftoverLines describes the stacks, then the files, in that order.
+	// LeftoverLines describes the stacks, then the files, then the services,
+	// in that order.
 	hint := func(what, app string) string {
 		if app == "" {
 			return "left over: " + what
@@ -60,6 +68,12 @@ func printLeftovers(r ui.Reporter, cfg *config.Config, site string, inv *hostche
 	}
 	for i, f := range report.Files {
 		r.Warn(hint("file /"+f.Path, ownership.FileApp(f.Path)), lines[len(report.Stacks)+i])
+	}
+	for i, s := range report.Services {
+		r.Warn(fmt.Sprintf("left over: service %s of stack %s (`docker rm -f %s`)", s.Name, s.Stack, strings.Join(s.Containers, " ")), lines[len(report.Stacks)+len(report.Files)+i])
+	}
+	if len(report.Services) > 0 {
+		r.Detail("%s", "A left over service's containers keep running until removed, as the deployment's user, once nothing relies on them. Its data under the stack's directory stays.")
 	}
 	for _, line := range removeAdvice(report) {
 		r.Detail("%s", line)

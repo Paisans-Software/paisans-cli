@@ -18,7 +18,9 @@ import (
 
 // apply's plan output ends with a "left over" section naming this
 // deployment's stacks and files the site no longer renders, saying apply
-// leaves them and naming `paisans app remove` for each app they belong to. A whole plan shows what it is about to mark; a
+// leaves them and naming `paisans app remove` for each app they belong to,
+// and each container of a stack still rendered for a service its compose
+// file no longer declares, naming the `docker rm -f` that takes it off. A whole plan shows what it is about to mark; a
 // partial one shows the manifest's marks. Nothing left over prints nothing.
 func TestTheApplyPlanListsLeftovers(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
@@ -42,6 +44,7 @@ func TestTheApplyPlanListsLeftovers(t *testing.T) {
 		Containers: []hostcheck.Container{
 			{Name: "paisans-f2a9-talk-app-1", Deployment: id, Project: "paisans-f2a9-talk", PID: 1},
 			{Name: "paisans-f2a9-docs-app-1", Deployment: id, Project: "paisans-f2a9-docs", PID: 2},
+			{Name: "paisans-f2a9-talk-rabbitmq-1", Deployment: id, Project: "paisans-f2a9-talk", Service: "rabbitmq", PID: 3},
 		},
 		ManifestFiles: []render.ManifestFile{{Path: "srv/paisans/f2a9/docs/.env", Leftover: true, LeftoverSince: "2026-10-01T00:00:00Z"}},
 	}
@@ -58,7 +61,9 @@ func TestTheApplyPlanListsLeftovers(t *testing.T) {
 		!warned(rec, "`paisans app remove docs`", "") ||
 		!rec.Has("detail", "left over: this deployment's, no longer rendered for home-a. apply leaves each one in place.") ||
 		!rec.Has("detail", "`paisans app remove docs` takes docs's off every site") ||
-		strings.Contains(rec.Lines(), "talk") {
+		!warned(rec, "left over: service rabbitmq of stack talk (`docker rm -f paisans-f2a9-talk-rabbitmq-1`)", "service rabbitmq of stack talk (compose project paisans-f2a9-talk, 1 of 1 running): paisans-f2a9-talk-rabbitmq-1") ||
+		!rec.Has("detail", "A left over service's containers keep running until removed") ||
+		strings.Contains(rec.Lines(), "talk-app") || strings.Contains(rec.Lines(), "app remove talk") {
 		t.Errorf("whole plan:\n%s", rec.Lines())
 	}
 	if strings.Contains(rec.Lines(), "docs/.env") {

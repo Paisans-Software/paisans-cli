@@ -20,6 +20,7 @@ package ownership
 import (
 	"fmt"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 
@@ -38,6 +39,11 @@ type Report struct {
 	Stacks []Stack
 	// Files are the manifest's entries marked left over, sorted by path.
 	Files []render.ManifestFile
+	// Services are this deployment's containers in a stack the site still
+	// renders, for a service that stack's compose file no longer declares,
+	// sorted by stack and service. Compose leaves such a container running.
+	// Classify leaves it empty; UndeclaredServices fills it from a render.
+	Services []Service
 	// HostSites are the *.caddy files in the deployment's render.HostSitesDir, which the
 	// gateway's Caddy serves, on a gateway site only.
 	HostSites []string
@@ -53,8 +59,20 @@ type Stack struct {
 	Running    int
 }
 
+// Service is one left over compose service of a stack still rendered.
+type Service struct {
+	// Stack is the stack, Project its compose project, Name the service.
+	Stack, Project, Name string
+	// Containers are its containers by name, sorted, and Running how many
+	// of them run.
+	Containers []string
+	Running    int
+}
+
 // Leftover reports whether anything of this deployment's is left over.
-func (r Report) Leftover() bool { return len(r.Stacks) > 0 || len(r.Files) > 0 }
+func (r Report) Leftover() bool {
+	return len(r.Stacks) > 0 || len(r.Files) > 0 || len(r.Services) > 0
+}
 
 // Foreign reports whether anything foreign relies on this site's Caddy.
 func (r Report) Foreign() bool { return len(r.HostSites) > 0 }
@@ -121,15 +139,56 @@ func Classify(cfg *config.Config, site string, inv *hostcheck.Inventory, manifes
 	return out, nil
 }
 
-// LeftoverLines describes each leftover in one line, for a plan or a report.
+// UndeclaredServices is every container of d's in a stack of declared, the
+// services each stack's rendered compose file declares, whose service is not
+// among them. A stack absent from declared is not judged, and a container
+// without a service label is not one compose started.
+func UndeclaredServices(d deployment.Deployment, inv *hostcheck.Inventory, declared map[string][]string) []Service {
+	prefix := d.Prefix() + "-"
+	left := map[string]*Service{}
+	for _, c := range inv.Containers {
+		if c.Deployment != d.ID || c.Service == "" {
+			continue
+		}
+		stack, ok := strings.CutPrefix(c.Project, prefix)
+		if !ok {
+			continue
+		}
+		services, ok := declared[stack]
+		if !ok || slices.Contains(services, c.Service) {
+			continue
+		}
+		key := stack + "/" + c.Service
+		s := left[key]
+		if s == nil {
+			s = &Service{Stack: stack, Project: c.Project, Name: c.Service}
+			left[key] = s
+		}
+		s.Containers = append(s.Containers, c.Name)
+		if c.PID > 0 {
+			s.Running++
+		}
+	}
+	out := make([]Service, 0, len(left))
+	for _, s := range left {
+		sort.Strings(s.Containers)
+		out = append(out, *s)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Stack != out[j].Stack {
+			return out[i].Stack < out[j].Stack
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
+// LeftoverLines describes each leftover in one line, for a plan or a report:
+// the stacks, then the files, then the services.
 func (r Report) LeftoverLines() []string {
 	var out []string
 	for _, s := range r.Stacks {
-		state := "stopped"
-		if s.Running > 0 {
-			state = fmt.Sprintf("%d of %d running", s.Running, len(s.Containers))
-		}
-		out = append(out, fmt.Sprintf("stack %s (compose project %s, %s): %s", s.Name, s.Project, state, strings.Join(s.Containers, ", ")))
+		out = append(out, fmt.Sprintf("stack %s (compose project %s, %s): %s", s.Name, s.Project, runState(s.Running, len(s.Containers)), strings.Join(s.Containers, ", ")))
 	}
 	for _, f := range r.Files {
 		line := "file /" + f.Path
@@ -138,7 +197,18 @@ func (r Report) LeftoverLines() []string {
 		}
 		out = append(out, line)
 	}
+	for _, s := range r.Services {
+		out = append(out, fmt.Sprintf("service %s of stack %s (compose project %s, %s): %s", s.Name, s.Stack, s.Project, runState(s.Running, len(s.Containers)), strings.Join(s.Containers, ", ")))
+	}
 	return out
+}
+
+// runState says how many of n containers run.
+func runState(running, n int) string {
+	if running == 0 {
+		return "stopped"
+	}
+	return fmt.Sprintf("%d of %d running", running, n)
 }
 
 // ForeignLines describes each foreign user of the site's Caddy in one line.
@@ -152,7 +222,9 @@ func (r Report) ForeignLines() []string {
 
 // Apps names the apps the leftovers belong to, sorted: each left over stack
 // but the infrastructure stack, and the app each left over file is under or
-// routes to. These are what `paisans app remove <app>` takes.
+// routes to. These are what `paisans app remove <app>` takes. A left over
+// service is not one: its app is still declared, and removing the app would
+// take the services it still runs.
 func (r Report) Apps() []string {
 	seen := map[string]bool{}
 	for _, s := range r.Stacks {
