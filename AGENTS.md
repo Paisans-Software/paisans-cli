@@ -228,7 +228,11 @@ release and below the next one's pre-releases: a build of `develop` never
 reports a release it is not. A pre-release, `make bump VERSION=0.3.0-rc.1`,
 is released like a release, as a GitHub pre-release that never becomes the
 latest; `0.3.0-dev < 0.3.0-rc.1 < 0.3.0-rc.2 < 0.3.0`, as semantic versioning
-orders them. Every record the toolkit writes carries the build
+orders them. `requires_toolkit` alone counts a `-dev` version as meeting
+every pre-release of its own release, since `develop` holds each release
+candidate cut from it, so a build of `develop` can use a catalog release that
+needs one; it still never meets the release itself. Founder decision. Every
+record the toolkit writes carries the build
 that wrote it, `version.Build`: the version, the commit and whether the tree
 was modified. `0.x` holds while command names remain
 provisional. The operator reconciler, which the `pocket-id` blueprint runs,
