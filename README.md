@@ -1526,8 +1526,8 @@ and **deletes every system the file does not list**, history included
 (`internal/hub/config/config.go`, `SyncSystems` at `v0.21.1`). So `site add`
 and `site remove` re-render the hub with the monitor, and the next apply
 restarts it: a new site appears and a removed one is dropped with no visit to
-the UI. The file is rendered 0600 and overwritten if the hub rewrote it, which
-is right, since the toolkit owns it. The hub reads its private key from
+the UI. The file is rendered 0600 at every apply, since the toolkit owns it and the
+hub only reads it. The hub reads its private key from
 `/beszel_data/id_ed25519` (`internal/hub/hub.go:152-201`).
 
 **The agent runs in every site's `infra` stack** whenever a `beszel` app is
@@ -1540,8 +1540,8 @@ since `TOKEN` is the site's credential at the hub; `KEY` is the hub's public
 key and `SYSTEM_NAME` the site's name. Three details follow from how it runs:
 
 * **`DATA_DIR`** is `/var/lib/beszel-agent`, bound from the infra stack's
-  `beszel-agent/data`. The agent keeps the hub's fingerprint there, pinned on
-  its first connect, so it survives a restart.
+  `beszel-agent/data`. The agent keeps its own fingerprint there, which the hub pins on the
+  agent's first connect, so it survives a restart.
 * **The socket path is learnt over ssh**, after rendering, so the compose file
   mounts `${PAISANS_DOCKER_SOCKET:?run by paisans deployment apply}` and the
   transport exports `PAISANS_DOCKER_SOCKET` beside the `DOCKER_HOST` it
@@ -1562,7 +1562,10 @@ deployment user's Docker can.
 **Per container CPU, memory and I/O need delegation, which `site admit`
 already grants.** It writes `Delegate=cpu cpuset io memory pids` for
 `user@.service` on every host, so the controllers are there on Ubuntu 22.04
-and 24.04 alike, and nothing more is needed and `doctor` has no check for it.
+and 24.04 alike, and `doctor` has no check for it. A host's own drop-in at
+that path is left as it is, with a warning (`planDelegation`,
+`internal/hostadmit/user.go`), and on a running manager a drop-in takes effect
+at the manager's next start.
 
 **Rotation.** `sites.<site>.beszel_token` is `hex32`, 64 hexadecimal
 characters, generated only while a hub is declared. `paisans secrets rotate
@@ -1578,8 +1581,8 @@ unencrypted OpenSSH private key written to `id_ed25519` at 0600, and
 agent.
 
 The image tracks `beszel` and `beszel-agent` in the core catalog are optional
-and held to `0.21.`: Beszel is 0.x, and a minor may change the agent's
-protocol, so a new minor is a catalog release.
+and held to `0.21.`: Beszel is 0.x, so the track is held to one minor, and a new minor is a
+catalog release.
 
 ## Adding a site, and the constraint that shapes it
 
