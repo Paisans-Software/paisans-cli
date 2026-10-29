@@ -75,6 +75,7 @@ func TestNoMonitorSiteSkipsTheReseed(t *testing.T) {
 	defer siteadd.SetFast()()
 	w := newWorld(t)
 	delete(w.cfg.Sites, "watch")
+	delete(w.cfg.Apps, "stats")
 	delete(w.cfg.Apps, "health")
 	delete(w.hosts, "watch")
 	p := build(t, w)

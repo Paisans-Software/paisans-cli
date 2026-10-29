@@ -145,6 +145,7 @@ func TestAFailedReseedNamesTheApply(t *testing.T) {
 func TestNoMonitorSitePlansNoReseed(t *testing.T) {
 	cfg, secrets, hosts := watched(t)
 	delete(cfg.Sites, "watch")
+	delete(cfg.Apps, "stats")
 	delete(cfg.Apps, "health")
 	delete(hosts, "watch")
 	p, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
