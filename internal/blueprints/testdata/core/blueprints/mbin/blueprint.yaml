@@ -2,9 +2,9 @@
 # Paisans reads it; internal/blueprints.Parse in paisans-cli documents every key.
 apiVersion: paisans.blueprint/v3
 name: mbin
-# Its .env reads a consumer's .Values, which a toolkit before 0.3.0-rc.19
+# Its .env reads a consumer's .Values, which a toolkit before 0.3.0-rc.20
 # does not have, so that toolkit keeps the release before this one.
-requires_toolkit: ">= 0.3.0-rc.19"
+requires_toolkit: ">= 0.3.0-rc.20"
 services:
   # The paisans fork, not upstream: it carries the generic OIDC
   # provider this blueprint's .env configures, which upstream does not
