@@ -61,11 +61,18 @@ func (c *checker) engagement() {
 				"the bot's display name is empty or holds a control character",
 				"is %q. Members see the bot by this name, and it is rendered into one .env line, so it must hold something besides spaces and no line break, tab or other control character. Write one line, or leave it unset for Community Bot.", display)
 		}
-		if room, ok := c.cfg.Apps[name].Settings["community_room_name"].(string); ok && (!displayName(room) || render.RoomAliasLocalpart(room) == "") {
-			c.refuse("engagement-community-room-name-invalid", fmt.Sprintf("apps.%s.settings.community_room_name", name),
-				"the community room's name is empty, holds a control character or has no letter or digit",
-				"is %q. Members see the room by this name, its alias is made from its letters and digits, and it is rendered into one .env line, so it must be one line holding at least one letter or digit. Write one, or leave it unset for the community's name plus Community.", room)
+		if _, set := c.cfg.Apps[name].Settings["community_room_name"]; set {
+			if room, ok := c.cfg.Apps[name].Settings["community_room_name"].(string); ok && (!displayName(room) || render.RoomAliasLocalpart(room) == "") {
+				c.refuse("engagement-community-room-name-invalid", fmt.Sprintf("apps.%s.settings.community_room_name", name),
+					"the community room's name is empty, holds a control character or has no letter or digit",
+					"is %q. Members see the room by this name, its alias is made from its letters and digits, and it is rendered into one .env line, so it must be one line holding at least one letter or digit. Write one, or leave it unset for the community's name plus Community.", room)
+			}
+		} else if room, _, _ := render.CommunityRoom(c.cfg, name); !displayName(room) {
+			c.refuse("engagement-community-room-name-invalid", "community.name",
+				"the community room's name, made from the community's name, holds a control character",
+				"is %q. The engagement app names its Matrix room after the community, and the name is rendered into one .env line, so it must hold no line break, tab or other control character. Write the community's name on one line, or set apps.%s.settings.community_room_name.", c.cfg.Community.Name, name)
 		}
+		c.forumClustered(name)
 		if limit, ok := c.cfg.Apps[name].Settings["welcome_email_daily_limit"].(int); ok && limit < 1 {
 			c.refuse("engagement-welcome-limit-invalid", fmt.Sprintf("apps.%s.settings.welcome_email_daily_limit", name),
 				"the daily welcome email limit is less than 1",
@@ -103,6 +110,28 @@ func (c *checker) engagement() {
 			c.refuse("engagement-source-not-clustered", fmt.Sprintf("apps.%s.placement", mbins[0]),
 				"the engagement digest reads only a clustered mbin",
 				"is pinned. The engagement digest reads Mbin only when Mbin has cluster placement, because its read only role is created in the cluster's Postgres.")
+		}
+	}
+}
+
+// forumClustered refuses an engagement app's forum link to an app that is
+// not clustered: the service calls the forum's API on its own site's mesh
+// address, where only a clustered forum runs beside it. A forum outside the
+// deployment is link-shared-secret-outside's, since the link shares the
+// agent client's secret.
+func (c *checker) forumClustered(app string) {
+	for _, consume := range blueprints.Consumes(c.cfg.Apps[app].Blueprint) {
+		if consume.Role != "forum" {
+			continue
+		}
+		link, err := blueprints.LinkOf(c.cfg, app, consume)
+		if err != nil || !link.Linked || link.Provider == "" {
+			continue
+		}
+		if c.cfg.Apps[link.Provider].Placement.Mode != config.PlacementCluster {
+			c.refuse("engagement-forum-not-clustered", fmt.Sprintf("apps.%s.settings.forum", app),
+				"the engagement app's forum is not clustered",
+				"links to %s, which is pinned. The service calls the forum's API on its own site's mesh address, where only a clustered forum runs beside it. Give %s placement: cluster, or name a clustered forum.", link.Provider, link.Provider)
 		}
 	}
 }
