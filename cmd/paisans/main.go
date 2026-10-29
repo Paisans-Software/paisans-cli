@@ -657,13 +657,22 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	// On its own, apply --site holds the deployment's lease on every ready
 	// site, as apply without --site does: it publishes the version it
 	// applies to all of them. As a step of that run, the run holds it.
+	// Before the lease, a site a newer paisans last applied refuses it:
+	// every ready site, since the version is published to all of them. As a
+	// step of the run, the run checked them.
+	readyHost := func(name string) apply.Transport {
+		if name == *site {
+			return siteTransport(name, cfg.Sites[name], *destination)
+		}
+		return convergeHost(name, cfg.Sites[name])
+	}
+	if reviewedByRun == nil {
+		if err := refuseNewerToolkit(r, cfg, readySites(cfg, sites), readyHost); err != nil {
+			return err
+		}
+	}
 	if *execute && reviewedByRun == nil {
-		release, err := takeLease(r, cfg, readySites(cfg, sites), func(name string) apply.Transport {
-			if name == *site {
-				return siteTransport(name, cfg.Sites[name], *destination)
-			}
-			return convergeHost(name, cfg.Sites[name])
-		}, "deployment apply --site "+*site, leaseOptions{breakLease: *breakLease, answers: ans, stdin: stdin, stdout: stdout})
+		release, err := takeLease(r, cfg, readySites(cfg, sites), readyHost, "deployment apply --site "+*site, leaseOptions{breakLease: *breakLease, answers: ans, stdin: stdin, stdout: stdout})
 		if err != nil {
 			return err
 		}

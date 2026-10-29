@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
+	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
@@ -45,6 +46,9 @@ func TestMain(m *testing.M) {
 		}
 		return lease.Take(taken, d, h, takeover)
 	}
+	// No test's apply reads which paisans last applied each site; a test
+	// about the check sets toolkitCheck back.
+	toolkitCheck = func(string, apply.Transport, deployment.Deployment) error { return nil }
 	dnsProviderFor = func(name, _ string) (dns.Provider, error) {
 		return nil, fmt.Errorf("test: no DNS provider may be built in tests, asked for %s", name)
 	}

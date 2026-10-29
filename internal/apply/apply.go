@@ -1265,6 +1265,12 @@ func Execute(plan *Plan, t Transport) error {
 	if err := Refusal(plan); err != nil {
 		return err
 	}
+	// The command checked every site before it planned; this reads the
+	// manifest again at the last moment, so an apply by a newer paisans
+	// since then is refused before this one writes over it.
+	if err := CheckToolkit(plan.Site, t, plan.Deployment); err != nil {
+		return err
+	}
 	if err := settleOwedVolumes(plan, t); err != nil {
 		return err
 	}

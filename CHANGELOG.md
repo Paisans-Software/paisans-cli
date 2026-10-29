@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Added
+
+- `deployment apply` refuses, before it changes anything, when a newer paisans release last applied one or more sites, naming each and the release to upgrade to; a `-dev` build counts as its own release candidates.
+
 ### Changed
 
 - The `engagement` blueprint is gateable with `/u/*` and `/healthz` open, so its web digest can name the member by the gate; `validate` warns when an app linked to a homeserver is not `gated`.

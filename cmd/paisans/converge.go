@@ -838,6 +838,12 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	}
 	runSites = sites
 	showPending(r, declaration, sites)
+	// A site a newer paisans last applied refuses the run before anything
+	// reaches a host for more than this read.
+	r.Section("toolkit")
+	if err := refuseNewerToolkit(r, cfg, readySites(cfg, sites), func(name string) apply.Transport { return convergeHost(name, cfg.Sites[name]) }); err != nil {
+		return err
+	}
 	// Every site's architecture is read before anything is planned, and a
 	// missing one is recorded before the file is gathered and published:
 	// each step of the run refuses bytes changed after the publish. See
