@@ -272,6 +272,3 @@ func SourceReaders(cfg *config.Config, secrets *config.Secrets, app, source stri
 	secrets.Apps[app] = secrets.Apps["digest"]
 	return sourceReaders(cfg, secrets, []Database{{App: source, Role: source, Name: source}})
 }
-
-// NewerThan is newerThan, for the toolkit check's table test.
-func NewerThan(recorded, have string) bool { return newerThan(recorded, have) }

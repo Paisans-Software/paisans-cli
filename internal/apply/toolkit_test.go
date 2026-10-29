@@ -116,26 +116,3 @@ func TestExecuteRefusesANewerApplySinceThePlan(t *testing.T) {
 		t.Error("a refused apply still wrote files")
 	}
 }
-
-// A build of develop counts as every pre-release of its own release, and
-// as nothing newer.
-func TestNewerThan(t *testing.T) {
-	for _, tc := range []struct {
-		recorded, have string
-		newer          bool
-	}{
-		{"0.3.1", "0.3.0", true},
-		{"0.3.0", "0.3.0-rc.14", true},
-		{"0.3.0-rc.14", "0.3.0-rc.13", true},
-		{"0.3.0-rc.14", "0.3.0-dev", false},
-		{"0.3.0", "0.3.0-dev", true},
-		{"0.4.0-rc.1", "0.3.0-dev", true},
-		{"0.3.0-dev", "0.3.0-dev", false},
-		{"0.3.0-dev", "0.3.0-rc.14", false},
-		{"0.2.0", "0.3.0", false},
-	} {
-		if got := apply.NewerThan(tc.recorded, tc.have); got != tc.newer {
-			t.Errorf("newerThan(%s, %s) = %v, want %v", tc.recorded, tc.have, got, tc.newer)
-		}
-	}
-}

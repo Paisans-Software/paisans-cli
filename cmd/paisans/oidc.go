@@ -96,6 +96,11 @@ func runOIDCClientCreate(args []string) error {
 		if _, err := admittedHosts(r, cfg, map[string]registry.Runner{where: registryHost(where, cfg.Sites[where], *destination)}); err != nil {
 			return err
 		}
+		// The client is the deployment's, which apply makes as this
+		// release knows it; a newer release's is not remade by this one.
+		if err := refuseNewerToolkit(r, cfg, []string{where}, func(string) apply.Transport { return siteTransport(where, cfg.Sites[where], *destination) }, "oidc client create", false); err != nil {
+			return err
+		}
 	}
 
 	if *secretsPath == "" {

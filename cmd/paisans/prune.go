@@ -58,6 +58,11 @@ func runPrune(args []string) error {
 	if _, err := admittedHosts(r, cfg, map[string]registry.Runner{*site: transport}); err != nil {
 		return err
 	}
+	// Which volumes are dangling is this release's reading of their
+	// labels, so a newer one's volumes are not judged by it.
+	if err := refuseNewerToolkit(r, cfg, []string{*site}, func(string) apply.Transport { return transport }, "prune --site "+*site, false); err != nil {
+		return err
+	}
 	plan, err := ui.Get(r, "read volumes", func() (*apply.VolumePrune, error) {
 		return apply.BuildVolumePrune(cfg.Deployment(), *site, transport)
 	})

@@ -12,7 +12,8 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Added
 
-- `deployment apply` refuses, before it changes anything, when a newer paisans release last applied one or more sites, naming each and the release to upgrade to; a `-dev` build counts as its own release candidates.
+- `deployment apply`, `deployment publish` and every other command that changes a site refuse, before changing anything, when a newer paisans release last applied one or more of its sites, naming each and the release to upgrade to.
+- `site admit` refuses a host any deployment of which a newer paisans claimed, as `site evict` already does.
 
 ### Changed
 
@@ -22,6 +23,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Fixed
 
+- A build of `develop`, `X.Y.Z-dev`, counts as every pre-release of `X.Y.Z` when `site evict` and `site remove` compare it with the release that last changed the host, so it is not refused on a host a release candidate set up.
 - `site admit` turns on forwarding on the relay, the first site by name dialled on its `public_address` or `endpoint`, and no other site, matching the WireGuard render; apply refuses only a relay without it.
 - A build of `develop`, `X.Y.Z-dev`, meets a blueprint's `requires_toolkit` of any `X.Y.Z` pre-release, so it uses the catalog releases a release candidate would.
 - `site admit` gives a relay `ufw route allow in on psns-<token> out on psns-<token>`, since ufw's default DROP forward policy otherwise drops the mesh traffic it relays, and `site evict` removes it.

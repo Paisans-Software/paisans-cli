@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/progname"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
@@ -76,4 +80,64 @@ func TestApplyGoesOnWhenNoNewerPaisansAppliedASite(t *testing.T) {
 	if len(*ran) == 0 {
 		t.Error("the run ran no step")
 	}
+}
+
+// publish is refused as apply is, before its lease and its gather, and
+// pushes nothing.
+func TestPublishIsRefusedWhenANewerPaisansLastAppliedASite(t *testing.T) {
+	f := newApplyStore(t, 1)
+	f.based(t)
+	f.editDraft(t, "# next\n")
+	takes := heldBy(t, "bob@desk")
+	appliedByNewer(t, map[string]string{"home-a": "99.0.0"})
+	var out bytes.Buffer
+	var err error
+	captureStdout(t, func() {
+		err = runDeployment([]string{"publish", "--config", f.cfgPath, "--execute"}, noTerminalStdin(), &out)
+	})
+	text := problemText(err)
+	if err == nil || !strings.Contains(text, "home-a: paisans 99.0.0") || !strings.Contains(text, "run "+progname.Cmd()+" deployment publish again") {
+		t.Fatalf("err = %v", text)
+	}
+	if len(*takes) != 0 {
+		t.Error("a refused publish took the lease")
+	}
+	if h, _ := f.sys.Head(); h != f.shas[0] || f.pushed() {
+		t.Fatalf("a refused publish moved the head to %s, pushed %v", h, f.pushed())
+	}
+}
+
+// A site that does not answer is passed over with a warning, since publish
+// pushes it nothing; one that answers is still checked.
+func TestRefuseNewerToolkitPassesOverASiteThatDoesNotAnswer(t *testing.T) {
+	cfg := fixtureCfg(t)
+	saved := toolkitCheck
+	toolkitCheck = func(site string, _ apply.Transport, _ deployment.Deployment) error {
+		if site == "home-b" {
+			return &apply.NewerToolkitError{Site: site, Build: version.Build{Version: "99.0.0", Commit: strings.Repeat("a", 40)}}
+		}
+		return apply.CheckToolkit(site, unansweredHost{}, cfg.Deployment())
+	}
+	t.Cleanup(func() { toolkitCheck = saved })
+	host := func(string) apply.Transport { return nil }
+	r := &ui.Recorder{}
+	if err := refuseNewerToolkit(r, cfg, []string{"home-a"}, host, "deployment publish", true); err != nil {
+		t.Fatalf("an unanswering site refused the publish: %v", err)
+	}
+	if !strings.Contains(r.Lines(), "home-a was not checked for a newer paisans") {
+		t.Errorf("no warning for the site passed over:\n%s", r.Lines())
+	}
+	if err := refuseNewerToolkit(&ui.Recorder{}, cfg, []string{"home-a"}, host, "deployment apply", false); err == nil {
+		t.Error("apply went on past a site it could not read")
+	}
+	if err := refuseNewerToolkit(&ui.Recorder{}, cfg, []string{"home-a", "home-b"}, host, "deployment publish", true); err == nil {
+		t.Error("passing over one site let a newer one through")
+	}
+}
+
+// unansweredHost is a site whose every read fails, as one that is down.
+type unansweredHost struct{ emptyHost }
+
+func (unansweredHost) ReadFile(string) (string, bool, error) {
+	return "", false, errors.New("ssh: connect to host home-a port 22: Connection refused")
 }

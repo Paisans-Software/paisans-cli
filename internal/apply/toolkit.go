@@ -1,8 +1,8 @@
 package apply
 
 import (
+	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/version"
@@ -19,15 +19,13 @@ type NewerToolkitError struct {
 }
 
 func (e *NewerToolkitError) Error() string {
-	return fmt.Sprintf("%s was last applied by paisans %s, and this is paisans %s, so it may not know everything that release put on the host. Nothing was changed on %s. Upgrade paisans to %s or later, and apply again", e.Site, e.Build, version.Version, e.Site, e.Build.Version)
+	return fmt.Sprintf("%s was last applied by paisans %s, and this is paisans %s, so it may not know everything that release put on the host. Nothing was changed on %s. Upgrade paisans to %s or later, and run the command again", e.Site, e.Build, version.Version, e.Site, e.Build.Version)
 }
 
 // CheckToolkit reads the manifest on site and refuses, with a
 // *NewerToolkitError, one that a newer release of paisans wrote. A build of
 // the same release passes, whatever its commit, as does an older release and
-// a host with no manifest yet. A build of develop, X.Y.Z-dev, also passes
-// every pre-release of X.Y.Z, as it meets a blueprint's requires_toolkit of
-// one: develop holds every release candidate cut from it. A manifest whose
+// a host with no manifest yet, as version.Newer orders them. A manifest whose
 // version this paisans cannot order is refused as readManifest refuses it.
 func CheckToolkit(site string, t Transport, d deployment.Deployment) error {
 	_, m, err := readManifest(t, d)
@@ -37,19 +35,22 @@ func CheckToolkit(site string, t Transport, d deployment.Deployment) error {
 	if m.Build.Version == "" {
 		return nil
 	}
-	if newerThan(m.Build.Version, version.Version) {
+	if newer, err := version.Newer(m.Build.Version, version.Version); err == nil && newer {
 		return &NewerToolkitError{Site: site, Build: m.Build}
 	}
 	return nil
 }
 
-// newerThan reports whether recorded is a newer release than have, a build
-// of develop counting as every pre-release of its own X.Y.Z.
-func newerThan(recorded, have string) bool {
-	c, err := version.Compare(recorded, have)
-	if err != nil || c <= 0 {
-		return false
-	}
-	core, dev := strings.CutSuffix(have, "-dev")
-	return !(dev && version.IsPreRelease(recorded) && strings.HasPrefix(recorded, core+"-"))
+// unreadError is a manifest the transport could not read: the host did not
+// answer, as against a manifest it answered with that is not one.
+type unreadError struct{ err error }
+
+func (e *unreadError) Error() string { return e.err.Error() }
+func (e *unreadError) Unwrap() error { return e.err }
+
+// Unread reports whether err is CheckToolkit failing to read the manifest at
+// all, rather than reading one it refuses.
+func Unread(err error) bool {
+	var u *unreadError
+	return errors.As(err, &u)
 }

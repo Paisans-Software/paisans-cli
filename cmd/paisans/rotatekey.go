@@ -102,6 +102,9 @@ func runStorageRotateKey(args []string) error {
 		if _, err := admittedSites(r, cfg, union(cfg.Storage.Garage.Sites[:1], render.AppSites(cfg)[*appName])...); err != nil {
 			return err
 		}
+		if err := refuseNewerToolkit(r, cfg, union(cfg.Storage.Garage.Sites[:1], render.AppSites(cfg)[*appName]), func(name string) apply.Transport { return transports[name] }, "storage rotate-key --app "+*appName, false); err != nil {
+			return err
+		}
 	}
 	plan, err := ui.Get(r, "read "+*appName+"'s key", func() (*rotatekey.Plan, error) {
 		return rotatekey.Build(rotatekey.Options{

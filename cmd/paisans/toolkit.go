@@ -23,7 +23,11 @@ var toolkitCheck = apply.CheckToolkit
 // site is read, so the refusal names each such site and the release to
 // upgrade to, and none is changed. Execute reads each manifest again before
 // it writes, for an apply by a newer paisans in between.
-func refuseNewerToolkit(r ui.Reporter, cfg *config.Config, sites []string, host func(name string) apply.Transport) error {
+//
+// command is what the refusal says to run again. With skipUnread, a site that does not answer is warned of and passed
+// over, for a command that goes on without it; a manifest it answers with
+// is checked all the same.
+func refuseNewerToolkit(r ui.Reporter, cfg *config.Config, sites []string, host func(name string) apply.Transport, command string, skipUnread bool) error {
 	line := r.Step("check which paisans last applied each site")
 	var newer []*apply.NewerToolkitError
 	for _, name := range sites {
@@ -32,6 +36,8 @@ func refuseNewerToolkit(r ui.Reporter, cfg *config.Config, sites []string, host 
 		switch {
 		case errors.As(err, &n):
 			newer = append(newer, n)
+		case skipUnread && apply.Unread(err):
+			r.Warn(name+" was not checked for a newer paisans", errLine(err)+". It is not reached for anything else either.")
 		case err != nil:
 			line.Fail(err)
 			return err
@@ -52,7 +58,7 @@ func refuseNewerToolkit(r ui.Reporter, cfg *config.Config, sites []string, host 
 	line.End(ui.Failed, fmt.Sprintf("%s last applied by a newer paisans", plural(len(newer), "site")))
 	return &ui.Problem{
 		Hint: "a newer paisans last applied this deployment",
-		Explain: strings.Join(lines, "\n") + fmt.Sprintf("\nThis is paisans %s, which may not know everything a newer release put on those hosts, and applying would write over it. Nothing was changed. Upgrade paisans to %s or later, and run %s deployment apply again.",
-			version.Version, want, progname.Cmd()),
+		Explain: strings.Join(lines, "\n") + fmt.Sprintf("\nThis is paisans %s, which may not know everything a newer release put on those hosts, and applying would write over it. Nothing was changed. Upgrade paisans to %s or later, and run %s %s again.",
+			version.Version, want, progname.Cmd(), command),
 	}
 }

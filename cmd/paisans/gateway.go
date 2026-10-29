@@ -124,6 +124,12 @@ func gatewayMoveCommand(args []string) error {
 	if _, err := admittedSites(r, cfg, plan.From, plan.To); err != nil {
 		return err
 	}
+	// As a step of apply, the run checked every site already.
+	if !insideApply {
+		if err := refuseNewerToolkit(r, cfg, []string{plan.From, plan.To}, func(name string) apply.Transport { return transports[name] }, "gateway move", false); err != nil {
+			return err
+		}
+	}
 	if !*execute || r.Verbose() {
 		plan.Show(r)
 	}

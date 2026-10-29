@@ -165,6 +165,11 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// The removal rewrites each site's manifest, so a site a newer paisans
+	// last applied refuses it before anything changes.
+	if err := refuseNewerToolkit(r, cfg, cfg.SiteNames(), func(name string) apply.Transport { return hosts[name] }, "app remove "+app, false); err != nil {
+		return err
+	}
 	// The monitor is reseeded last, from the render without the app, so
 	// its checks of the app go with it. Each monitor site is host checked
 	// as apply would check it.

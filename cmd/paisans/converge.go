@@ -841,7 +841,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	// A site a newer paisans last applied refuses the run before anything
 	// reaches a host for more than this read.
 	r.Section("toolkit")
-	if err := refuseNewerToolkit(r, cfg, readySites(cfg, sites), func(name string) apply.Transport { return convergeHost(name, cfg.Sites[name]) }); err != nil {
+	if err := refuseNewerToolkit(r, cfg, readySites(cfg, sites), func(name string) apply.Transport { return convergeHost(name, cfg.Sites[name]) }, "deployment apply", false); err != nil {
 		return err
 	}
 	// Every site's architecture is read before anything is planned, and a

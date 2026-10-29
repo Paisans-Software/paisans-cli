@@ -117,6 +117,12 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	if down := sites.Down(); len(down) > 0 {
 		return &ui.Problem{Hint: "site add " + site + ": a site joins once every joined site answers", Explain: "The join changes every joined site's mesh and HAProxy files, and " + strings.Join(down, ", ") + " does not answer:\n" + topology.DownLine(down[0]) + "\nNothing was changed."}
 	}
+	// As a step of apply, the run checked every site already.
+	if reviewedByRun == nil {
+		if err := refuseNewerToolkit(r, cfg, readySites(cfg, sites), func(name string) apply.Transport { return transports[name] }, "site add "+site, false); err != nil {
+			return err
+		}
+	}
 	// The new site's architecture is recorded as site prepare records it;
 	// preflight compares it with the data sites'.
 	read, err := readArchitectures(r, cfg, []string{site}, func(name string) hostarch.Runner { return transports[name] })

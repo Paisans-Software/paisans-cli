@@ -127,6 +127,11 @@ func runMeshRekey(args []string) error {
 	if _, err := admittedSites(r, cfg, withoutNames(cfg.SiteNames(), plan.Joining)...); err != nil {
 		return err
 	}
+	// The rekey saves its next key and pauses Patroni before its first
+	// apply, so a site a newer paisans last applied refuses it before then.
+	if err := refuseNewerToolkit(r, cfg, withoutNames(cfg.SiteNames(), plan.Joining), func(name string) apply.Transport { return transports[name] }, "mesh rekey", false); err != nil {
+		return err
+	}
 	if !*execute {
 		r.Result("Nothing changed. Re-run with --execute to rekey.")
 		return nil
