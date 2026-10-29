@@ -953,11 +953,12 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			// The compose file moves the image; an environment file under
 			// infra moves what the replaced container starts with. Both
 			// replace the gateway, so both need the gates. The heartbeat's
-			// own environment file is the exception: the heartbeat service
-			// alone reads it, and `up -d` replaces only the service whose
-			// configuration changed, so a new monitor's URL reaching the
+			// and the Beszel agent's own environment files are the
+			// exception: each service alone reads its own, and `up -d`
+			// replaces only the service whose configuration changed, so a
+			// new monitor's URL or a rotated beszel_token reaching the
 			// gateway site never touches Caddy.
-			if rel == d.RelPath(gatewayCompose) || (change.Stack == infraStack && isEnvironment(rel) && infraService(rel) != heartbeatService) {
+			if rel == d.RelPath(gatewayCompose) || (change.Stack == infraStack && isEnvironment(rel) && !ownEnvironment(infraService(rel))) {
 				gatewayComposeChanged = true
 			}
 		}
@@ -1866,6 +1867,16 @@ func isStackCompose(c Change) bool {
 // heartbeatService is the infrastructure stack's heartbeat pusher, whose
 // files sit under heartbeat/ (internal/render/heartbeat.go).
 const heartbeatService = "heartbeat"
+
+// beszelAgentService is the infrastructure stack's Beszel agent, whose env
+// file sits under beszel-agent/ (internal/render/beszel.go).
+const beszelAgentService = "beszel-agent"
+
+// ownEnvironment reports whether an infrastructure service's env file is
+// read by that service alone, so a change to it replaces nothing else.
+func ownEnvironment(service string) bool {
+	return service == heartbeatService || service == beszelAgentService
+}
 
 // infraService returns the compose service a file of the infrastructure stack
 // is mounted into, empty when it is not one service's. The templates put each

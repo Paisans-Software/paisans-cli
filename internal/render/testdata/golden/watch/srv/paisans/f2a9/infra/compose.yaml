@@ -24,6 +24,31 @@ services:
       - /srv/paisans/f2a9/infra/caddy/etc:/etc/caddy:ro
       - /srv/paisans/f2a9/infra/caddy/data:/data
       - /srv/paisans/f2a9/infra/caddy/config:/config
+  # This site's Beszel agent, which dials the hub with this site's token and
+  # reports the host and its containers. On the host's network, like the rest
+  # of this stack, so the figures are the host's. The socket is the
+  # deployment user's rootless Docker, whose path apply learns over ssh and
+  # exports as PAISANS_DOCKER_SOCKET; compose run any other way fails by name
+  # rather than mounting nothing. Read only on the mount does not limit the
+  # API behind it: the agent can do what the deployment user can, which
+  # already owns every container here.
+  #
+  # The data directory keeps the fingerprint the hub pins on the agent's
+  # first connection (internal/hub/agent_connect.go handleSingleRecord at
+  # Beszel v0.21.1; agent/fingerprint.go), so a recreated container, or a
+  # renamed host, still reads as the same agent rather than a fingerprint
+  # mismatch.
+  beszel-agent:
+    labels:
+      community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
+    image: "ghcr.io/henrygd/beszel/beszel-agent:0.21.*"
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - beszel-agent/beszel-agent.env
+    volumes:
+      - ${PAISANS_DOCKER_SOCKET:?run by paisans deployment apply}:/var/run/docker.sock:ro
+      - /srv/paisans/f2a9/infra/beszel-agent/data:/var/lib/beszel-agent
 
 # Every network carries the deployment label too, so that what owns it is
 # read from the label rather than guessed from its name.

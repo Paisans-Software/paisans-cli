@@ -207,8 +207,8 @@ paisans validate --offline   # the file alone; no site is reached
   naming the fix. It reads the file without decrypting it, so it needs no age
   key.
 * **Images:** an `infra` override is refused under a key the infrastructure
-  stack does not run (`infra.images` takes etcd, haproxy, garage and
-  heartbeat), for a Postgres major the toolkit does not run, with a floating
+  stack does not run (`infra.images` takes etcd, haproxy, garage, heartbeat
+  and beszel-agent), for a Postgres major the toolkit does not run, with a floating
   tag (`latest`, or none), and outside the versions the toolkit is written
   against (etcd v3, HAProxy 3, Garage v1, Zalando Spilo 3 and 4); an etcd,
   HAProxy, Garage or Zalando Spilo override is refused with a digest and no

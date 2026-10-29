@@ -52,8 +52,13 @@
       "mode": "0644"
     },
     {
+      "path": "srv/paisans/f2a9/infra/beszel-agent/beszel-agent.env",
+      "sha256": "883b1876cf010043bd003a3e4e0bd8870787d3f76feac12f4d373c1d4c2a97d3",
+      "mode": "0600"
+    },
+    {
       "path": "srv/paisans/f2a9/infra/compose.yaml",
-      "sha256": "4c9d2bd075d98858135623e6934d331ba5fd3eb632125bb15e24cea02b0e22ab",
+      "sha256": "bc8f010ce15629edf2234c8cd91e245bf470a30396e452ced2140b92eb3a1abf",
       "mode": "0644"
     },
     {

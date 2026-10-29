@@ -183,7 +183,7 @@ type Infra struct {
 }
 
 // InfraImageKeys are the keys infra.images takes.
-var InfraImageKeys = []string{"etcd", "garage", "haproxy", "heartbeat"}
+var InfraImageKeys = []string{"beszel-agent", "etcd", "garage", "haproxy", "heartbeat"}
 
 // InfraPostgresKeys are the keys infra.postgres.<major> takes.
 var InfraPostgresKeys = []string{"spilo"}

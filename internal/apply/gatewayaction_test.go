@@ -139,6 +139,25 @@ func TestAHeartbeatEnvChangeDoesNotEngageTheGatewayGates(t *testing.T) {
 	}
 }
 
+// The Beszel agent's env file is read by the agent alone, so a rotated
+// beszel_token reaching the gateway site recreates the agent and never
+// touches Caddy: no gateway gate is engaged for it.
+func TestBeszelEnvNotGateway(t *testing.T) {
+	host := applied(t, "vm")
+	host.running = true
+	p, err := apply.Build("vm", planChangingOn(t, "vm", "srv/paisans/f2a9/infra/beszel-agent/beszel-agent.env"), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.GatewayChanging {
+		t.Error("a beszel-agent.env change is treated as the gateway changing")
+	}
+	a := infraAction(t, p)
+	if !a.Recreate || a.Force {
+		t.Errorf("the infrastructure action is %q, want `up -d`", a.Command(p.Deployment))
+	}
+}
+
 // A Pocket ID stack's operators-heartbeat/heartbeat.env is read by the
 // operators-heartbeat service alone, so a new token or monitor URL in it is a
 // plain `up -d` of the app's stack, which replaces only that service, since

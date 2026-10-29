@@ -2,13 +2,16 @@ package render
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"golang.org/x/crypto/ssh"
 	"gopkg.in/yaml.v3"
 
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
@@ -54,18 +57,18 @@ func TestBeszelSystems(t *testing.T) {
 		"home-a": {Address: "10.44.0.1"},
 	}}
 	secrets := &config.Secrets{Sites: map[string]config.SiteSecrets{
-		"home-a": {BeszelToken: "token-a"},
-		"home-b": {BeszelToken: "token-b"},
-		"watch":  {BeszelToken: "token-w"},
+		"home-a": {BeszelToken: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		"home-b": {BeszelToken: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+		"watch":  {BeszelToken: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"},
 	}}
 	got, err := beszelSystems(cfg, secrets)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []beszelSystem{
-		{Name: "home-a", Host: "10.44.0.1", Token: "token-a"},
-		{Name: "home-b", Host: "10.44.0.2", Token: "token-b"},
-		{Name: "watch", Host: "10.44.0.4", Token: "token-w"},
+		{Name: "home-a", Host: "10.44.0.1", Token: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		{Name: "home-b", Host: "10.44.0.2", Token: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+		{Name: "watch", Host: "10.44.0.4", Token: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %+v, want %+v", got, want)
@@ -78,6 +81,12 @@ func TestBeszelSystems(t *testing.T) {
 
 	// A site without a token is refused by name, since the hub would create
 	// a token of its own the site's agent never presents.
+	// So is one not in init's shape, which would reach the agent's env file
+	// as something other than written.
+	secrets.Sites["home-b"] = config.SiteSecrets{BeszelToken: "not hex # at all"}
+	if _, err := beszelSystems(cfg, secrets); err == nil || !strings.Contains(err.Error(), "sites.home-b.beszel_token: is not 64 lowercase hex") {
+		t.Errorf("a malformed beszel_token: %v", err)
+	}
 	delete(secrets.Sites, "home-b")
 	if _, err := beszelSystems(cfg, secrets); err == nil {
 		t.Error("a site without a beszel_token was accepted")
@@ -276,4 +285,154 @@ func TestBeszelSnippetRefusesTheSuperuserPanel(t *testing.T) {
 	if matcher < 0 || refusal < matcher || proxy < refusal {
 		t.Errorf("the snippet does not refuse /_/ ahead of the proxy:\n%s", snippet)
 	}
+}
+
+// beszelAgentEnv is the agent's env file's path on a site.
+func beszelAgentEnv(site string) string {
+	return site + "/srv/paisans/f2a9/infra/beszel-agent/beszel-agent.env"
+}
+
+// Without a beszel app no site runs an agent, and the deployment plans
+// against a core catalog released before the Beszel tracks, which names
+// neither image.
+func TestNoBeszelRendersNothing(t *testing.T) {
+	cfg, secrets := beszelFixture(t)
+	delete(cfg.Apps, "stats")
+	real := foundationImage
+	t.Cleanup(func() { foundationImage = real })
+	resolved := 0
+	foundationImage = func(name string) (string, error) {
+		if name == blueprints.FoundationBeszel || name == blueprints.FoundationBeszelAgent {
+			return "", fmt.Errorf("the core catalog's foundation.yaml has no %s image; it needs a catalog release that publishes one", name)
+		}
+		resolved++
+		return real(name)
+	}
+	plan, err := Build(cfg, secrets)
+	if err != nil {
+		t.Fatalf("a deployment without a beszel app does not plan against a foundation without the Beszel tracks: %v", err)
+	}
+	if resolved == 0 {
+		t.Fatal("the test's foundation was never read")
+	}
+	for _, f := range plan.Files {
+		if strings.Contains(f.Path, "/infra/beszel-agent/") {
+			t.Errorf("%s rendered without a beszel app", f.Path)
+		}
+		if strings.HasSuffix(f.Path, "/infra/compose.yaml") && strings.Contains(f.Content, "beszel-agent:") {
+			t.Errorf("%s runs a beszel agent without a beszel app", f.Path)
+		}
+	}
+}
+
+// With the stats app on watch, every site's infrastructure stack runs an
+// agent on the host's network, with the deployment user's Docker socket
+// read only and its data directory under the stack, and reads a 0600 env
+// file naming the hub at watch's mesh address, the site's own token, the
+// hub's key and the site's name.
+func TestBeszelAgentEveryInfra(t *testing.T) {
+	cfg, secrets := beszelFixture(t)
+	plan, err := Build(cfg, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]File{}
+	for _, f := range plan.Files {
+		files[f.Path] = f
+	}
+	foundation, err := blueprints.FoundationImage(blueprints.FoundationBeszelAgent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := secrets.Apps["stats"]["hub_key_public"].(string)
+	for _, site := range cfg.SiteNames() {
+		compose, ok := files[site+"/srv/paisans/f2a9/infra/compose.yaml"]
+		if !ok {
+			t.Errorf("%s has no infra stack", site)
+			continue
+		}
+		var parsed struct {
+			Services map[string]struct {
+				Image       string   `yaml:"image"`
+				NetworkMode string   `yaml:"network_mode"`
+				EnvFile     []string `yaml:"env_file"`
+				Volumes     []string `yaml:"volumes"`
+			} `yaml:"services"`
+		}
+		if err := yaml.Unmarshal([]byte(compose.Content), &parsed); err != nil {
+			t.Fatalf("%s: %v", site, err)
+		}
+		agent, ok := parsed.Services["beszel-agent"]
+		if !ok {
+			t.Errorf("%s's infra stack runs no beszel-agent", site)
+			continue
+		}
+		if agent.NetworkMode != "host" {
+			t.Errorf("%s: network_mode %q, want host", site, agent.NetworkMode)
+		}
+		if agent.Image != foundation {
+			t.Errorf("%s: image %q, want the foundation's %q", site, agent.Image, foundation)
+		}
+		wantVolumes := []string{
+			"${PAISANS_DOCKER_SOCKET:?run by paisans deployment apply}:/var/run/docker.sock:ro",
+			"/srv/paisans/f2a9/infra/beszel-agent/data:/var/lib/beszel-agent",
+		}
+		if strings.Join(agent.Volumes, "\n") != strings.Join(wantVolumes, "\n") {
+			t.Errorf("%s: volumes %q, want %q", site, agent.Volumes, wantVolumes)
+		}
+		if len(agent.EnvFile) != 1 || agent.EnvFile[0] != "beszel-agent/beszel-agent.env" {
+			t.Errorf("%s: env_file %v", site, agent.EnvFile)
+		}
+
+		env, ok := files[beszelAgentEnv(site)]
+		if !ok {
+			t.Errorf("%s has no beszel-agent.env", site)
+			continue
+		}
+		if env.Mode != 0o600 {
+			t.Errorf("%s: beszel-agent.env carries the site's token and was rendered %o", site, env.Mode)
+		}
+		for _, line := range []string{
+			"HUB_URL=http://10.44.0.4:8084",
+			"TOKEN=" + secrets.Sites[site].BeszelToken,
+			"KEY=" + key,
+			"SYSTEM_NAME=" + site,
+			"DISABLE_SSH=true",
+			"DOCKER_HOST=unix:///var/run/docker.sock",
+			"DATA_DIR=/var/lib/beszel-agent",
+		} {
+			if !strings.Contains("\n"+env.Content+"\n", "\n"+line+"\n") {
+				t.Errorf("%s: beszel-agent.env has no line %q:\n%s", site, line, env.Content)
+			}
+		}
+		if strings.Contains(compose.Content, secrets.Sites[site].BeszelToken) {
+			t.Errorf("%s: the compose file names the site's token", site)
+		}
+	}
+	// The image is the foundation's in the plan, as every infra image is,
+	// and infra.images.beszel-agent overrides it.
+	if image := beszelAgentImage(t, plan, "home-a"); len(image.FoundationServices) != 1 || image.Setting() != "infra.images.beszel-agent" {
+		t.Errorf("the agent's image is %+v", image)
+	}
+	const pinned = "ghcr.io/henrygd/beszel/beszel-agent:0.21.99"
+	cfg.Infra.Images = map[string]string{blueprints.FoundationBeszelAgent: pinned}
+	plan, err = Build(cfg, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if image := beszelAgentImage(t, plan, "home-a"); image.Image != pinned || image.Origin != "infra.images.beszel-agent" {
+		t.Errorf("an overridden agent image is %+v", image)
+	}
+}
+
+// beszelAgentImage is the plan's image of site's beszel-agent.
+func beszelAgentImage(t *testing.T, plan *Plan, site string) ComposeImage {
+	t.Helper()
+	for _, image := range plan.Images[site] {
+		if image.Stack == "infra" && slices.Contains(image.Services, "beszel-agent") {
+			return image
+		}
+	}
+	t.Fatalf("%s runs no beszel-agent image: %+v", site, plan.Images[site])
+	return ComposeImage{}
 }

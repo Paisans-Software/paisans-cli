@@ -111,7 +111,7 @@ const secretSuffix = ".secret"
 // deployment's Postgres major's, since Spilo publishes one repository per
 // major.
 type infraImages struct {
-	etcd, spilo, haproxy, garage, heartbeat string
+	etcd, spilo, haproxy, garage, heartbeat, beszelAgent string
 }
 
 // infraOrigins is the image of each service the infrastructure template
@@ -132,6 +132,16 @@ func (p *planner) infraOrigins() (map[string]imageOrigin, error) {
 			return nil, err
 		}
 		out[service] = o
+	}
+	// The Beszel agent's only while the deployment declares a beszel app,
+	// since the track is optional and a core catalog released before it
+	// names none: a deployment without a hub plans against it as before.
+	if p.cfg.BeszelApp() != "" {
+		o, err := declaredOr(p.cfg.Infra.Images[blueprints.FoundationBeszelAgent], blueprints.FoundationBeszelAgent)
+		if err != nil {
+			return nil, err
+		}
+		out["beszel-agent"] = o
 	}
 	spilo, err := blueprints.SpiloImage(p.postgresVersion())
 	if err != nil {
@@ -164,6 +174,7 @@ func (p *planner) infraImages() (infraImages, error) {
 	return infraImages{
 		etcd: o["etcd"].image, spilo: o["patroni"].image, haproxy: o["haproxy"].image,
 		garage: o["garage"].image, heartbeat: o["heartbeat"].image,
+		beszelAgent: o["beszel-agent"].image,
 	}, nil
 }
 
@@ -194,7 +205,7 @@ func (p *planner) caddyImage() (string, error) {
 			"acme.provider %q has no image in this toolkit and acme.image declares none. A DNS provider is a module compiled into Caddy, so an image carrying it is the only way it reaches a gateway. Published providers: %s",
 			p.cfg.ACME.Provider, strings.Join(acme.Providers(), ", "))
 	}
-	return blueprints.FoundationImage(blueprints.FoundationCaddy)
+	return foundationImage(blueprints.FoundationCaddy)
 }
 
 type clusterMember struct {
@@ -358,6 +369,8 @@ func (p *planner) renderSite(site *siteView) ([]File, error) {
 		"EtcdCompactionRetention": etcdCompactionRetention,
 		"EtcdQuotaBackendBytes":   etcdQuotaBackendBytes,
 		"HeartbeatImage":          images.heartbeat,
+		"BeszelAgentImage":        images.beszelAgent,
+		"BeszelAgentDataDir":      BeszelAgentDataDir,
 	})
 	if err != nil {
 		return nil, err
@@ -389,6 +402,20 @@ func (p *planner) renderSite(site *siteView) ([]File, error) {
 			return nil, err
 		}
 		files = append(files, File{Path: base + p.dep().RelPath("infra", "heartbeat", "push.sh"), Content: push, Mode: 0o644})
+	}
+	if site.Beszel != nil {
+		// The token and the hub's key go in a 0600 env file, as the
+		// heartbeat's URLs do, and a changed one recreates the agent alone
+		// (apply, beszelAgentService).
+		agent, err := p.beszelAgentFor(site)
+		if err != nil {
+			return nil, err
+		}
+		env, err := p.renderTemplate("beszel-agent.env.tmpl", map[string]any{"Site": site, "Agent": agent, "DataDir": BeszelAgentDataDir})
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, File{Path: base + p.dep().RelPath("infra", "beszel-agent", "beszel-agent.env"), Content: env, Mode: 0o600})
 	}
 	if site.IsEtcd {
 		files = append(files, File{Path: base + EtcdInitialPath(p.dep()), Content: FormatEtcdInitial(initial), Mode: 0o644})
@@ -530,9 +557,10 @@ func (p *planner) renderSite(site *siteView) ([]File, error) {
 
 // runsInfra reports whether the site runs any infrastructure service, and so
 // gets an infra stack. The heartbeat counts: a site watched by a monitor
-// elsewhere pushes to it from here, whatever its roles.
+// elsewhere pushes to it from here, whatever its roles. So does the Beszel
+// agent, which runs on every site while a hub is declared.
 func (site *siteView) runsInfra() bool {
-	return site.IsEtcd || site.IsData || site.NeedsProxy || site.IsGarage || site.RunsCaddy || len(site.Heartbeats) > 0
+	return site.IsEtcd || site.IsData || site.NeedsProxy || site.IsGarage || site.RunsCaddy || len(site.Heartbeats) > 0 || site.Beszel != nil
 }
 
 // hostSitesMount is where the Caddyfile imports the host's own site blocks

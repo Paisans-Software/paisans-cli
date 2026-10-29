@@ -128,7 +128,7 @@ func TestACatalogBlueprintsTemplatesReadItsHeartbeatURLs(t *testing.T) {
 	cfg.Apps["health-b"] = config.App{Blueprint: config.BlueprintUptime, Hostname: "health-b.example.org",
 		Placement: config.Placement{Mode: config.PlacementPinned, Site: "watch-b"},
 		Settings:  map[string]any{"admin_group": "admins"}}
-	secrets.Sites["watch-b"] = config.SiteSecrets{WireGuardPrivateKey: "REREREREREREREREREREREREREREREREREREREREREQ=", HeartbeatToken: "4444444444444444444444444444dddd", BeszelToken: "b4444444444444444444444444444ddd"}
+	secrets.Sites["watch-b"] = config.SiteSecrets{WireGuardPrivateKey: "REREREREREREREREREREREREREREREREREREREREREQ=", HeartbeatToken: "4444444444444444444444444444dddd", BeszelToken: "b4444444444444444444444444444dddb4444444444444444444444444444ddd"}
 	secrets.Apps["health-b"] = map[string]any{"admin_password": "fixture-admin-b", "session_secret": "fixture-session-b"}
 	want := "HEARTBEAT_URLS=https://health.example.org/ping/" + notesToken + " https://health-b.example.org/ping/" + notesToken + "\n"
 	if got := notesEnv(t, cfg, secrets); got != want {

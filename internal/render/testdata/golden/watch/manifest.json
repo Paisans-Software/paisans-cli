@@ -17,6 +17,11 @@
       "mode": "0600"
     },
     {
+      "path": "srv/paisans/f2a9/infra/beszel-agent/beszel-agent.env",
+      "sha256": "f2e571fee8ad808aa36a5e86fe539ff19c8cfa8dad0d9dac87c0a11feaf6a490",
+      "mode": "0600"
+    },
+    {
       "path": "srv/paisans/f2a9/infra/caddy/caddy.env",
       "sha256": "e4524ec782161f97cf1daad5745e4c59d5bf37815622a70442ec33e1b684ee31",
       "mode": "0600"
@@ -38,7 +43,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/compose.yaml",
-      "sha256": "389eeaced497203fb46450468ac62b27794591ce9a4a29e328839fb7f86ebf70",
+      "sha256": "dcbb1c5911c6b7c7baeb6d3092593e58bc8a9995067479b5567aaac48696afcb",
       "mode": "0644"
     },
     {
@@ -58,7 +63,7 @@
     },
     {
       "path": "srv/paisans/f2a9/stats/data/config.yml",
-      "sha256": "1c2d3159caa6f1e9e896cf6ef18a0548e904b7cfd8a7f787042c1e0f574bbf15",
+      "sha256": "fde9a43b3e9398b2a959ea300aaf27de55092fee0f7ca2a8f22351f053639567",
       "mode": "0600"
     },
     {
