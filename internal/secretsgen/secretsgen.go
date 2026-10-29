@@ -204,6 +204,22 @@ func Fill(cfg *config.Config, secrets *config.Secrets) (Result, error) {
 			site.HeartbeatToken = token
 			note(true, "sites."+name+".heartbeat_token")
 		}
+		// The site's Beszel token, while the deployment declares a hub: what
+		// its agent presents and what the hub's config.yml lists the site
+		// with. 32 random bytes, hex. Kept once set: a replaced token is an
+		// agent the hub no longer accepts until both are applied.
+		if cfg.BeszelApp() != "" {
+			if site.BeszelToken != "" {
+				note(false, "sites."+name+".beszel_token")
+			} else {
+				token, err := hexSecret(32)
+				if err != nil {
+					return result, err
+				}
+				site.BeszelToken = token
+				note(true, "sites."+name+".beszel_token")
+			}
+		}
 		secrets.Sites[name] = site
 	}
 

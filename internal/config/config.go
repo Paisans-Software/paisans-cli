@@ -1073,6 +1073,18 @@ func (c *Config) AppNames() []string {
 	return names
 }
 
+// BeszelApp is the name of the deployment's beszel app, the hub every site's
+// agent reports to, or empty when it declares none. one-beszel refuses a
+// second, so the first in name order is the one.
+func (c *Config) BeszelApp() string {
+	for _, name := range c.AppNames() {
+		if c.Apps[name].Blueprint == BlueprintBeszel {
+			return name
+		}
+	}
+	return ""
+}
+
 // DataSites returns the sites holding the data role, sorted.
 func (c *Config) DataSites() []string {
 	var out []string

@@ -61,6 +61,8 @@ func ReplacementIn(cfg *config.Config, path string, s *config.Secrets) (string, 
 		gen = func() (string, error) { return hexSecret(32) }
 	case len(parts) == 3 && parts[0] == "sites" && last == "heartbeat_token":
 		gen = func() (string, error) { return hexSecret(16) }
+	case len(parts) == 3 && parts[0] == "sites" && last == "beszel_token":
+		gen = func() (string, error) { return hexSecret(32) }
 	case len(parts) == 3 && parts[0] == "apps" && last == "database_password":
 		// Every Postgres backed app has one, whatever its blueprint says.
 		gen = password
