@@ -13,6 +13,19 @@ changes share a bullet. Detailed notes are on the corresponding
 ### Added
 
 - The `beszel` blueprint runs Beszel's hub on the monitor site, signed in through Pocket ID only, and an agent in every site's infra stack; `paisans create` offers it; run `site prepare` on hosts prepared earlier.
+
+## [0.3.0-rc.16] - 2026-10-29
+
+### Changed
+
+- The `engagement` blueprint names the community in the digest by `community.name`, falling back to Mbin's meta title without one, so the digest reads "This week on Paisans" rather than "Talk · Paisans".
+- The engagement app's front page and `/d/` with no date redirect to the account app, or the community's domain without one; `/d/` before the gate, the front page after it.
+
+## [0.3.0-rc.15] - 2026-10-29
+
+### Added
+
+- Every command that changes sites, not only `deployment apply` and `deployment publish`, holds the deployment lease on them with `--execute`, and checks for a newer paisans under it.
 - `deployment apply`, `deployment publish` and every other command that changes a site refuse, before changing anything, when a newer paisans release last applied any of its sites, naming each and the release to upgrade to.
 - `site admit` refuses a host any deployment of which a newer paisans claimed, as `site evict` already does.
 
@@ -24,6 +37,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Fixed
 
+- A gated hostname runs the gate before its app's snippet, in a `route` of its own: Caddy ordered the snippet's `handle` ahead of the gate, so engagement's web digest reached the app ungated.
 - `site admit` turns on forwarding on the relay, the first site by name dialled on its `public_address` or `endpoint`, and no other site, matching the WireGuard render; apply refuses only a relay without it.
 - A build of `develop`, `X.Y.Z-dev`, meets a blueprint's `requires_toolkit` of any `X.Y.Z` pre-release, and `site evict` and `site remove` accept it on hosts a release candidate set up.
 - `site admit` gives a relay `ufw route allow in on psns-<token> out on psns-<token>`, since ufw's default DROP forward policy otherwise drops the mesh traffic it relays, and `site evict` removes it.
@@ -372,7 +386,9 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.
 - The gateway refuses any request to Pocket ID that carries an `X-API-Key` header with 403, so Pocket ID's API keys work only on the mesh.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.14...develop
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.16...develop
+[0.3.0-rc.16]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.15...v0.3.0-rc.16
+[0.3.0-rc.15]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.14...v0.3.0-rc.15
 [0.3.0-rc.14]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.13...v0.3.0-rc.14
 [0.3.0-rc.13]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.12...v0.3.0-rc.13
 [0.3.0-rc.12]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.11...v0.3.0-rc.12

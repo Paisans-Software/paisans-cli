@@ -75,8 +75,9 @@ nothing. Their dry runs show the same review and ask nothing (see *`deployment a
 Every command that asks for a confirmation takes `--yes`: `deployment apply`,
 `deployment apply --site`, `site prepare`, `site admit`, `site evict`, `site add`,
 `site remove`, `gateway move`, `deployment publish`, `deployment pull`,
-`deployment recover`, `operator register`, `secrets prune`, `secrets rotate` and
-`app remove`. No other command takes it.
+`deployment recover`, `operator register`, `secrets prune`, `secrets rotate`,
+`app remove`, `mesh rekey`, `prune`, `storage init`, `storage add`,
+`storage rotate-key` and `oidc client create`. No other command takes it.
 
 * **What it answers:** every word a command asks to have typed (`approve`,
   `create`, `rollback`, `prune`, `sign out`, `revoked`,
@@ -105,6 +106,19 @@ Every command that asks for a confirmation takes `--yes`: `deployment apply`,
 
 Apply without `--site` hands `--yes` on to its `deployment apply` and `gateway move`
 steps, and `gateway move` to its hand-off's `deployment apply`.
+
+### `--break-lease` takes over the deployment lease
+
+Every command that changes sites takes the deployment lease with `--execute`
+and takes `--break-lease`: `deployment apply`, with or without `--site`,
+`deployment publish`, `operator register`, `site add`, `site prepare`,
+`site remove`, `app remove`, `gateway move`, `mesh rekey`, `prune`,
+`storage init`, `storage add`, `storage rotate-key`, `secrets rotate` and
+`oidc client create`. `--break-lease` takes over another command's live lease
+once you know that command is no longer running, after the word `break`,
+which `--yes` types. Under the lease each refuses a site a newer paisans last
+applied. See *One command changes a deployment at a time* and *A site a newer
+paisans applied is left to it* in `README.md`.
 
 A site that leaves `ssh.user` out is reached as the deployment's own user,
 `paisans-<token>`. Any run with `--execute` that logs in to it writes that
@@ -1630,6 +1644,10 @@ images it superseded* in `README.md`).
   ready site before its gather and holds it to its end; another command's live
   lease refuses it, and `--break-lease` takes one over after the word `break`
   (see *One command changes a deployment at a time* in `README.md`).
+* **Newer paisans:** a site a newer release last applied refuses the run
+  before anything changes, and again under the lease, naming the release to
+  upgrade to (see *A site a newer paisans applied is left to it* in
+  `README.md`). Every other command that changes a site does the same.
 * **Stopped after the publish:** the stop says the revision is published and
   not applied on every site, and names `deployment log`, which shows what each
   site runs (see *A published version is not a deployed one* in `README.md`).

@@ -233,14 +233,19 @@ digest.example.org {
 
 	# Open paths: the sign-in itself, federation discovery and what those
 	# pages load. They hold no private content.
-	@open path /u/* /healthz
+	@open path /u/* /d /d/ /d/preview /d/preview/ /healthz
 	handle @open {
 		import /etc/caddy/snippets/digest.caddy
 	}
 
+	# A route of its own, so the gate runs before the app's snippet: Caddy
+	# sorts a block's directives, putting handle ahead of route, so a snippet
+	# that routes with handle would otherwise match before the gate ran.
 	handle {
-		import gate
-		import /etc/caddy/snippets/digest.caddy
+		route {
+			import gate
+			import /etc/caddy/snippets/digest.caddy
+		}
 	}
 }
 
@@ -422,9 +427,14 @@ talk.example.org {
 		import /etc/caddy/snippets/talk.caddy
 	}
 
+	# A route of its own, so the gate runs before the app's snippet: Caddy
+	# sorts a block's directives, putting handle ahead of route, so a snippet
+	# that routes with handle would otherwise match before the gate ran.
 	handle {
-		import gate
-		import /etc/caddy/snippets/talk.caddy
+		route {
+			import gate
+			import /etc/caddy/snippets/talk.caddy
+		}
 	}
 }
 

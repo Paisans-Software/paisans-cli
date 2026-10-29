@@ -875,6 +875,9 @@ Mbin. The design is in `docs/specs/2026-10-24-engagement-digest.md`.
   On a deployment with several apps sites the service runs on each of them,
   and each member is mailed once: every copy claims a member's week in the
   service's own database before sending, so only one sends it.
+* **What it calls the community.** `community.name`, as in "This week on
+  Paisans", in the subject, the headings, the footer and the Matrix message.
+  Without one it uses Mbin's meta title. Mbin's own pages keep their titles.
 * **How it reads Mbin.** Through a read only Postgres role, `<app>_reader`
   (`digest_reader` for an app named `digest`), which `deployment apply` creates
   beside the app's own role. The role has `SELECT` on named columns of named
@@ -910,8 +913,13 @@ Mbin. The design is in `docs/specs/2026-10-24-engagement-digest.md`.
   offer `mas_admin_url` leaves the bot off.
 * **What the gateway forwards.** `/u/*`, the unsubscribe links, `/d/*`, the
   web digests the Matrix message links to, and
-  `GET /healthz`, which answers ok or 503, for the monitor's public check;
-  everything else on the hostname answers 404.
+  `GET /healthz`, which answers ok or 503, for the monitor's public check.
+  The front page and `/d/` with no date redirect to the account app, or to
+  the community's domain without one, since the hostname has no page of its
+  own. `/d/` with no date is an open path, so nobody signs in to be sent
+  there; the front page redirects past the gate, which no gateable
+  blueprint opens its front page to. Everything
+  else on the hostname answers 404.
 * **Gated, with the unsubscribe links open.** The web digest, `/d/<week>`,
   names the member by the gate's `X-Auth-Request-User`, their Pocket ID
   subject, so the link carries no secret and no member's id, and a forwarded
@@ -3961,6 +3969,13 @@ publishes: `talk` above is `gated: true`, and its stack publishes port 8080,
 so anything that can open that port reaches Mbin with no gate in front of it at
 all. The same is true of every gated app.
 
+**The gate runs before anything of the app's.** A gated hostname's
+catch-all is `handle { route { import gate; import <app snippet> } }`. Caddy
+sorts the directives of a block by its directive order, which puts `handle`
+ahead of `route`, and the gate is a `route`; an app snippet that routes with
+`handle`, as engagement's does, would otherwise match first and reach the app
+with no gate at all. Inside a `route`, directives run as written.
+
 **So every published port binds the site's mesh address and nothing else**
 (Eg: `"10.44.0.1:8080:8080"`, never `"8080:8080"`). The gateway reaches every
 app over the mesh, so the mesh is the only interface a port needs, and the
@@ -5116,15 +5131,21 @@ Two operators running `deployment apply` from one version both pass their
 gathers, so the fork the store refuses is found only by the next command, while
 both runs go on changing hosts. The deployment's lock serialises one write of a
 record and nothing longer. So every command that publishes or changes the
-deployment as a whole, `deployment apply` (with or without `--site`) and
-`deployment publish`, first takes the **deployment lease**:
+deployment first takes the **deployment lease**: `deployment apply` (with or
+without `--site`), `deployment publish`, `operator register`, `site add`,
+`site prepare`, `site remove`, `app remove`, `gateway move`, `mesh rekey`,
+`prune`, `storage init`, `storage add`, `storage rotate-key`,
+`secrets rotate` and `oidc client create`.
 
 * **It is a file on every site,** `/srv/paisans/<token>/.paisans/lease`,
   written under the deployment's lock: a fresh id for the command, who ran it
   (the workstation's user and host), the command, when it was taken and when it
-  was last renewed. It is taken on every ready site at once, before the gather,
-  which may merge the draft forward, and held to the end of the run; a step the
-  run takes, such as `apply --site` inside `apply`, takes none of its own.
+  was last renewed. `deployment apply` and `deployment publish` take it on
+  every ready site at once, before the gather, which may merge the draft
+  forward; every other command takes it on each site it changes. It is held to
+  the end of the run; a command run inside another, such as `apply --site`
+  inside `apply` or `storage rotate-key` inside `secrets rotate`, takes none of
+  its own.
 * **A live lease of another command refuses the run,** naming the command, who
   ran it and since when, and nothing is changed. A refusal on any site
   releases the sites already taken, so the two commands never each hold half.
@@ -5142,6 +5163,31 @@ deployment as a whole, `deployment apply` (with or without `--site`) and
   from another workstation that reaches only the sites this one could not is
   not stopped by it; the store's fork check is still there behind it.
 * **A dry run takes none,** since it changes nothing.
+
+### A site a newer paisans applied is left to it
+
+Every apply records in the site's manifest, `.paisans-manifest.json`, the
+release and commit of paisans that wrote it. A newer release may put on a host
+what an older one does not know about, and an older one would write over it.
+So each command that takes the lease, and `deployment apply` once more before
+it, reads the manifest of every site it changes and refuses when a newer
+release last applied one:
+
+* **The refusal names each such site** and the release that applied it, says
+  nothing was changed, and names the release to upgrade to, the newest of them.
+* **The check is made under the lease,** so no newer release can apply a site
+  between the check and the command's last write. Each apply of a site reads
+  the manifest once more just before it writes.
+* **The same release built from another commit passes,** as do an older
+  release and a site never applied. A build of `develop`, `X.Y.Z-dev`, counts
+  as every pre-release of `X.Y.Z`.
+* **`deployment publish`, `operator register`, `gateway move` and
+  `site prepare --all` pass over a site that does not answer,** with a
+  warning: publish and register push it nothing, a gateway move's two
+  gateways have answered already, and each host's own prepare refuses one
+  that does not answer.
+* **`site admit` and `site evict` refuse a host** a newer paisans claimed for
+  any deployment, judged by the host's registry, `/etc/paisans`, the same way.
 
 ### A folder holds a draft
 

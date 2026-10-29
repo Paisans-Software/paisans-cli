@@ -107,6 +107,7 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 	var replaced nameList
 	fs.Var(&replaced, "replaced", "a pasted secret already replaced at its issuer and applied, which every host using it runs: listed, not rotated (repeatable, or comma-separated)")
 	answers := yesFlag(fs)
+	breakLease := breakLeaseFlag(fs)
 	var named []string
 	for len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		named, args = append(named, args[0]), args[1:]
@@ -202,9 +203,11 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	// A rotation changes Postgres and Garage before its applies, so a site
 	// a newer paisans last applied refuses it before anything changes.
-	if err := refuseNewerToolkit(r, cfg, cfg.SiteNames(), func(name string) apply.Transport { return transports[name] }, "secrets rotate", false); err != nil {
+	release, err := guardSites(r, cfg, cfg.SiteNames(), func(name string) apply.Transport { return transports[name] }, "secrets rotate", guard{execute: *execute, lease: leaseOptions{breakLease: *breakLease, answers: ans, stdin: stdin, stdout: stdout}})
+	if err != nil {
 		return err
 	}
+	defer release()
 	if err := ui.Run(r, "check etcd and Patroni", func() error { return meshrekey.ClusterHealth(cfg, transports) }); err != nil {
 		return fmt.Errorf("secrets rotate: %w. A password changed on a limping cluster can leave a member unable to rejoin, so nothing is rotated until it is healthy. Nothing was changed", err)
 	}

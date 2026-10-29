@@ -62,3 +62,41 @@ func refuseNewerToolkit(r ui.Reporter, cfg *config.Config, sites []string, host 
 			version.Version, want, progname.Cmd(), command),
 	}
 }
+
+// guard is how a command that changes sites guards them.
+type guard struct {
+	// execute holds the deployment's lease on the sites; a dry run takes
+	// none.
+	execute bool
+	// skipUnread passes over a site that does not answer, for a command
+	// that pushes it nothing. See refuseNewerToolkit.
+	skipUnread bool
+	lease      leaseOptions
+}
+
+// guardSites guards sites for command before it changes any: with execute
+// it first takes the deployment's lease on them, so no other command, of
+// this release or a newer one, changes them until it is released; then it
+// refuses them if a newer paisans last applied any. Checked under the
+// lease, nothing a newer release does can land between the check and the
+// command's last write. It returns what releases the lease.
+//
+// A command run inside one that holds the lease, a step of apply or a
+// rotation's rotate-key, guards nothing: the outer command holds the lease
+// and checked every site.
+func guardSites(r ui.Reporter, cfg *config.Config, sites []string, host func(name string) apply.Transport, command string, g guard) (release func(), err error) {
+	if reviewedByRun != nil || runLease != nil {
+		return func() {}, nil
+	}
+	release = func() {}
+	if g.execute {
+		if release, err = takeLease(r, cfg, sites, host, command, g.lease); err != nil {
+			return nil, err
+		}
+	}
+	if err := refuseNewerToolkit(r, cfg, sites, host, command, g.skipUnread); err != nil {
+		release()
+		return nil, err
+	}
+	return release, nil
+}

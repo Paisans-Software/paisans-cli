@@ -17,10 +17,15 @@ type engagementValues struct {
 	// SourceURL is the Mbin app's public URL, which every link in the digest
 	// points into.
 	SourceURL string
-	// InstanceTitle and MetaTitle are the names Mbin renders as KBIN_TITLE
-	// and KBIN_META_TITLE (mbinTitles).
+	// InstanceTitle is the name Mbin renders as KBIN_TITLE (mbinTitles).
+	// MetaTitle names the community in the digest: its name, or without one
+	// the name Mbin renders as KBIN_META_TITLE.
 	InstanceTitle string
 	MetaTitle     string
+	// HomeURL is where the digest's hostname sends a visitor with no digest to
+	// read: the account app's public URL, the first by name, or the
+	// community's domain in a deployment without one.
+	HomeURL string
 }
 
 // ReaderRole is the Postgres role the engagement app reads Mbin's database
@@ -32,13 +37,23 @@ func ReaderRole(engagementApp string) string { return DBIdentifier(engagementApp
 // requires of a deployment with an engagement app. Without one the values
 // stay empty: validate has already refused the configuration.
 func (p *planner) engagementValuesFor(planned plannedApp, host string, port int) engagementValues {
+	home := "https://" + p.cfg.Community.Domain
+	for _, name := range p.cfg.AppNames() {
+		if p.cfg.Apps[name].Blueprint == config.BlueprintAccount {
+			home = "https://" + p.cfg.Apps[name].Hostname
+			break
+		}
+	}
 	mbin, ok := p.cfg.EngagementSource()
 	if !ok {
-		return engagementValues{}
+		return engagementValues{HomeURL: home}
 	}
 	reader := planned
 	reader.DBUser, reader.DBName = ReaderRole(planned.Name), DBIdentifier(mbin)
 	instance, meta := mbinTitles(p.cfg, mbin)
+	if p.cfg.Community.Name != "" {
+		meta = p.cfg.Community.Name
+	}
 	// A missing source_database_password renders an empty one here, and
 	// never reaches a host: apply refuses it before any stack starts.
 	return engagementValues{
@@ -46,6 +61,7 @@ func (p *planner) engagementValuesFor(planned plannedApp, host string, port int)
 		SourceURL:     "https://" + p.cfg.Apps[mbin].Hostname,
 		InstanceTitle: instance,
 		MetaTitle:     meta,
+		HomeURL:       home,
 	}
 }
 

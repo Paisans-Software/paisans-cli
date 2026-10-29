@@ -368,9 +368,14 @@ talk.example.org {
 		import /etc/caddy/snippets/talk.caddy
 	}
 
+	# A route of its own, so the gate runs before the app's snippet: Caddy
+	# sorts a block's directives, putting handle ahead of route, so a snippet
+	# that routes with handle would otherwise match before the gate ran.
 	handle {
-		import gate
-		import /etc/caddy/snippets/talk.caddy
+		route {
+			import gate
+			import /etc/caddy/snippets/talk.caddy
+		}
 	}
 }
 

@@ -52,6 +52,7 @@ func gatewayMoveCommand(args []string) error {
 	keepImages := fs.Bool("keep-images", false, "passed to the hand-off's apply of a site that keeps the monitor")
 	minFree := fs.String("min-free", "", "passed to the hand-off's apply of a site that keeps the monitor")
 	answers := yesFlag(fs)
+	breakLease := breakLeaseFlag(fs)
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -124,12 +125,14 @@ func gatewayMoveCommand(args []string) error {
 	if _, err := admittedSites(r, cfg, plan.From, plan.To); err != nil {
 		return err
 	}
-	// As a step of apply, the run checked every site already.
-	if !insideApply {
-		if err := refuseNewerToolkit(r, cfg, []string{plan.From, plan.To}, func(name string) apply.Transport { return transports[name] }, "gateway move", false); err != nil {
-			return err
-		}
+	// Every site, since the hand-off is an apply --site of each gateway,
+	// which publishes its version to all of them and, inside this move,
+	// takes no lease of its own. The two gateways answered above.
+	release, err := guardSites(r, cfg, cfg.SiteNames(), func(name string) apply.Transport { return transports[name] }, "gateway move", guard{execute: *execute, skipUnread: true, lease: leaseOptions{breakLease: *breakLease, answers: ans, stdin: os.Stdin, stdout: os.Stdout}})
+	if err != nil {
+		return err
 	}
+	defer release()
 	if !*execute || r.Verbose() {
 		plan.Show(r)
 	}

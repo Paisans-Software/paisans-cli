@@ -472,21 +472,16 @@ func runDeploymentPublish(args []string, stdin io.Reader, stdout io.Writer) erro
 	r.Section("publish " + *configPath)
 	sites := configTransports(cfg)
 	siteHost := func(name string) apply.Transport { return sites[name] }
-	// A site a newer paisans last applied refuses the publish before its
-	// lease: the version this one signs is what the next apply puts there.
-	// A site that does not answer is pushed nothing, so it is passed over.
-	if err := refuseNewerToolkit(r, cfg, cfg.SiteNames(), siteHost, "deployment publish", true); err != nil {
+	// publish holds the deployment's lease while it gathers and pushes, so
+	// it never publishes beside a running apply, and a site a newer paisans
+	// last applied refuses it: the version this one signs is what the next
+	// apply puts there. A site that does not answer is pushed nothing, so
+	// it is passed over. See internal/lease.
+	release, err := guardSites(r, cfg, cfg.SiteNames(), siteHost, "deployment publish", guard{execute: *execute, skipUnread: true, lease: leaseOptions{breakLease: *breakLease, answers: ans, stdin: stdin, stdout: stdout}})
+	if err != nil {
 		return err
 	}
-	// publish holds the deployment's lease while it gathers and pushes, so
-	// it never publishes beside a running apply. See internal/lease.
-	if *execute {
-		release, err := takeLease(r, cfg, cfg.SiteNames(), siteHost, "deployment publish", leaseOptions{breakLease: *breakLease, answers: ans, stdin: stdin, stdout: stdout})
-		if err != nil {
-			return err
-		}
-		defer release()
-	}
+	defer release()
 	t, err := gatherDeploy(r, d, cfg, sites, raw.Paisans, gatherMode{execute: *execute, answers: ans}, stdin, stdout)
 	defer t.done()
 	if err != nil {
