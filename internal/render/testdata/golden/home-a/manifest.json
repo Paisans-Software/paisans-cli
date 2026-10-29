@@ -58,7 +58,7 @@
     },
     {
       "path": "srv/paisans/f2a9/digest/.env",
-      "sha256": "af9c8f46797353c7d660187a71b504446fd3c907b08da354fde6b7cd8491f6af",
+      "sha256": "85bb041a2b8c4776adc48f80e86238eddacde64dae5964eb0c1d85d91318f7e1",
       "mode": "0600"
     },
     {
@@ -118,7 +118,7 @@
     },
     {
       "path": "srv/paisans/f2a9/talk/.env",
-      "sha256": "5e2be14b189ceb22773f47118a2d8796ea3bea6496d562540104727ad21e6e35",
+      "sha256": "a37ce4fb29fe8550b3f286eb40034503fb0a2d38909540d38449e06499c7e6c9",
       "mode": "0600"
     },
     {

@@ -5,8 +5,11 @@ name: engagement
 services:
   # paisans-engagement-service: the weekly digest email, which reads the
   # community's Mbin through a role that can only read
-  # (docs/specs/2026-10-24-engagement-digest.md). Its own database holds
-  # only unsubscribes and the record of each week's sends. Its image is the
+  # (docs/specs/2026-10-24-engagement-digest.md), and the welcomes for
+  # newcomers on Mbin, on Matrix and by a daily email
+  # (docs/specs/2026-10-29-engagement-welcome.md). Its own database holds
+  # unsubscribes, the record of each week's sends, and welcome records it
+  # deletes after 21 days. Its image is the
   # core catalog's foundation.yaml's.
   - {name: "app", foundation: "engagement", purpose: "the weekly digest"}
   - {name: "postgres", purpose: "its role and database on the cluster"}
@@ -41,6 +44,12 @@ mail: reads
 # whose mas.yaml declares the client beside this app's .env.
 consumes:
   - {role: matrix-homeserver, setting: homeserver, optional: true, shared_secrets: [mas_admin_client_secret]}
+  # The forum the welcome loop posts in and subscribes newcomers on, through
+  # an Mbin agent client the mbin app declares with this app's secret.
+  # Optional: with forum unset the app links to the deployment's one forum,
+  # and with none the Mbin welcomes are off. The digest itself still reads
+  # Mbin's database directly.
+  - {role: forum, setting: forum, optional: true, shared_secrets: [mbin_agent_client_secret]}
 settings:
   # The homeserver's hostname, unset meaning the deployment's one.
   homeserver: {type: string}
@@ -50,6 +59,17 @@ settings:
   bot_localpart: {type: string, default: "community-bot"}
   # The name members see the bot by, which it sets on its account at start.
   bot_display_name: {type: string, default: "Community Bot"}
+  # The forum's hostname, unset meaning the deployment's one.
+  forum: {type: string}
+  # The name of the Matrix room the bot announces newcomers in. Unset, it is
+  # the community's name plus " Community", unless the name already holds a
+  # word such as Community or Guild. The room is found by an alias made from
+  # this name, so changing it makes the bot find or create a room under the
+  # new name, and new accounts auto-join that one.
+  community_room_name: {type: string}
+  # How many members the daily welcome email reaches at most: four fifths
+  # the most active, the rest picked at random.
+  welcome_email_daily_limit: {type: int, default: 50}
 secrets:
   required:
     - {key: "digest_signing_key", why: "paisans-engagement-service refuses to start without ENGAGEMENT_SIGNING_KEY"}
@@ -64,4 +84,8 @@ secrets:
     # homeserver app's mas.yaml declares the client with it, beside this
     # app's .env, so a rotation re-renders and restarts both.
     - {name: mas_admin_client_secret, format: password, rotation_cost: restart}
-  self_rotated: ["digest_signing_key", "mas_admin_client_secret"]
+    # The secret of the Mbin agent client the bot welcomes newcomers with.
+    # The mbin app declares the client with it, beside this app's .env, so a
+    # rotation re-renders and restarts both.
+    - {name: mbin_agent_client_secret, format: password, rotation_cost: restart}
+  self_rotated: ["digest_signing_key", "mas_admin_client_secret", "mbin_agent_client_secret"]

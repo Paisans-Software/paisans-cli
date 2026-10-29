@@ -10,6 +10,16 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Added
+
+- The `engagement` blueprint links to a `forum` provider, sharing an Mbin agent client secret, and renders the welcome variables and the operators' addresses.
+- The `engagement` blueprint takes `community_room_name` and `welcome_email_daily_limit`; validate refuses a blank or letterless room name, a derived name with a control character, a limit under 1, and a pinned forum.
+- A provider's templates read a consumer's `.Values`; the `engagement` app offers its community room alias and Mbin agent client there.
+
+### Changed
+
+- The engagement app's reader is also granted `"user".application_status`, `entry_vote.created_at` and `post_vote.created_at`, which the welcome loop and its activity ranking read.
+
 ## [0.3.0-rc.19] - 2026-10-29
 
 ### Added

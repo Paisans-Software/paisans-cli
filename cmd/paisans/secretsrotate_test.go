@@ -264,6 +264,7 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 		"apps.auth.dns_email_hash_key",
 		"apps.digest.digest_signing_key",
 		"apps.digest.mas_admin_client_secret",
+		"apps.digest.mbin_agent_client_secret",
 		"apps.notify.mas_admin_client_secret",
 		"apps.notify.beszel_superuser_password",
 		"apps.talk.mercure_jwt_secret",
@@ -1421,6 +1422,30 @@ func TestSecretsRotateTakesTheDigestsSourceDatabasePassword(t *testing.T) {
 	}
 	if _, err := rotatorFor("apps.wiki.source_database_password", rotateWiring{cfg: cfg}); err == nil {
 		t.Error("a blueprint with no reader was given a reader rotation")
+	}
+}
+
+// The engagement app's Mbin agent client secret is one the mbin app
+// declares the client with, so rotating it hands Mbin's stack the next
+// secret first and costs a restart of both.
+func TestSecretsRotateHandsTheMbinAgentClientSecretToMbinFirst(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := rotatorFor("apps.digest.mbin_agent_client_secret", rotateWiring{cfg: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Path() != "apps.digest.mbin_agent_client_secret" || !strings.Contains(r.Cost().Downtime, "digest and talk") {
+		t.Errorf("path %q cost %+v", r.Path(), r.Cost())
+	}
+	var users []string
+	for _, u := range r.Users(secretsrotate.Env{Cfg: cfg}) {
+		users = append(users, u.Site+":"+strings.Join(u.Stacks, ","))
+	}
+	if want := []string{"home-a:talk", "home-b:talk", "home-a:digest", "home-b:digest"}; !slices.Equal(users, want) {
+		t.Errorf("users %v, want %v", users, want)
 	}
 }
 

@@ -1777,8 +1777,10 @@ checks (`colocated-app-elsewhere`, `internal/validate/links.go`). Templates
 ask `.HasLinked "<role>"` before reading `.Linked` on an optional role,
 `.LinkedApp "<role>"` for the providing app's name, `.LinkedOffers "<role>"
 "<value>"` for whether the provider declares a value, and, on the provider,
-`.Consumers "<role>"` for each linked consumer's name and shared secrets
-(`internal/render/links.go`). Where a consume leads is `blueprints.LinkOf`
+`.Consumers "<role>"` for each linked consumer's `.Name`, its shared
+`.Secrets` and the `.Values` it shows its providers, which only an
+engagement consumer fills (`internal/render/links.go`,
+`internal/render/welcome.go`). Where a consume leads is `blueprints.LinkOf`
 alone, read by render, validate and `secrets rotate`, so the three never
 disagree.
 

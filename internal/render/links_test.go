@@ -81,12 +81,36 @@ func TestConsumersCarryTheSharedSecret(t *testing.T) {
 		t.Fatalf(`Consumers("matrix-homeserver"): %v`, err)
 	}
 	want := []Consumer{
-		{Name: "digest", Secrets: map[string]string{"mas_admin_client_secret": "fixture-not-a-secret-digest-mas-admin"}},
-		{Name: "notify", Secrets: map[string]string{"mas_admin_client_secret": "fixture-not-a-secret-notify-mas-admin"}},
-		{Name: "web", Secrets: map[string]string{}},
+		{Name: "digest", Secrets: map[string]string{"mas_admin_client_secret": "fixture-not-a-secret-digest-mas-admin"}, Values: digestValues},
+		{Name: "notify", Secrets: map[string]string{"mas_admin_client_secret": "fixture-not-a-secret-notify-mas-admin"}, Values: map[string]string{}},
+		{Name: "web", Secrets: map[string]string{}, Values: map[string]string{}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf(`Consumers("matrix-homeserver") = %#v, want %#v`, got, want)
+	}
+}
+
+// digestValues is what the fixture's engagement app shows its providers.
+var digestValues = map[string]string{
+	"community_room_alias": "fixture-community",
+	"mbin_agent_client_id": "engagement-agent",
+	"mbin_agent_username":  "community-bot",
+}
+
+// The forum sees the engagement app with the Mbin agent client's secret,
+// which the mbin app declares the client with.
+func TestForumConsumersCarryTheMbinSecret(t *testing.T) {
+	cfg, secrets := linksFixture(t)
+	v := valuesOf(t, cfg, secrets, "talk")
+	got, err := v.Consumers("forum")
+	if err != nil {
+		t.Fatalf(`Consumers("forum"): %v`, err)
+	}
+	want := []Consumer{
+		{Name: "digest", Secrets: map[string]string{"mbin_agent_client_secret": "fixture-not-a-secret-digest-mbin-agent"}, Values: digestValues},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf(`Consumers("forum") = %#v, want %#v`, got, want)
 	}
 }
 
@@ -138,6 +162,28 @@ func TestEngagementWithAnOlderHomeserverRendersNoMatrix(t *testing.T) {
 	}
 	if strings.Contains(env, "ENGAGEMENT_MAS_") || strings.Contains(env, "ENGAGEMENT_MATRIX_") {
 		t.Errorf("the digest's .env renders Matrix with no mas_admin_url:\n%s", env)
+	}
+}
+
+// An Mbin blueprint that provides no forum, or one that does not offer
+// api_port, renders the digest with the Mbin welcomes off rather than
+// failing.
+func TestEngagementWithAnOlderForumRendersNoAgent(t *testing.T) {
+	for name, older := range map[string]func(appValues){
+		"no forum":    func(v appValues) { delete(v.links, "forum") },
+		"no api_port": func(v appValues) { delete(v.links["forum"], "api_port") },
+	} {
+		cfg, secrets := linksFixture(t)
+		p := newPlanner(cfg, secrets)
+		v := valuesOf(t, cfg, secrets, "digest")
+		older(v)
+		env, err := p.renderFile("engagement/.env.secret.tmpl", v)
+		if err != nil {
+			t.Fatalf("%s: rendering the digest's .env: %v", name, err)
+		}
+		if strings.Contains(env, "ENGAGEMENT_MBIN_API_URL") || strings.Contains(env, "ENGAGEMENT_MBIN_AGENT_") {
+			t.Errorf("%s: the digest's .env renders the agent client:\n%s", name, env)
+		}
 	}
 }
 

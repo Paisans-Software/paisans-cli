@@ -556,6 +556,9 @@ func TestOperatorSectionRefusals(t *testing.T) {
 		{"one word name", admin("alice", "    name: Alice\n    email: alice@example.org\n"+keyed(fakeKeyA)), "operators.alice.name: \"Alice\" is not a first and a last name"},
 		{"blank last name", admin("alice", "    name: \"Alice  \"\n    email: alice@example.org\n"+keyed(fakeKeyA)), "operators.alice.name: \"Alice  \" is not a first and a last name"},
 		{"not an email", admin("alice", "    email: Alice <alice@example.org>\n"+keyed(fakeKeyA)), "operators.alice.email: \"Alice <alice@example.org>\" is not an email address alone"},
+		// The engagement app renders the operators' addresses as one comma
+		// separated line, so a comma in one would split it in two.
+		{"comma in a quoted local part", admin("alice", "    email: '\"a,b\"@example.org'\n"+keyed(fakeKeyA)), "operators.alice.email: \"\\\"a,b\\\"@example.org\" is not an email address alone"},
 		{"no keys", admin("alice", "    email: alice@example.org\n"), "operators.alice.keys: required"},
 		{"not a key", admin("alice", "    email: alice@example.org\n"+keyed("ssh-ed25519 not-base64")), "operators.alice.keys: line 1 is not an OpenSSH public key"},
 		{"private key path", admin("alice", "    email: alice@example.org\n"+keyed("~/.ssh/id_ed25519")), "not an OpenSSH public key"},
