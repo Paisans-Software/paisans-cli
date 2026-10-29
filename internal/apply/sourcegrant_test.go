@@ -155,7 +155,7 @@ func TestGrantSQLColumnGrants(t *testing.T) {
 	for _, want := range []string{
 		`GRANT CONNECT ON DATABASE "talk" TO "digest_reader";`,
 		`GRANT USAGE ON SCHEMA public TO "digest_reader";`,
-		`GRANT SELECT ("id", "username", "email", "is_verified", "is_banned", "is_deleted", "marked_for_deletion_at", "visibility", "type", "ap_id", "oauth_oidc_id", "last_active", "created_at") ON public."user" TO "digest_reader";`,
+		`GRANT SELECT ("id", "username", "email", "is_verified", "is_banned", "is_deleted", "marked_for_deletion_at", "visibility", "type", "ap_id", "oauth_oidc_id", "last_active", "created_at", "application_status") ON public."user" TO "digest_reader";`,
 		`GRANT SELECT ("user_id", "magazine_id") ON public."magazine_subscription" TO "digest_reader";`,
 	} {
 		if !strings.Contains(sql, want) {
