@@ -154,13 +154,14 @@ func TestEngagementWithoutMbinRendersEmpty(t *testing.T) {
 func TestEngagementMatrixEnv(t *testing.T) {
 	env := planFiles(build(t))[digestEnvA]
 	for key, want := range map[string]string{
-		"ENGAGEMENT_MATRIX_URL":            "https://chat.example.org",
-		"ENGAGEMENT_MATRIX_SERVER_NAME":    "example.org",
-		"ENGAGEMENT_MAS_ADMIN_URL":         "http://10.44.0.3:18010",
-		"ENGAGEMENT_MAS_CLIENT_ID":         blueprints.StableULID("digest-mas-admin"),
-		"ENGAGEMENT_MAS_CLIENT_SECRET":     "fixture-not-a-secret-digest-mas-admin",
-		"ENGAGEMENT_MAS_UPSTREAM_PROVIDER": blueprints.StableULID("chat"),
-		"ENGAGEMENT_MATRIX_BOT_LOCALPART":  "digest-bot",
+		"ENGAGEMENT_MATRIX_URL":              "https://chat.example.org",
+		"ENGAGEMENT_MATRIX_SERVER_NAME":      "example.org",
+		"ENGAGEMENT_MAS_ADMIN_URL":           "http://10.44.0.3:18010",
+		"ENGAGEMENT_MAS_CLIENT_ID":           blueprints.StableULID("digest-mas-admin"),
+		"ENGAGEMENT_MAS_CLIENT_SECRET":       "fixture-not-a-secret-digest-mas-admin",
+		"ENGAGEMENT_MAS_UPSTREAM_PROVIDER":   blueprints.StableULID("chat"),
+		"ENGAGEMENT_MATRIX_BOT_LOCALPART":    "community-bot",
+		"ENGAGEMENT_MATRIX_BOT_DISPLAY_NAME": "Community Bot",
 	} {
 		if got := envValue(env, key); got != want {
 			t.Errorf("%s=%s, want %s", key, got, want)
@@ -171,11 +172,14 @@ func TestEngagementMatrixEnv(t *testing.T) {
 func TestEngagementBotLocalpartSetting(t *testing.T) {
 	cfg := fixture(t)
 	app := cfg.Apps["digest"]
-	app.Settings = map[string]any{"bot_localpart": "weekly"}
+	app.Settings = map[string]any{"bot_localpart": "weekly", "bot_display_name": "Weekly Bot"}
 	cfg.Apps["digest"] = app
 	digest, _ := digestAndTalkEnv(t, cfg)
 	if got := envValue(digest, "ENGAGEMENT_MATRIX_BOT_LOCALPART"); got != "weekly" {
 		t.Errorf("ENGAGEMENT_MATRIX_BOT_LOCALPART=%s, want weekly", got)
+	}
+	if got := envValue(digest, "ENGAGEMENT_MATRIX_BOT_DISPLAY_NAME"); got != "Weekly Bot" {
+		t.Errorf("ENGAGEMENT_MATRIX_BOT_DISPLAY_NAME=%s, want Weekly Bot", got)
 	}
 }
 
@@ -212,7 +216,7 @@ func TestEngagementWithoutHomeserverRendersNoMatrix(t *testing.T) {
 	// and every ENGAGEMENT_MATRIX_ and ENGAGEMENT_MAS_ line, is the unlinked
 	// render byte for byte.
 	lines := strings.Split(with, "\n")
-	start := slices.Index(lines, "# The homeserver the Digest Bot runs on, and the MAS admin client it looks")
+	start := slices.Index(lines, "# The homeserver the bot runs on, and the MAS admin client it looks")
 	if start < 0 {
 		t.Fatalf("the linked .env has no Matrix block:\n%s", with)
 	}

@@ -93,8 +93,11 @@ func TestEngagementBlueprintConsumesAHomeserver(t *testing.T) {
 	if s, ok := settings["homeserver"]; !ok || s.Type != "string" {
 		t.Errorf("homeserver setting %+v (declared %v), want a string", s, ok)
 	}
-	if s, ok := settings["bot_localpart"]; !ok || s.Type != "string" || s.Default != "digest-bot" {
-		t.Errorf("bot_localpart setting %+v (declared %v), want a string defaulting to digest-bot", s, ok)
+	if s, ok := settings["bot_localpart"]; !ok || s.Type != "string" || s.Default != "community-bot" {
+		t.Errorf("bot_localpart setting %+v (declared %v), want a string defaulting to community-bot", s, ok)
+	}
+	if s, ok := settings["bot_display_name"]; !ok || s.Type != "string" || s.Default != "Community Bot" {
+		t.Errorf("bot_display_name setting %+v (declared %v), want a string defaulting to Community Bot", s, ok)
 	}
 }
 

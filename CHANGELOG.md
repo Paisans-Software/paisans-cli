@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Changed
+
+- The `engagement` blueprint's bot defaults to the account `community-bot`, was `digest-bot`, and takes the name members see from a new `bot_display_name` setting, `Community Bot` by default; `validate` refuses a blank or multi-line one.
+
 ### Fixed
 
 - `site admit` turns on forwarding on the relay, the first site by name dialled on its `public_address` or `endpoint`, and no other site, matching the WireGuard render; apply refuses only a relay without it.
