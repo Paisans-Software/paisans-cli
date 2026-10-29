@@ -12,11 +12,16 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Added
 
-- `deployment apply` lists, under `left over`, each container of a stack still rendered whose service the stack no longer declares, with the `docker rm -f` that takes it off.
+- `deployment apply` lists, under `left over`, each container of a stack still rendered whose service the stack no longer declares.
+- `site prune` removes those containers, keeping etcd, Patroni and Garage, then this deployment's dangling volumes; `deployment prune` runs it on every site.
 
 ### Changed
 
 - The engagement app's front page and `/d/` with no date redirect to the account app, or the community's domain without one; `/d/` before the gate, the front page after it.
+
+### Removed
+
+- `prune --site`, whose volume removal `site prune` now does.
 
 ## [0.3.0-rc.15] - 2026-10-29
 

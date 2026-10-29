@@ -1823,8 +1823,9 @@ every container name is noise. With the id above the token is `f2a9`, and:
 
 Code that decides whether a Docker object is this deployment's matches the
 label, and the full id in it, never a name: `doctor` lists containers with
-`docker ps -a --filter label=community.paisans.deployment=<id>`, and `prune`
-removes a volume only when it carries that label with this id. A name is
+`docker ps -a --filter label=community.paisans.deployment=<id>`, and `site
+prune` removes a container or a volume only when it carries that label with
+this id. A name is
 chosen by whoever creates the object, and two deployments on one host share
 every naming convention, so a name can only ever say what something is
 called. The firewall, unit and DNS markers carry the token: ufw comments
@@ -1871,7 +1872,7 @@ deployment learns about its host it learns from its **admission record**,
 claim: root's and 0644, in a directory the deployment's user lists and reads
 but cannot write. Every command that changes a host, `deployment apply`, `site prepare`,
 `storage init`, `storage add`, `storage rotate-key`, `site add`, `site
-remove`, `prune`, `operator magic-link`, `app remove`, `oidc client create`,
+remove`, `site prune`, `deployment prune`, `operator magic-link`, `app remove`, `oidc client create`,
 `secrets rotate` and `failover test`, reads the record of each site it will
 write to, as the deployment's user, before its first change. A host with no
 record has not admitted the deployment, or has evicted it, and a record that
@@ -3338,11 +3339,32 @@ each app the leftovers belong to, which is the command that takes them off
 
 A service taken out of a stack that still runs is left over the same way.
 Compose starts and updates only the services a stack's file declares, so a
-service the toolkit stops rendering keeps its container running: Patroni on a
-site that drops the `data` role, or Mbin's broker after the queue moves to
-Postgres. apply's `left over` section lists each such container with the
-`docker rm -f` that takes it off, run as the deployment's user once nothing
-relies on it. Its data under the stack's directory stays.
+service the toolkit stops rendering keeps its container running: HAProxy on a
+site that no longer needs it, or Mbin's broker after the queue moves to
+Postgres. apply's `left over` section lists each such container and names
+`paisans site prune <site>`, which removes it (see *`site prune` removes what
+a site no longer runs*). A left over etcd, Patroni or Garage is listed with
+the reason `site prune` keeps it: each is a member other sites may still count
+on, and `site remove` is what takes a site out of them.
+
+#### `site prune` removes what a site no longer runs
+
+`paisans site prune <site>` is the command that makes the decision `deployment
+apply` leaves alone. It judges against what the last apply wrote on the host,
+not against a fresh render, so it needs no secrets and never removes what an
+apply has not yet stopped declaring:
+
+| What | Removed when | Kept |
+|------|--------------|------|
+| a left over service's containers | the stack's compose file on the host no longer declares the service, or the manifest marks the infrastructure stack's compose file left over | etcd, Patroni and Garage, each with why; an app's whole stack, which is `app remove`'s |
+| a dangling volume | it carries this deployment's label | every other volume |
+
+The containers go first and the volumes after, read once the containers are
+gone, so an anonymous volume a removed container leaves behind is judged too.
+Bind mounted data under the stack's directory stays. Without `--execute` it
+lists what it would remove and changes nothing. `paisans deployment prune`
+runs it on every site, after checking and leasing them all; a site that fails
+does not stop the others.
 
 #### A blueprint can come from a catalog
 
@@ -4966,7 +4988,7 @@ record and nothing longer. So every command that publishes or changes the
 deployment first takes the **deployment lease**: `deployment apply` (with or
 without `--site`), `deployment publish`, `operator register`, `site add`,
 `site prepare`, `site remove`, `app remove`, `gateway move`, `mesh rekey`,
-`prune`, `storage init`, `storage add`, `storage rotate-key`,
+`site prune`, `deployment prune`, `storage init`, `storage add`, `storage rotate-key`,
 `secrets rotate` and `oidc client create`.
 
 * **It is a file on every site,** `/srv/paisans/<token>/.paisans/lease`,
@@ -5708,9 +5730,9 @@ skips sudo entirely, and with it everything above.
 
 ### The host check: what is already on a host decides how much is touched
 
-`deployment apply` removes the images it superseded and `prune` removes every anonymous
-volume nothing mounted, and `site prepare`, `deployment apply`, `site add` and `prune`
-all bind ports. That is right on a dedicated host and wrong on one where
+`deployment apply` removes the images it superseded and `site prune` removes left over
+containers and every anonymous volume nothing mounted, and `site prepare`,
+`deployment apply`, `site add` and `site prune` all bind ports. That is right on a dedicated host and wrong on one where
 somebody else runs a web server or a database. So before any of them changes
 anything, in a dry run as well as with `--execute`, it runs the **host
 check**, as the deployment's user, on the site it is about to change and
@@ -5765,7 +5787,7 @@ The check has three parts, in `internal/hostcheck`:
   which is `site admit`'s.
 * **Classification.** A container or network is the toolkit's when it
   carries the label `community.paisans.deployment` with this deployment's id,
-  the same rule `prune` follows. Another deployment's containers on the same
+  the same rule `site prune` follows. Another deployment's containers on the same
   host are foreign like anyone else's, whatever their names. A listener is
   told by its owner's UID. It is the toolkit's when its UID is the
   deployment user's own or in the user's subordinate range, which is every
@@ -7662,8 +7684,8 @@ migration.
 the removed `rabbitmq` and `amqproxy` containers running as orphans. Run one
 consumer against the old AMQP DSN until `messenger:stats` reads nothing and the
 broker's `delay_*` retry queues are empty (retries can be up to about 21 hours
-out), or accept losing pending retries; then `docker compose up -d
---remove-orphans` in the stack.
+out), or accept losing pending retries; then `paisans site prune <site>` on each
+apps site removes them.
 
 What it costs: every message is at least three commits (insert, take,
 delete), each waiting for the synchronous replica on the other site, and the
@@ -8583,7 +8605,7 @@ Refuse, not warn: the leak is certain, and a warning is the state the real site
 was already in with nobody reading it. Only stacks the apply acts on are
 checked, because a stack left alone creates no container and so no volume.
 
-For what accumulated before any of this, `paisans prune --site <site>` lists
+For what accumulated before any of this, `paisans site prune <site>` lists
 every dangling volume with its size and top level entries, and `--execute`
 removes the ones that are this deployment's: those carrying the label
 `community.paisans.deployment` with this deployment's id. Every other volume is
@@ -8591,7 +8613,7 @@ kept: one labelled with another id is another deployment's, and one with no
 such label, anonymous ones included, cannot be attributed to any deployment on
 a host that several may share. `deployment apply` itself removes the anonymous volumes its
 own recreates abandon, read from its own containers before they are replaced,
-so those do not wait for `prune`. The plan says what its verdicts rest on at
+so those do not wait for `site prune`. The plan says what its verdicts rest on at
 the top, then marks each volume the way `site prepare` marks its plan: `○
 remove volume <name>` for one it would remove, and with `-v` `✓ keep volume
 <name>` for one it keeps, each with its whole name, size, top level entries
@@ -8599,7 +8621,7 @@ and reason under it, and the total last. Piped output says `todo` and `ok`
 instead. An anonymous volume's 64 character name is shortened to its first 12
 in the title.
 
-**`prune` lists first and removes only this deployment's volumes**, the same
+**`site prune` lists first and removes only this deployment's volumes**, the same
 rule `deployment apply` follows for images. **Every declared
 volume is mounted** because each recreate otherwise costs a volume, and a
 throwaway path is not bound under the deployment's root because a shared cache directory

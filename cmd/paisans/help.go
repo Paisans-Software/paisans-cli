@@ -43,13 +43,13 @@ type helpSection struct {
 // groupSummary is the line the first page gives a command with
 // subcommands. A command without any is listed by its own summary.
 var groupSummary = map[string]string{
-	"site":        "List, admit, prepare, add, remove, evict and log in to sites.",
+	"site":        "List, admit, prepare, add, remove, evict, prune and log in.",
 	"mesh":        "Replace sites' WireGuard keys.",
 	"gateway":     "Move the gateway role to another site.",
 	"storage":     "Provision object storage, join sites to it, replace keys.",
 	"failover":    "Switch the database primary to another site and back.",
 	"dns":         "Create the DNS records the configuration implies, or prune them.",
-	"deployment":  "Apply, list, check out, fetch, publish, pull and recover.",
+	"deployment":  "Apply, prune, list, check out, fetch, publish, pull and recover.",
 	"operator":    "Add an operator, sign the configuration, or give a sign-in link.",
 	"secrets":     "List, set, prune and rotate secrets.",
 	"app":         "Take a removed app off hosts.",
@@ -63,7 +63,7 @@ var groupSummary = map[string]string{
 var helpSections = []helpSection{
 	{"Most of the time", []string{"deployment"}},
 	{"Start a deployment", []string{"create", "validate", "init", "render"}},
-	{"Sites", []string{"site", "mesh", "gateway", "storage", "prune"}},
+	{"Sites", []string{"site", "mesh", "gateway", "storage"}},
 	{"Check", []string{"doctor", "images", "preflight", "failover", "web-server", "version"}},
 	{"Configuration and secrets", []string{"operator", "secrets", "dns"}},
 	{"Apps", []string{"app", "oidc", "catalog", "blueprint"}},
@@ -141,6 +141,12 @@ var helpCommands = []helpCommand{
 			"otherwise skip the site, whose site admit checks the subnet as root, printing the site admit and site request lines that admit it. --yes never admits a host: admitting stays its owner's step; " +
 			"until the deployment is on any site, reach every admitted site and keep mesh.subnet only if it overlaps nothing there, else, with no site admitted, roll a random /24 that overlaps nothing and move each site's address into it; " +
 			"then generate the secrets it needs, filling in only what is missing, and say what is still owed from elsewhere. " + draftTopic,
+	},
+	{
+		name:    "deployment prune",
+		summary: "Run site prune on every site.",
+		usage:   []string{"paisans deployment prune [--config " + config.FileName + "] [--break-lease] [--execute]"},
+		detail:  "Run site prune on every site " + config.FileName + " declares. Every site is checked and leased before any is changed; a site that fails does not stop the others, and the run fails naming it.",
 	},
 	{
 		name:    "render",
@@ -270,6 +276,14 @@ var helpCommands = []helpCommand{
 			"Reads " + config.FileName + " without validating it; changes nothing itself.",
 	},
 	{
+		name:    "site prune",
+		summary: "Remove what this deployment no longer runs on one site.",
+		usage:   []string{"paisans site prune <site> [--config " + config.FileName + "] [--ssh <destination>] [--break-lease] [--execute]"},
+		detail: "List the containers of each service a stack's compose file on the host no longer declares, which compose leaves running, and every container of an infrastructure stack the site no longer runs; then the site's dangling Docker volumes, with size and top level entries, saying which carry this deployment's label. " +
+			"Keeps etcd, Patroni and Garage, which other sites may still count on; site remove takes a site out of those.\n\n" +
+			"Removes the rest with --execute, the containers first and then the volumes carrying this deployment's label. Data in a stack's directory stays. An app's whole stack is app remove's.",
+	},
+	{
 		name:    "mesh rekey",
 		summary: "Replace sites' WireGuard keys, one site at a time.",
 		usage:   []string{"paisans mesh rekey <site>... | --all [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                   [--id <id>] [--execute]"},
@@ -303,13 +317,6 @@ var helpCommands = []helpCommand{
 		usage:   []string{"paisans storage rotate-key --app <name> [--config " + config.FileName + "]\n                           [--secrets secrets.enc.yaml] [--id <id>] [--execute]"},
 		detail: "Replace one app's S3 key, in gated stages: the new pair into the secrets (the old one kept beside it), the new key imported and granted, the app applied alone on every site running it, a probe written, read and deleted with the new key, and only then the old key deleted from Garage and the secrets.\n\n" +
 			"Resumes from the secrets file. Writes nothing without --execute. " + draftTopic,
-	},
-	{
-		name:    "prune",
-		summary: "List and remove one site's dangling Docker volumes.",
-		usage:   []string{"paisans prune --site <name> [--config " + config.FileName + "] [--ssh <destination>] [--execute]"},
-		detail: "List one site's dangling Docker volumes, with size and top level entries, and say which carry this deployment's label. " +
-			"Removes those with --execute; every other volume is kept.",
 	},
 	{
 		name:    "preflight",

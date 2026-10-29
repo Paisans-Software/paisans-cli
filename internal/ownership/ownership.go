@@ -24,10 +24,12 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
@@ -67,6 +69,8 @@ type Service struct {
 	// of them run.
 	Containers []string
 	Running    int
+	// Kept says why site prune keeps it, empty for one it removes.
+	Kept string
 }
 
 // Leftover reports whether anything of this deployment's is left over.
@@ -161,7 +165,7 @@ func UndeclaredServices(d deployment.Deployment, inv *hostcheck.Inventory, decla
 		key := stack + "/" + c.Service
 		s := left[key]
 		if s == nil {
-			s = &Service{Stack: stack, Project: c.Project, Name: c.Service}
+			s = &Service{Stack: stack, Project: c.Project, Name: c.Service, Kept: keptService(stack, c.Service)}
 			left[key] = s
 		}
 		s.Containers = append(s.Containers, c.Name)
@@ -180,6 +184,78 @@ func UndeclaredServices(d deployment.Deployment, inv *hostcheck.Inventory, decla
 		}
 		return out[i].Name < out[j].Name
 	})
+	return out
+}
+
+// clusterServices are the infrastructure stack's services that make a site a
+// member of something larger than itself: etcd's and Patroni's cluster, and
+// Garage's layout. Removing one's container leaves a member the others still
+// count on, so site prune keeps it; site remove takes a site out of each.
+var clusterServices = map[string]string{
+	"etcd":    "an etcd member",
+	"patroni": "a member of the Patroni cluster",
+	"garage":  "a node in Garage's layout",
+}
+
+// keptService says why site prune keeps a left over service, empty for one it
+// removes.
+func keptService(stack, service string) string {
+	what, ok := clusterServices[service]
+	if stack != "infra" || !ok {
+		return ""
+	}
+	return what + ", which the rest of the deployment may still count on; `" + progname.Cmd() + " site remove` takes a site out of it"
+}
+
+// PruneServices is every left over service site prune judges, against the
+// compose files on the host rather than a render, so that it needs no
+// secrets and judges what the last apply wrote. composes is each stack's
+// compose file on the host, by stack, absent where there is none; a stack
+// without one is not judged. A stack whose compose file the manifest marks
+// left over is judged as declaring nothing when it is the infrastructure
+// stack, and not at all otherwise: an app's stack is `app remove`'s.
+func PruneServices(d deployment.Deployment, inv *hostcheck.Inventory, composes map[string]string) ([]Service, error) {
+	leftover := map[string]bool{}
+	for _, f := range inv.ManifestFiles {
+		if f.Leftover {
+			leftover[f.Path] = true
+		}
+	}
+	declared := map[string][]string{}
+	for stack, content := range composes {
+		if leftover[strings.TrimPrefix(d.Compose(stack), "/")] {
+			if stack == "infra" {
+				declared[stack] = nil
+			}
+			continue
+		}
+		services, err := apply.ComposeServices(content)
+		if err != nil {
+			return nil, fmt.Errorf("reading the services %s declares: %w", d.Compose(stack), err)
+		}
+		declared[stack] = services
+	}
+	return UndeclaredServices(d, inv, declared), nil
+}
+
+// Stacks is every stack of d's with a container on the host, sorted: the
+// stacks whose compose files site prune reads.
+func Stacks(d deployment.Deployment, inv *hostcheck.Inventory) []string {
+	prefix := d.Prefix() + "-"
+	seen := map[string]bool{}
+	for _, c := range inv.Containers {
+		if c.Deployment != d.ID {
+			continue
+		}
+		if stack, ok := strings.CutPrefix(c.Project, prefix); ok && stack != "" {
+			seen[stack] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for stack := range seen {
+		out = append(out, stack)
+	}
+	sort.Strings(out)
 	return out
 }
 

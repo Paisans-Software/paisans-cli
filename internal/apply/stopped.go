@@ -20,8 +20,8 @@ const ContainersRead = `docker ps --all --filter label=com.docker.compose.projec
 // one was paused by somebody, on purpose.
 var downStates = map[string]bool{"exited": true, "created": true, "dead": true}
 
-// composeServices returns the services a rendered compose file declares.
-func composeServices(content string) ([]string, error) {
+// ComposeServices returns the services a compose file declares.
+func ComposeServices(content string) ([]string, error) {
 	var doc struct {
 		Services map[string]yaml.Node `yaml:"services"`
 	}
@@ -46,7 +46,7 @@ func (p *Plan) DeclaredServices() (map[string][]string, error) {
 		if !isStackCompose(c) {
 			continue
 		}
-		services, err := composeServices(c.content)
+		services, err := ComposeServices(c.content)
 		if err != nil {
 			return nil, fmt.Errorf("reading the services %s declares: %w", c.Path, err)
 		}

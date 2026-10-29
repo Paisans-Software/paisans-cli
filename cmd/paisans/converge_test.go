@@ -923,7 +923,7 @@ func TestNothingSaysApplyTakesOneSite(t *testing.T) {
 	if !strings.Contains(entry, "Without --site") {
 		t.Errorf("apply's usage entry does not say what it does without --site:%s", entry)
 	}
-	for name, run := range map[string]func([]string) error{"storage init": runStorageInit, "prune": runPrune} {
+	for name, run := range map[string]func([]string) error{"storage init": runStorageInit} {
 		var err error
 		captureStdout(t, func() { err = run([]string{"--config", fixtureConfig()}) })
 		if err == nil || !strings.Contains(err.Error(), "the same reason deployment apply --site takes one") {

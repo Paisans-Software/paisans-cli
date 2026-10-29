@@ -257,14 +257,14 @@ func TestStorageAddIsRefusedWhenANewerPaisansLastAppliedASite(t *testing.T) {
 	}
 }
 
-// prune is refused before it reads the site's volumes.
+// site prune is refused before it reads the site's compose files or volumes.
 func TestPruneIsRefusedWhenANewerPaisansLastAppliedIt(t *testing.T) {
 	log := loggingSSH(t, "")
 	recordConverge(t)
 	read := appliedByNewer(t, map[string]string{"home-a": "99.0.0"})
 	after := sentAfterCheck(t, log)
-	err := runPrune([]string{"--config", fixtureConfig(), "--site", "home-a", "--execute"})
-	refusedAsNewer(t, err, "home-a", "prune --site home-a")
+	err := runSitePrune([]string{"home-a", "--config", fixtureConfig(), "--execute"}, strings.NewReader(""), io.Discard)
+	refusedAsNewer(t, err, "home-a", "site prune home-a")
 	readAll(t, *read, "home-a")
 	if sent := after(); sent != "" {
 		t.Errorf("a refused prune reached its host after the check:\n%s", sent)

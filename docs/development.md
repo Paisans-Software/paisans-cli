@@ -57,7 +57,7 @@ create writes one new file there. validate reads only the files, except that
 it tries each app's mail settings from a site running it, and `secrets set`
 tries an SMTP password from this machine before writing it; neither changes a site,
 and `validate --offline` reaches none. init writes only local files, and reads every site over ssh to settle the mesh subnet.
-`site prepare`, `deployment apply`, `prune`, `site add`, `site remove`, `mesh rekey`,
+`site prepare`, `deployment apply`, `site prune`, `deployment prune`, `site add`, `site remove`, `mesh rekey`,
 `secrets rotate`, `storage init`, `storage add`, `storage rotate-key`, `app
 admin create`, `app remove` and `oidc client create` reach a machine, and each
 changes it only with `--execute`. `preflight` and `doctor`
@@ -150,7 +150,7 @@ paisans render   --config examples/paisans-stack.example.yaml \
 paisans site prepare --site home-a        # the host check, then what a blank host lacks
 paisans deployment apply    --site home-a            # shows what would change
 paisans deployment apply    --site home-a --execute  # does it
-paisans prune    --site home-a            # lists dangling volumes, and which go
+paisans site prune home-a                 # lists left over containers and volumes, and which go
 paisans preflight --site home-b           # site add's read only checks
 paisans storage add                       # every Garage stage, from live state
 paisans storage rotate-key --app talk     # replaces one app's S3 key, staged
@@ -391,7 +391,8 @@ each app the leftovers belong to (`Report.Apps`). apply also lists each
 container of a stack still rendered whose service that stack's compose file
 no longer declares (`ownership.UndeclaredServices`, against
 `apply.Plan.DeclaredServices`), with the `docker rm -f` that takes it off;
-`doctor`, which renders nothing, does not. Its allow list takes the inventory's probes
+`doctor`, which renders nothing, does not. `site prune` names the same
+services from the host's compose files, and removes them. Its allow list takes the inventory's probes
 from `hostcheck.ReadCommands`.
 
 `render`, `deployment apply`, `site add` and `site remove` refuse a site running the
@@ -458,8 +459,8 @@ two sites, so uploads stop while either is down, a trade its comment explains.
 
 ## The host check, before anything changes
 
-`site prepare`, `deployment apply`, `site add` (on the site being added) and `prune`
-each run `internal/hostcheck` first, and so do `storage rotate-key` (on every
+`site prepare`, `deployment apply`, `site add` (on the site being added),
+`site prune` and `deployment prune` each run `internal/hostcheck` first, and so do `storage rotate-key` (on every
 site the app runs on), `storage add` (every Garage site, the gateway and every
 monitor site), and `site add`, `site remove` and `app remove` on every monitor
 site they reseed, in a dry run as well as with `--execute`, and
@@ -825,7 +826,11 @@ under Mbin's `/app/var/`. Three pieces, each easy to undo by accident:
   (`internal/apply/anonvolumes.go`). Warnings only, and nothing on a failed
   gate.
 
-`prune --site <s>` (`internal/apply/volumeprune.go`) lists every dangling
+`site prune <s>` (`cmd/paisans/siteprune.go`) first removes left over
+services: `ownership.PruneServices` judges this deployment's containers
+against each stack's compose file read from the host, keeping etcd, Patroni
+and Garage, and `apply.RemoveContainers` removes the rest. Then
+(`internal/apply/volumeprune.go`) it lists every dangling
 volume with size and top level entries and removes, with `--execute`, only
 those labelled `community.paisans.deployment` with this deployment's id;
 another id's, an unlabelled one, an anonymous one and a named one are kept. The listing ends with an `end` marker, so a cut

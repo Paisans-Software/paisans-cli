@@ -164,7 +164,7 @@ func TestUndeclaredServicesAreLeftOver(t *testing.T) {
 	declared := map[string][]string{"talk": {"app"}, "infra": {"caddy"}}
 	got := ownership.UndeclaredServices(cfg.Deployment(), inv, declared)
 	want := []ownership.Service{
-		{Stack: "infra", Project: "paisans-f2a9-infra", Name: "patroni", Containers: []string{"paisans-f2a9-infra-patroni-1"}, Running: 1},
+		{Stack: "infra", Project: "paisans-f2a9-infra", Name: "patroni", Containers: []string{"paisans-f2a9-infra-patroni-1"}, Running: 1, Kept: "a member of the Patroni cluster, which the rest of the deployment may still count on; `paisans site remove` takes a site out of it"},
 		{Stack: "talk", Project: "paisans-f2a9-talk", Name: "amqproxy", Containers: []string{"paisans-f2a9-talk-amqproxy-1"}},
 		{Stack: "talk", Project: "paisans-f2a9-talk", Name: "rabbitmq", Containers: []string{"paisans-f2a9-talk-rabbitmq-1"}, Running: 1},
 	}
@@ -187,5 +187,58 @@ func TestUndeclaredServicesAreLeftOver(t *testing.T) {
 		if !strings.Contains(lines, want) {
 			t.Errorf("lines lack %q:\n%s", want, lines)
 		}
+	}
+}
+
+// site prune judges against the compose files on the host. A service the
+// host's file no longer declares is left over; a stack without a file is not
+// judged; an infrastructure stack the manifest marks left over declares
+// nothing, while an app's stack so marked is app remove's. etcd, Patroni and
+// Garage are kept, with why.
+func TestPruneServicesJudgesTheHostsComposeFiles(t *testing.T) {
+	d := fixture(t).Deployment()
+	inv := &hostcheck.Inventory{
+		Containers: []hostcheck.Container{
+			container("paisans-f2a9-talk-app-1", ours, "paisans-f2a9-talk", "app", 10),
+			container("paisans-f2a9-talk-rabbitmq-1", ours, "paisans-f2a9-talk", "rabbitmq", 11),
+			container("paisans-f2a9-infra-patroni-1", ours, "paisans-f2a9-infra", "patroni", 12),
+			container("paisans-f2a9-infra-haproxy-1", ours, "paisans-f2a9-infra", "haproxy", 13),
+			container("paisans-f2a9-docs-app-1", ours, "paisans-f2a9-docs", "app", 14),
+			container("paisans-f2a9-wiki-app-1", ours, "paisans-f2a9-wiki", "app", 15),
+			container("paisans-0c1d-infra-caddy-1", theirs, "paisans-0c1d-infra", "caddy", 16),
+		},
+		ManifestFiles: []render.ManifestFile{
+			{Path: "srv/paisans/f2a9/infra/compose.yaml", Leftover: true},
+			{Path: "srv/paisans/f2a9/docs/compose.yaml", Leftover: true},
+		},
+	}
+	if got, want := ownership.Stacks(d, inv), []string{"docs", "infra", "talk", "wiki"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Stacks = %v, want %v", got, want)
+	}
+	composes := map[string]string{
+		"talk":  "services:\n  app:\n    image: x\n",
+		"infra": "services:\n  patroni:\n    image: x\n",
+		"docs":  "services:\n  web:\n    image: x\n",
+	}
+	got, err := ownership.PruneServices(d, inv, composes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, s := range got {
+		names = append(names, s.Stack+"/"+s.Name)
+	}
+	if want := []string{"infra/haproxy", "infra/patroni", "talk/rabbitmq"}; !reflect.DeepEqual(names, want) {
+		t.Fatalf("services = %v, want %v", names, want)
+	}
+	if got[0].Kept != "" || got[2].Kept != "" {
+		t.Errorf("haproxy or rabbitmq kept: %q, %q", got[0].Kept, got[2].Kept)
+	}
+	if !strings.Contains(got[1].Kept, "a member of the Patroni cluster") || !strings.Contains(got[1].Kept, "site remove") {
+		t.Errorf("patroni kept = %q", got[1].Kept)
+	}
+
+	if _, err := ownership.PruneServices(d, inv, map[string]string{"talk": "services: ["}); err == nil {
+		t.Error("an unreadable compose file was judged")
 	}
 }
