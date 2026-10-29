@@ -274,8 +274,10 @@ func TestEngagementWelcomeEnv(t *testing.T) {
 			t.Errorf("%s=%s, want %s", key, got, want)
 		}
 	}
-	if got := envValue(env, "ENGAGEMENT_MBIN_API_URL"); !regexp.MustCompile(`^http://10\.44\.0\.\d+:8080$`).MatchString(got) {
-		t.Errorf("ENGAGEMENT_MBIN_API_URL=%s, want Mbin's mesh address on 8080", got)
+	// home-a's own mesh address: Mbin is clustered like the digest, so it
+	// runs on the same site.
+	if got, want := envValue(env, "ENGAGEMENT_MBIN_API_URL"), "http://10.44.0.1:8080"; got != want {
+		t.Errorf("ENGAGEMENT_MBIN_API_URL=%s, want %s", got, want)
 	}
 }
 

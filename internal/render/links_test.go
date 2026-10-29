@@ -165,6 +165,28 @@ func TestEngagementWithAnOlderHomeserverRendersNoMatrix(t *testing.T) {
 	}
 }
 
+// An Mbin blueprint that provides no forum, or one that does not offer
+// api_port, renders the digest with the Mbin welcomes off rather than
+// failing.
+func TestEngagementWithAnOlderForumRendersNoAgent(t *testing.T) {
+	for name, older := range map[string]func(appValues){
+		"no forum":    func(v appValues) { delete(v.links, "forum") },
+		"no api_port": func(v appValues) { delete(v.links["forum"], "api_port") },
+	} {
+		cfg, secrets := linksFixture(t)
+		p := newPlanner(cfg, secrets)
+		v := valuesOf(t, cfg, secrets, "digest")
+		older(v)
+		env, err := p.renderFile("engagement/.env.secret.tmpl", v)
+		if err != nil {
+			t.Fatalf("%s: rendering the digest's .env: %v", name, err)
+		}
+		if strings.Contains(env, "ENGAGEMENT_MBIN_API_URL") || strings.Contains(env, "ENGAGEMENT_MBIN_AGENT_") {
+			t.Errorf("%s: the digest's .env renders the agent client:\n%s", name, env)
+		}
+	}
+}
+
 func TestConsumersOfARoleNotProvidedFails(t *testing.T) {
 	cfg, secrets := linksFixture(t)
 	v := valuesOf(t, cfg, secrets, "web")
