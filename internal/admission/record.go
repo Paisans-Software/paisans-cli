@@ -488,8 +488,11 @@ func (r Record) Differences(cfg *config.Config, site string) []string {
 	if r.MeshSubnet != cfg.Mesh.Subnet {
 		out = append(out, fmt.Sprintf("the host admitted mesh subnet %s, and mesh.subnet is %s", r.MeshSubnet, cfg.Mesh.Subnet))
 	}
-	if want := s.DialEndpoint() != ""; r.Forwarding != want {
-		out = append(out, fmt.Sprintf("forwarding is %s on the host, and the site %s an endpoint, which relays the mesh", onOff(r.Forwarding), map[bool]string{true: "has", false: "has no"}[want]))
+	// Only forwarding the relay lacks is a difference. Forwarding left on a
+	// site that no longer relays passes nothing, and refusing it would hold
+	// up every apply until the owner admits the host again.
+	if cfg.Relay() == site && !r.Forwarding {
+		out = append(out, "forwarding is off on the host, and the site relays the mesh between sites that cannot dial each other")
 	}
 	for _, g := range Needs(s).Missing(r.Grants) {
 		out = append(out, fmt.Sprintf("the site's roles need --%s, which the host's owner did not grant", g))
@@ -498,13 +501,6 @@ func (r Record) Differences(cfg *config.Config, site string) []string {
 		out = append(out, "the site is behind the owner's web server (managed_by: external), and the host was admitted without it")
 	}
 	return out
-}
-
-func onOff(b bool) string {
-	if b {
-		return "on"
-	}
-	return "off"
 }
 
 // SiteError is a host whose admission does not cover its site.

@@ -11,7 +11,7 @@ ssh_port: 22
 listen_port: 51821
 mesh_subnet: "10.44.0.0/24"
 address: "10.44.0.5"
-endpoint: true
+endpoint: false
 grants:
   watchdog: false
   public_ports: true

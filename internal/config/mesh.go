@@ -216,6 +216,29 @@ func (s Site) ListenPortMovable() bool {
 	return err == nil && host == ""
 }
 
+// Relay is the site that relays the mesh between sites nobody dials: the
+// first site in name order that others dial (DialEndpoint), as the
+// WireGuard render routes the whole mesh subnet to it from every site that
+// is not dialled. It is empty unless two sites are not dialled: a lone one
+// peers directly with every dialled site, and nothing passes through a
+// relay. Only the relay needs forwarding, so site admit turns it on there
+// alone.
+func (c *Config) Relay() string {
+	relay, undialled := "", 0
+	for _, name := range c.SiteNames() {
+		switch {
+		case c.Sites[name].DialEndpoint() == "":
+			undialled++
+		case relay == "":
+			relay = name
+		}
+	}
+	if undialled < 2 {
+		return ""
+	}
+	return relay
+}
+
 // PeersDirectly reports whether this site and another exchange WireGuard
 // traffic without a relay: one of them is dialled (DialEndpoint), so the
 // other dials it. Two sites that are never dialled never peer at all; their
