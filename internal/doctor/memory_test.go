@@ -93,6 +93,7 @@ func TestSwap(t *testing.T) {
 func TestMemory(t *testing.T) {
 	cfg := fixture(t)
 	delete(cfg.Apps, "stats")
+	delete(cfg.Apps, "notify") // it serves the hub
 	for _, c := range []struct {
 		name  string
 		probe MemoryProbe
@@ -167,6 +168,7 @@ func TestMemoryFollowsPlacement(t *testing.T) {
 	cfg.Sites["watch"] = watch
 	// It hosts the uptime app alone (web-server-external-serves-one-app).
 	delete(cfg.Apps, "stats")
+	delete(cfg.Apps, "notify") // it serves the hub
 	f = Memory(cfg, []MemoryProbe{{Site: "watch", Out: memOut(gib3, "0", false)}})
 	if len(f) != 1 || !strings.Contains(f[0].Line, "at least its 768 MiB floor for what it runs") {
 		t.Errorf("monitor behind its owner's web server:\n%s", dump(f))

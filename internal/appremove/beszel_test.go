@@ -25,6 +25,7 @@ func hubless(t *testing.T) (map[string]*host, Input, *Plan) {
 	t.Helper()
 	cfg, hosts := world(t)
 	delete(cfg.Apps, "stats")
+	delete(cfg.Apps, "notify") // it serves the hub
 	agent := func(h *host, leftover bool) {
 		h.files[agentEnv] = "TOKEN=x\n"
 		h.files[agentFingerprint] = "f00d"
@@ -111,6 +112,7 @@ func TestRemovingTheHubAgainFindsNoAgent(t *testing.T) {
 	cfg := fixture(t)
 	delete(cfg.Apps, "blog")
 	delete(cfg.Apps, "stats")
+	delete(cfg.Apps, "notify") // it serves the hub
 	again, err := Build(cfg, "stats", probe(t, cfg, "stats", hosts, false))
 	if err != nil {
 		t.Fatal(err)

@@ -625,7 +625,7 @@ func rotatorFor(path string, w rotateWiring) (secretsrotate.Rotator, error) {
 				}
 			}
 		}
-		if _, ok := secretsrotate.AppSelfBlueprint(last); ok {
+		if len(secretsrotate.AppSelfBlueprints(last)) > 0 {
 			return secretsrotate.AppSelf(app, last, costOf(w.cfg, app, last)), nil
 		}
 	}

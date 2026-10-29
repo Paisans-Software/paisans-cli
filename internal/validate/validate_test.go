@@ -146,6 +146,10 @@ func TestRulesFire(t *testing.T) {
 		{"uptime-needs-a-monitor-site", "uptime-needs-a-monitor-site", validate.Refuse},
 		{"beszel-off-monitor", "beszel-needs-a-monitor-site", validate.Refuse},
 		{"beszel-twice", "one-beszel", validate.Refuse},
+		{"ops-notifier-without-homeserver", "ops-notifier-without-homeserver", validate.Refuse},
+		{"ops-notifier-without-hub", "ops-notifier-without-hub", validate.Refuse},
+		{"ops-notifier-twice", "one-ops-notifier", validate.Refuse},
+		{"ops-notifier-off-homeserver", "colocated-app-elsewhere", validate.Refuse},
 		{"beszel-smtp-without-sender", "beszel-smtp-sender", validate.Refuse},
 		{"beszel-smtp-sender-not-an-email", "beszel-smtp-sender", validate.Refuse},
 		{"beszel-starttls-without-username", "beszel-starttls-not-enforced", validate.Warn},
@@ -658,6 +662,19 @@ func TestABeszelAppOnValidMailIsQuiet(t *testing.T) {
 	for _, rule := range []string{"beszel-smtp-sender", "beszel-starttls-not-enforced", "smtp-plaintext-with-username", "smtp-on-a-blueprint-without-mail"} {
 		if result.Has(rule) {
 			t.Errorf("%s fired: %v", rule, result.Findings)
+		}
+	}
+}
+
+// An ops-notifier beside its homeserver, with a hub in the deployment, draws
+// no refusal and none of its own rules. The fixture's homeserver and notifier
+// are pinned to the witness, which is warned about and is not what this
+// test is about.
+func TestAnOpsNotifierBesideItsHomeserverIsAccepted(t *testing.T) {
+	result := validate.Check(load(t, "ops-notifier-valid"))
+	for _, f := range result.Findings {
+		if f.Level == validate.Refuse || strings.HasPrefix(f.Rule, "ops-notifier") || f.Rule == "one-ops-notifier" {
+			t.Errorf("unexpected finding: %s", f)
 		}
 	}
 }

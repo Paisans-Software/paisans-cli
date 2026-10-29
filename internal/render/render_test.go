@@ -2833,6 +2833,8 @@ func TestARolelessSiteRendersItsPinnedAppAndNoInfraStack(t *testing.T) {
 	}
 
 	delete(cfg.Apps, "stats")
+	delete(cfg.Apps, "notify") // it serves the hub
+
 	plan, err = render.Build(cfg, secrets)
 	if err != nil {
 		t.Fatal(err)

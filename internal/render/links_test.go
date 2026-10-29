@@ -82,6 +82,7 @@ func TestConsumersCarryTheSharedSecret(t *testing.T) {
 	}
 	want := []Consumer{
 		{Name: "digest", Secrets: map[string]string{"mas_admin_client_secret": "fixture-not-a-secret-digest-mas-admin"}},
+		{Name: "notify", Secrets: map[string]string{"mas_admin_client_secret": "fixture-not-a-secret-notify-mas-admin"}},
 		{Name: "web", Secrets: map[string]string{}},
 	}
 	if !reflect.DeepEqual(got, want) {

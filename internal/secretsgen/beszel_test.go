@@ -56,6 +56,8 @@ func TestFillBeszelToken(t *testing.T) {
 	}
 
 	delete(cfg.Apps, "stats")
+	delete(cfg.Apps, "notify") // it serves the hub
+
 	bare := &config.Secrets{}
 	if _, err := secretsgen.Fill(cfg, bare); err != nil {
 		t.Fatal(err)

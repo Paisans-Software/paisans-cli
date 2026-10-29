@@ -21,6 +21,7 @@ func monitorConfig(t *testing.T, webServer *config.WebServer) *config.Config {
 		// An external web server is handed the uptime app alone
 		// (web-server-external-serves-one-app), so the hub goes.
 		delete(cfg.Apps, "stats")
+		delete(cfg.Apps, "notify") // it serves the hub
 	}
 	if refusals := validate.Check(cfg).Refusals(); len(refusals) > 0 {
 		t.Fatalf("the monitor configuration is refused: %v", refusals)
@@ -261,6 +262,7 @@ func monitorOnGateway(t *testing.T) *config.Config {
 	cfg := fixture(t)
 	delete(cfg.Sites, "watch")
 	delete(cfg.Apps, "stats")
+	delete(cfg.Apps, "notify") // it serves the hub
 	vm := cfg.Sites["vm"]
 	vm.Roles = append(vm.Roles, config.RoleMonitor)
 	vm.PublicAddress = "203.0.113.10"
@@ -305,6 +307,7 @@ func TestAMonitorOnTheGatewayPingsEveryOtherSite(t *testing.T) {
 	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
 	delete(cfg.Sites, "watch")
 	delete(cfg.Apps, "stats")
+	delete(cfg.Apps, "notify") // it serves the hub
 	vm := cfg.Sites["vm"]
 	vm.Roles = append(vm.Roles, config.RoleMonitor)
 	vm.PublicAddress = "203.0.113.10"

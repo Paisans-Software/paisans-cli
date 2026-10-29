@@ -1661,6 +1661,65 @@ The image tracks `beszel` and `beszel-agent` in the core catalog are optional
 and held to `0.21.`: Beszel is 0.x, so the track is held to one minor, and a new minor is a
 catalog release.
 
+#### Alerts in Matrix: `ops-notifier`
+
+Beszel keeps alert rules and notification URLs per user, and sends each
+alert to its owner's own settings, so an alert in Matrix needs a bot, a room
+and a `matrix://` URL in that operator's settings that keeps working when the
+bot's token is renewed. The reserved blueprint `ops-notifier` runs
+[`paisans-ops-notifier-service`](https://github.com/Paisans-Software/paisans-ops-notifier-service),
+which keeps them true (`docs/specs/2026-10-29-ops-notifier.md`; founder
+decision):
+
+* **One direct room per operator**, made by a bot account in MAS, `ops-bot`
+  by default, and one URL in that operator's Beszel webhooks naming it. Each
+  operator keeps their own alert rules; nothing is seeded. Their other URLs
+  and email addresses are left as they are.
+* **An opt out is either** removing the URL in Beszel or leaving the room.
+  A pass never puts the URL back. Replying `subscribe` in the room, or
+  inviting the bot to a room and replying `subscribe` there, turns the
+  alerts on again.
+* **An operator removed from `operators:` loses their Beszel account** at
+  the next pass after the apply that renders the shorter list, with their
+  alerts and settings. The break glass user, and any user who did not sign in
+  through Pocket ID, is never touched.
+
+**It runs beside the homeserver** (`colocate: true` on its
+`matrix-homeserver` consume, blueprint format v4). The MAS admin client
+secret it shares with the homeserver can make a token for any Matrix user, so
+it stays on the host that already runs MAS, which a takeover of the gateway
+does not reach.
+
+**It signs in to the hub with a superuser of its own.** The `beszel`
+blueprint provides the role `beszel-hub`, whose `url` is the hub's port on
+its mesh address. The notifier shares `beszel_superuser_password` with the
+hub, and the hub's `setup.sh` makes it the superuser
+`paisans-link-<app>@<domain>` at every start and deletes any other
+`paisans-link-` superuser, so the break glass password never leaves the
+hub's site, each credential rotates on its own, and removing the app removes
+its access. A PocketBase superuser is unscoped: it reads and changes
+everything in the hub. The hub's superuser API is refused at the edge and
+reached over the mesh, where the notifier is.
+
+| Combination | Result | Rule |
+|---|---|---|
+| an `ops-notifier` app with no homeserver in the deployment offering `mas_admin_url` | refused | `ops-notifier-without-homeserver` |
+| an `ops-notifier` app with no `beszel` app | refused | `ops-notifier-without-hub` |
+| more than one `ops-notifier` app | refused | `one-ops-notifier` |
+| an `ops-notifier` app placed unlike its homeserver | refused | `colocated-app-elsewhere` |
+
+Its hostname serves `GET /healthz` alone. Its state is one file in its data
+directory, what it wrote in each operator's settings, which is what makes an
+opt out readable; losing it gives every operator the URL again. Its image
+track, `ops-notifier`, is optional in the core catalog's foundation.
+
+A secret name may be self rotated by two blueprints when both share it with
+the provider of one role, which reads it under that name:
+`mas_admin_client_secret` is the engagement app's and the notifier's, and
+the app's own blueprint says which rotation `secrets rotate
+apps.<app>.mas_admin_client_secret` is. Both shared secrets restart the
+provider's stack first, then the notifier's.
+
 ## Adding a site, and the constraint that shapes it
 
 etcd quorum is a majority: 1 member survives nothing but works; 3 members

@@ -1,0 +1,73 @@
+# The ops-notifier blueprint. A reserved blueprint: built into the binary with the Go that drives it, and never read from a catalog.
+# internal/blueprints reads it; Parse there documents every key.
+#
+# paisans-ops-notifier-service: Beszel alerts in Matrix. It keeps one bot,
+# one direct room per operator and one matrix:// URL in each operator's
+# Beszel notification settings, and deletes the Beszel account of anyone no
+# longer an operator (docs/specs/2026-10-29-ops-notifier.md). Format v4 for
+# colocate.
+apiVersion: paisans.blueprint/v4
+name: ops-notifier
+services:
+  # Its image is the core catalog's foundation.yaml's.
+  - {name: "app", foundation: "ops-notifier", purpose: "the bot and its reconcile pass"}
+# Its state is one file in its data directory: what it wrote in each
+# operator's settings, which is what makes an opt out readable.
+database: {engine: none}
+# 8085: the engagement service publishes 8083 and Beszel's hub 8084, and the
+# apps pinned to one site share its mesh address. It serves /healthz alone.
+port: 8085
+config:
+  format: env
+  file: ".env"
+health: {path: "/healthz", status: [200]}
+# Not gateable: it serves nothing but its health route, which the monitor
+# reads through the gateway.
+gate: {gateable: false}
+storage:
+  local_only: true
+  local_only_reason: "the service keeps its state file under its data directory, beside the homeserver"
+# The homeserver its bot lives on, colocated: the MAS admin client secret it
+# holds can make a token for any Matrix user, so it stays on the host that
+# already runs MAS, and MAS's admin listener is reached on that host's mesh
+# address. The secret is shared with the homeserver app, whose mas.yaml
+# declares the admin client beside this app's .env.
+#
+# The hub whose users it serves, through the role the beszel blueprint
+# provides. It signs in with a superuser of its own, made by the hub's
+# setup.sh from the beszel_superuser_password it shares, so the break glass
+# password never leaves the hub's site and removing this app removes its
+# access. A PocketBase superuser is unscoped: it can read and change
+# everything in the hub.
+#
+# Both optional, so each links to the deployment's one provider of its role
+# with no setting; validate refuses the app without either provider
+# (ops-notifier-without-homeserver, ops-notifier-without-hub).
+consumes:
+  - {role: matrix-homeserver, setting: homeserver, optional: true, shared_secrets: [mas_admin_client_secret], colocate: true}
+  - {role: beszel-hub, setting: hub, optional: true, shared_secrets: [beszel_superuser_password]}
+settings:
+  # The homeserver's hostname, unset meaning the deployment's one.
+  homeserver: {type: string}
+  # The hub's hostname, unset meaning the deployment's one.
+  hub: {type: string}
+  # The bot's localpart. A setting because MAS takes members' localparts
+  # from Pocket ID, so a member may already hold the default. Changing it
+  # gives the bot a new account and every operator a new room.
+  bot_localpart: {type: string, default: "ops-bot"}
+  # The name operators see the bot by, which it sets on its account at start.
+  bot_display_name: {type: string, default: "Ops Bot"}
+secrets:
+  required:
+    - {key: "mas_admin_client_secret", why: "paisans-ops-notifier-service refuses to start without OPS_NOTIFIER_MAS_CLIENT_SECRET"}
+    - {key: "beszel_superuser_password", why: "paisans-ops-notifier-service refuses to start without OPS_NOTIFIER_BESZEL_PASSWORD"}
+  generate:
+    # The secret of the MAS admin client the bot is made and kept with. The
+    # homeserver app's mas.yaml declares the client with it, so a rotation
+    # re-renders and restarts both, the homeserver's stack first.
+    - {name: mas_admin_client_secret, format: password, rotation_cost: restart}
+    # The password of this app's superuser at the hub. The hub's setup.sh
+    # sets it at every start, so a rotation restarts the hub's stack first,
+    # then this one.
+    - {name: beszel_superuser_password, format: password, rotation_cost: restart}
+  self_rotated: ["mas_admin_client_secret", "beszel_superuser_password"]

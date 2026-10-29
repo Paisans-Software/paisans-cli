@@ -12,6 +12,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Added
 
+- The `ops-notifier` blueprint, beside the homeserver, gives each operator a Matrix room for their own Beszel alerts and deletes a departed operator's Beszel account; the hub makes it a superuser of its own.
+
+### Added
+
 - Blueprint format `paisans.blueprint/v4` lets a consume declare `colocate: true`; validate's `colocated-app-elsewhere` then refuses the app placed anywhere but where its provider runs.
 - The `beszel` blueprint writes the hub's SMTP settings and sender from the `smtp` block, so alerts reach the addresses operators add in Beszel; validate checks the sender and warns about unenforceable `starttls`.
 

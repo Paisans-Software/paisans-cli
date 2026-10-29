@@ -1,0 +1,14 @@
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
+#
+# Routing for notify, imported by the gateway's block for
+# notify.example.org. The service serves GET /healthz alone, answering ok while
+# its state file is readable, so the monitor's public check sees it through
+# the gateway. Nothing else is proxied.
+@health expression `method('GET') && path('/healthz')`
+handle @health {
+	reverse_proxy 10.44.0.3:8085 {
+	}
+}
+handle {
+	respond 404
+}

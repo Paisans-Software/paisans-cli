@@ -79,6 +79,8 @@ const (
 	BlueprintEngagement  Blueprint = "engagement"
 	// The server monitor: a hub, and an agent beside it on every site.
 	BlueprintBeszel Blueprint = "beszel"
+	// Beszel alerts in Matrix, beside the homeserver.
+	BlueprintOpsNotifier Blueprint = "ops-notifier"
 )
 
 // Config is a whole deployment, declared. It records intent and never status:
