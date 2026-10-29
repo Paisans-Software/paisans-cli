@@ -92,13 +92,16 @@ func (c *checker) judgePlaintext(key, host, whose string) {
 // or a LOGIN auth with the same check (emailer/smtp/smtp.go in
 // italypaleale/go-kit v1.2.4, at Pocket ID v2.18.0), and the account service
 // uses go-mail's PLAIN auth (smtp/auth_plain.go at go-mail v0.8.1, at the
-// service's v0.2.0; the engagement service sends through the same library).
-// Each refuses any host but localhost, which inside a
-// container is the container itself.
+// service's v0.2.0; the engagement service sends through the same library),
+// and Beszel's hub sends through PocketBase's mailer, which uses net/smtp's
+// PlainAuth or a LOGIN auth refusing the same (tools/mailer/smtp.go:65-72 and
+// :185-193 at PocketBase v0.40.5). Each refuses any host but localhost, which
+// inside a container is the container itself.
 var plaintextAuth = map[config.Blueprint]string{
 	config.BlueprintPocketID:   "Pocket ID",
 	config.BlueprintAccount:    "The account service",
 	config.BlueprintEngagement: "The engagement service",
+	config.BlueprintBeszel:     "Beszel's hub",
 }
 
 // smtpPlaintextWithUsername refuses security: none with a username for an

@@ -1516,6 +1516,26 @@ gives an OAuth2 user the `admin` role (`internal/users/users.go:28-49` at
 password sign in off on the `users` collection at every start.
 `DISABLE_SSH=true`, since the hub never dials an agent.
 
+**Alert email goes out through the deployment's mail.** Beszel emails an
+alert to the addresses each user lists in its own settings, through
+PocketBase's mailer, which has no working fallback in the hub's image, so the
+blueprint reads the `smtp` block (`mail: reads`) and `setup.sh` writes the
+hub's SMTP settings and sender at every start. Nothing else is seeded: an
+operator adds an address and the alert rules they want in Beszel's UI, since
+paging already belongs to the uptime monitor. With no SMTP host the hub's mail
+settings are left as they are. PocketBase's `tls` is implicit TLS or STARTTLS
+when the server offers it, with no way to require the upgrade, so:
+
+| Combination | Result | Rule |
+|---|---|---|
+| a `beszel` app with an SMTP host and no `from_address`, or one that is not an address alone | refused | `beszel-smtp-sender` |
+| a `beszel` app on `starttls` with no `username` | warned | `beszel-starttls-not-enforced` |
+| a `beszel` app on `none` with a `username` | refused | `smtp-plaintext-with-username` |
+
+A username makes STARTTLS required in effect, because PocketBase sends no
+credentials over an unencrypted connection; without one, a stripped STARTTLS
+delivers the alert in plaintext.
+
 **The break glass is the superuser, over the mesh.** Pocket ID is one of the
 things the hub watches, so a hub that only Pocket ID opens is no use while it
 is down. The superuser `beszel-admin@<domain>` signs in with

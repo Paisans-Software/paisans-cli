@@ -218,6 +218,94 @@ func TestBeszelSetupWritesTheProvider(t *testing.T) {
 	}
 }
 
+// setup.sh writes the deployment's smtp block into the hub's settings in
+// PocketBase v0.40.5's field names (core/settings_model.go:363-382 and
+// :529-530): starttls as tls false, the external SMTP password, and the
+// community's name for a sender name the block leaves unset.
+func TestBeszelSetupWritesTheMail(t *testing.T) {
+	f := beszelFile(t, "setup.sh")
+	var body string
+	for _, line := range strings.Split(f.Content, "\n") {
+		if strings.HasPrefix(line, `{"smtp":`) {
+			body = line
+		}
+	}
+	var patch struct {
+		SMTP struct {
+			Enabled    bool   `json:"enabled"`
+			Host       string `json:"host"`
+			Port       int    `json:"port"`
+			Username   string `json:"username"`
+			Password   string `json:"password"`
+			AuthMethod string `json:"authMethod"`
+			TLS        *bool  `json:"tls"`
+		} `json:"smtp"`
+		Meta struct {
+			SenderName    string `json:"senderName"`
+			SenderAddress string `json:"senderAddress"`
+		} `json:"meta"`
+	}
+	dec := json.NewDecoder(strings.NewReader(body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&patch); err != nil {
+		t.Fatalf("the settings PATCH body is not the JSON PocketBase reads: %v\n%s", err, body)
+	}
+	cfg, secrets := beszelFixture(t)
+	s := patch.SMTP
+	if !s.Enabled || s.Host != cfg.SMTP.Host || s.Port != cfg.SMTP.PortOrDefault() || s.Username != cfg.SMTP.Username || s.AuthMethod != "PLAIN" {
+		t.Errorf("smtp %+v, want enabled with the deployment's host, port and username, and PLAIN", s)
+	}
+	if s.Password != secrets.External["smtp_password"] {
+		t.Errorf("smtp password %q, want external.smtp_password", s.Password)
+	}
+	if s.TLS == nil || *s.TLS != (cfg.SMTP.Security == config.SMTPTLS) {
+		t.Errorf("smtp tls %v for security %q, want true only for tls", s.TLS, cfg.SMTP.Security)
+	}
+	wantName := cfg.SMTP.FromName
+	if wantName == "" {
+		wantName = cfg.Community.Name
+	}
+	if patch.Meta.SenderAddress != cfg.SMTP.FromAddress || patch.Meta.SenderName != wantName {
+		t.Errorf("sender %q <%s>, want %q <%s>", patch.Meta.SenderName, patch.Meta.SenderAddress, wantName, cfg.SMTP.FromAddress)
+	}
+
+	cfg.SMTP.Security = config.SMTPTLS
+	cfg.SMTP.Port = 465
+	plan, err := Build(cfg, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range plan.Files {
+		if f.Path != "watch/srv/paisans/f2a9/stats/setup.sh" {
+			continue
+		}
+		if !strings.Contains(f.Content, `"port":465,`) || !strings.Contains(f.Content, `"tls":true}`) {
+			t.Errorf("security tls renders no implicit TLS on 465:\n%s", f.Content)
+		}
+	}
+}
+
+// With no smtp host, setup.sh leaves the hub's mail settings alone, so an
+// operator's own SMTP in the hub's UI is kept.
+func TestBeszelSetupWithoutSMTPLeavesMailAlone(t *testing.T) {
+	cfg, secrets := beszelFixture(t)
+	cfg.SMTP = config.SMTP{}
+	plan, err := Build(cfg, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range plan.Files {
+		if f.Path != "watch/srv/paisans/f2a9/stats/setup.sh" {
+			continue
+		}
+		if strings.Contains(f.Content, "/api/settings") {
+			t.Errorf("setup.sh writes the hub's settings with no smtp host:\n%s", f.Content)
+		}
+		return
+	}
+	t.Fatal("no setup.sh was rendered")
+}
+
 // setup.sh signs in as the superuser with the break glass address and
 // admin_password (PocketBase apis/record_auth_with_password.go:102-105), and
 // sets the break glass user's password to the same.
