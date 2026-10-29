@@ -28,7 +28,8 @@ settings, for as long as they are an operator.
    image, in the layout of `paisans-engagement-service`, whose MAS and Matrix
    clients it reuses.
 2. **A reserved blueprint, `ops-notifier`**, in `paisans-cli`, colocated with
-   the Matrix homeserver (`colocate: true`, blueprint format v4).
+   the Matrix homeserver (`colocate: true`, blueprint format v4, read in v5
+   with `hostname: none`).
 3. **A role the `beszel` blueprint provides, `beszel-hub`**, and the hub's
    side of the credential the notifier signs in with.
 4. **A track in the core catalog's `foundation.yaml`**, `ops-notifier`, once
@@ -296,10 +297,12 @@ consumes:
 
 ## The service's own surface
 
-Every app has a hostname, so the notifier has one, which the gateway routes.
-Its Caddy snippet proxies `GET /healthz` alone, which answers `ok` while the
-process runs and its state file is readable (*provisional*); nothing else is
-served. The container publishes its port on the site's mesh address only, as
+The notifier serves no website, so its blueprint says `hostname: none`
+(format v5): the app declares no hostname, and gets no DNS record, no
+certificate and no route at the gateway. Its one route, `GET /healthz`,
+answers `ok` while the process runs and its state file is readable
+(*provisional*), and the monitor reads it over the mesh, on the port the app
+publishes on its site's mesh address. The container publishes its port on the site's mesh address only, as
 every app does, runs as the deployment user so it can write its bind mounted
 data directory, and listens for nothing else.
 

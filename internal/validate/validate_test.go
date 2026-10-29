@@ -679,6 +679,29 @@ func TestAnOpsNotifierBesideItsHomeserverIsAccepted(t *testing.T) {
 	}
 }
 
+// An app whose blueprint says hostname: none is refused a hostname, which
+// nothing would route or certify, and every other app still needs one. Both
+// are load problems, at the key to edit.
+func TestAHostnameIsRequiredExactlyWhereTheBlueprintTakesOne(t *testing.T) {
+	for fixture, want := range map[string]string{
+		"ops-notifier-with-hostname": "apps.notify.hostname: notify.example.org is written for ops-notifier, whose blueprint says hostname: none",
+		"app-without-hostname":       "apps.wiki.hostname: required",
+	} {
+		_, err := config.Load(filepath.Join("testdata", fixture+".yaml"))
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want %q", fixture, err, want)
+		}
+	}
+}
+
+// Two apps that take no hostname share none: an empty hostname is no claim.
+func TestTwoHostlessAppsDrawNoDuplicateHostname(t *testing.T) {
+	result := validate.Check(load(t, "ops-notifier-twice"))
+	if result.Has("duplicate-hostname") {
+		t.Errorf("findings: %v", result.Findings)
+	}
+}
+
 // A role-less site stays legal for any blueprint but uptime, which needs a site
 // holding the monitor role.
 func TestARolelessSiteStillHostsOtherBlueprints(t *testing.T) {

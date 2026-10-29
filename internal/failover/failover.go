@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/patroni"
@@ -285,6 +286,11 @@ func (r *runner) appProblems() []string {
 		}
 	}
 	for _, app := range r.cfg.AppNames() {
+		// An app with no hostname is behind no gateway: its stack's health
+		// above is the whole check.
+		if blueprints.Hostless(r.cfg.Apps[app].Blueprint) {
+			continue
+		}
 		s := r.o.Report.Step("check " + app + " answers")
 		detail, err := r.answer(app)
 		if err != nil {

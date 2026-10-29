@@ -121,11 +121,9 @@ apps:
     placement: { pinned: watch }
   notify:
     blueprint: ops-notifier
-    hostname: notify.example.org
     placement: { pinned: vm }
   notify-again:
     blueprint: ops-notifier
-    hostname: notify2.example.org
     placement: { pinned: vm }
 
 smtp:

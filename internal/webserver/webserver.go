@@ -60,6 +60,9 @@ func For(cfg *config.Config, app string) (Target, error) {
 	if !ok {
 		return Target{}, fmt.Errorf("web-server: %s declares no app %q. Declared apps are %s", cfg.Path, app, strings.Join(cfg.AppNames(), ", "))
 	}
+	if blueprints.Hostless(a.Blueprint) {
+		return Target{}, fmt.Errorf("web-server: %s is a %s app, whose blueprint says hostname: none: it serves no website, so no web server is in front of it", app, a.Blueprint)
+	}
 	site, ok := render.ServedBy(cfg, app)
 	if !ok {
 		return Target{}, fmt.Errorf("web-server: %s is served by the gateway's Caddy, which the toolkit runs, so there is nothing to hand off. Only an app pinned to a site holding the monitor role has one", app)

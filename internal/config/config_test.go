@@ -150,7 +150,9 @@ func TestGarageCapacitySurvivesWhenDeclared(t *testing.T) {
 }
 
 // Every structural problem in a file is reported at once. Fixing a
-// configuration one error per run is miserable.
+// configuration one error per run is miserable. A malformed hostname is one;
+// a missing one is not, since whether an app takes a hostname is its
+// blueprint's to say, read once the file is sound.
 func TestStructuralProblemsAreReportedTogether(t *testing.T) {
 	body := `version: 2
 community:
@@ -164,7 +166,7 @@ sites:
 apps:
   talk:
     blueprint: Gopher
-    hostname: ""
+    hostname: "not a hostname"
 `
 	_, err := config.Load(write(t, body))
 	if err == nil {

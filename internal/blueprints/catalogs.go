@@ -31,6 +31,7 @@ import (
 
 func init() {
 	config.ResolveBlueprints = resolve
+	config.HostlessBlueprint = Hostless
 }
 
 // CatalogAPIVersion is the catalog format this toolkit reads.

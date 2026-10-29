@@ -1331,9 +1331,10 @@ func (c *Config) structural(noSubnet bool) error {
 		if app.Blueprint == "" {
 			add("apps.%s.blueprint: required. Say which application this is, for example mbin or wikijs: the blueprint it runs.", name)
 		}
-		if app.Hostname == "" {
-			add("apps.%s.hostname: required. It is the public name the gateway routes to.", name)
-		} else if p := HostnameProblem(app.Hostname); p != "" {
+		// Whether the app takes a hostname at all is its blueprint's to say
+		// (hostname: none), which is read once the blueprints resolve:
+		// hostnameProblems requires one there, or refuses it.
+		if p := HostnameProblem(app.Hostname); app.Hostname != "" && p != "" {
 			add("apps.%s.hostname: %q is not a hostname: %s. It is written into the gateway's Caddyfile and the app's env file as it is, so anything else could add to them.", name, app.Hostname, p)
 		}
 		for _, service := range sortedKeys(app.Images) {
@@ -1409,6 +1410,9 @@ func (c *Config) structural(noSubnet bool) error {
 	// only on a file that is otherwise sound.
 	if len(problems) == 0 && ResolveBlueprints != nil {
 		problems = append(problems, ResolveBlueprints(c)...)
+	}
+	if len(problems) == 0 && HostlessBlueprint != nil {
+		problems = append(problems, c.hostnameProblems()...)
 	}
 	if len(problems) == 0 {
 		return nil

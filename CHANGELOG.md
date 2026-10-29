@@ -12,6 +12,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Added
 
+- Blueprint format `paisans.blueprint/v5` adds `hostname: none` for an app serving no website: it takes no hostname, DNS record, certificate or gateway route, and is checked over the mesh; `ops-notifier` uses it.
 - The `engagement` blueprint links to a `forum` provider, sharing an Mbin agent client secret, and renders the welcome variables and the operators' addresses.
 - The `engagement` blueprint takes `community_room_name` and `welcome_email_daily_limit`; validate refuses a blank or letterless room name, a derived name with a control character, a limit under 1, and a pinned forum.
 - A provider's templates read a consumer's `.Values`; the `engagement` app offers its community room alias and Mbin agent client there.

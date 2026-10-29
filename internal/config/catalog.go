@@ -34,6 +34,31 @@ type Catalog struct {
 // package checks only that a qualified name's catalog is declared.
 var ResolveBlueprints func(*Config) []string
 
+// HostlessBlueprint, when set, reports whether a blueprint's app serves no
+// website and so takes no hostname (hostname: none). internal/blueprints sets
+// it; Load asks it once the blueprints resolve, since only then is every
+// app's blueprint read.
+var HostlessBlueprint func(Blueprint) bool
+
+// hostnameProblems holds each app's hostname to its blueprint: required of an
+// app that serves a website, and refused of one whose blueprint says
+// hostname: none, because nothing would route that name or hold a
+// certificate for it.
+func (c *Config) hostnameProblems() []string {
+	var problems []string
+	for _, name := range c.AppNames() {
+		app := c.Apps[name]
+		hostless := HostlessBlueprint(app.Blueprint)
+		switch {
+		case app.Hostname == "" && !hostless:
+			problems = append(problems, fmt.Sprintf("apps.%s.hostname: required. It is the public name the gateway routes to.", name))
+		case app.Hostname != "" && hostless:
+			problems = append(problems, fmt.Sprintf("apps.%s.hostname: %s is written for %s, whose blueprint says hostname: none: it serves no website, so nothing would route that name or hold a certificate for it. Remove the line; the monitor checks the app over the mesh.", name, app.Hostname, app.Blueprint))
+		}
+	}
+	return problems
+}
+
 var (
 	// catalogName is a catalog's name: one word, or <owner>/<name> as
 	// `catalog add` names a catalog by default.

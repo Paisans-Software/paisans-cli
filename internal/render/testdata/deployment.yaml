@@ -209,10 +209,10 @@ apps:
     hostname: status.health.example.org
     placement: { pinned: watch }
   # Beszel alerts in Matrix, beside the homeserver whose MAS admin secret it
-  # holds, signing in to the hub above with a superuser of its own.
+  # holds, signing in to the hub above with a superuser of its own. No
+  # hostname: it serves no website.
   notify:
     blueprint: ops-notifier
-    hostname: notify.example.org
     placement: { pinned: vm }
 
 # The deployment's mail server. The uptime app above inherits every field but

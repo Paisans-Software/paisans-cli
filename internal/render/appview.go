@@ -453,6 +453,11 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		set:             blueprints.SettingsSeen(app),
 		decl:            app,
 	}
+	if planned.Hostname == "" {
+		// hostname: none: the app has no public URL, and a template that
+		// read one would otherwise get "https://".
+		v.PublicURL = ""
+	}
 	v.TrustProxy = trustProxy(p.cfg, planned.Name)
 	v.WebServerListen = webServerListen(p.cfg, planned.Name)
 	if v.WebServerListen != "" {
