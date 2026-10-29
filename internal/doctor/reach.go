@@ -3,6 +3,7 @@ package doctor
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -117,7 +118,7 @@ func Losses(cfg *config.Config, site string) string {
 			lost = append(lost, "its gateway, and every public hostname whose DNS points only at it")
 		}
 	}
-	if declared.Has(config.RoleMonitor) {
+	if slices.ContainsFunc(cfg.PinnedTo(site), func(app string) bool { return cfg.Apps[app].Blueprint == config.BlueprintUptime }) {
 		lost = append(lost, "the uptime monitor, so nothing reports the other sites' failures while it is gone")
 	}
 	if contains(cfg.Etcd.Members, site) {

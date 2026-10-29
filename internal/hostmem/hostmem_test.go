@@ -342,3 +342,18 @@ func TestFloorBeszel(t *testing.T) {
 		t.Error("a monitor judged by its roles is counted with a hub it may not run")
 	}
 }
+
+// The uptime monitor is counted where an uptime app is pinned, not wherever
+// the monitor role is: a monitor whose one app is Beszel's hub runs no
+// uptime process.
+func TestUptimeFollowsTheApp(t *testing.T) {
+	cfg := fixtureConfig(t)
+	for name, app := range cfg.Apps {
+		if app.Blueprint == config.BlueprintUptime {
+			delete(cfg.Apps, name)
+		}
+	}
+	if got, want := ForSite(cfg, "watch"), (Runs{Caddy: true, Beszel: true}); got != want {
+		t.Errorf("watch, holding only the stats app: %+v, want %+v", got, want)
+	}
+}

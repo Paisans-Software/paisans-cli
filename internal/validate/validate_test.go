@@ -637,6 +637,15 @@ func TestAMonitorOnlySiteIsQuiet(t *testing.T) {
 	}
 }
 
+// A monitor site whose one app is Beszel's hub is as quiet as one holding the
+// uptime monitor: either app is something the role exists for.
+func TestAMonitorHoldingOnlyBeszelIsQuiet(t *testing.T) {
+	result := validate.Check(load(t, "monitor-holds-beszel"))
+	if len(result.Findings) != 0 {
+		t.Fatalf("monitor-holds-beszel produced findings: %v", result.Findings)
+	}
+}
+
 // A role-less site stays legal for any blueprint but uptime, which needs a site
 // holding the monitor role.
 func TestARolelessSiteStillHostsOtherBlueprints(t *testing.T) {

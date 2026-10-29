@@ -10,8 +10,9 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
-// monitorRoles checks where the uptime monitor may run. README.md: "The
-// monitor has a site of its own".
+// monitorRoles checks where the uptime monitor may run, and that a monitor
+// site runs the uptime monitor or Beszel's hub. README.md: "The monitor has
+// a site of its own", and "Server and container stats".
 //
 // A monitor exists to report the failures of everything else, and it cannot
 // report the machine it runs on. A machine of its own is the recommendation,
@@ -45,10 +46,10 @@ func (c *checker) monitorRoles() {
 				"monitor shares a site",
 				"holds monitor beside %s. It cannot report %s failing: when it goes down, the monitor goes with it and no alert is sent.%s A small machine of its own with roles: [monitor] reports it.", andList(shared), name, witness)
 		}
-		if !c.hostsUptime(name) {
+		if !c.hostsMonitorApp(name) {
 			c.refuse("monitor-without-uptime", key,
-				"monitor site runs no uptime app",
-				"holds the monitor role, but no uptime app is pinned to %s, so the site would run nothing the role exists for. Pin the uptime app here, or drop the role.", name)
+				"monitor site runs no uptime or beszel app",
+				"holds the monitor role, but no uptime or beszel app is pinned to %s, so the site would run nothing the role exists for. Pin the uptime app or Beszel's hub here, or drop the role.", name)
 		}
 		if site.PublicAddress == "" {
 			c.refuse("monitor-without-public-address", fmt.Sprintf("sites.%s.public_address", name),
@@ -129,10 +130,12 @@ func (c *checker) nothingWatches() {
 		"declares no uptime app, so nothing watches this deployment: a site, the gateway or the database going down is noticed by a member before an admin. Declare an uptime app pinned to a site with the monitor role, ideally a small machine of its own with a public_address, and apply it (README.md, \"Monitoring\").")
 }
 
-// hostsUptime reports whether an uptime app is pinned to a site.
-func (c *checker) hostsUptime(site string) bool {
+// hostsMonitorApp reports whether an app the monitor role exists for, the
+// uptime monitor or Beszel's hub, is pinned to a site. Either is a reason
+// for a site apart from what it watches, so either one is enough.
+func (c *checker) hostsMonitorApp(site string) bool {
 	for _, name := range c.cfg.PinnedTo(site) {
-		if c.cfg.Apps[name].Blueprint == config.BlueprintUptime {
+		if b := c.cfg.Apps[name].Blueprint; b == config.BlueprintUptime || b == config.BlueprintBeszel {
 			return true
 		}
 	}
