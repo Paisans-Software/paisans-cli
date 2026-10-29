@@ -1,6 +1,6 @@
 # Welcoming new members, on Mbin, on Matrix and by email
 
-Status: draft, 2026-10-29, awaiting the founder's approval of the whole.
+Status: approved by the founder, 2026-10-29.
 The founder settled the scope, the agent role, operators as the alert
 audience, the Matrix room's audience and the digest exclusion in session
 the same day. It

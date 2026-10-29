@@ -919,8 +919,8 @@ Mbin. The design is in `docs/specs/2026-10-24-engagement-digest.md`.
   client; the service calls Mbin's API on its own site's mesh address, since
   both apps are clustered. With the bot on, the service announces newcomers
   in a community room named by `settings.community_room_name`. Unset, that is
-  the community's name plus " Community", unless a whole word of the name is
-  already one of Community, Communities, Collective, Commons, Club, Society,
+  the community's name plus " Community" ("Community" for no name), unless a
+  word of the name, a run of letters and digits, is already one of Community, Communities, Collective, Commons, Club, Society,
   Guild, Circle, Network, Group, Hub or Crew. The room's alias is made from
   the name, lowercased, with each run of other characters than letters and
   digits replaced by one `-`, and the synapse app reads it from the app's
@@ -979,7 +979,8 @@ app*).
 | `engagement-source-not-clustered` | the `mbin` app is pinned. Refused: the reader role is created in the cluster's Postgres, and a pinned Mbin runs against a Postgres of its own on its site, where no such role exists |
 | `engagement-without-smtp` | the app resolves no SMTP host or `from_address`. Warned: it is an email and cannot send without them |
 | `engagement-bot-localpart-invalid` | `settings.bot_localpart` is not a Matrix localpart, lowercase letters, digits and `._=/-` only. Refused: MAS would not create the bot's account |
-| `engagement-community-room-name-invalid` | `settings.community_room_name` is blank, holds a control character, or has no letter or digit. Refused: it is rendered into one `.env` line and the room's alias is made from its letters and digits |
+| `engagement-community-room-name-invalid` | `settings.community_room_name` is blank, holds a control character, or has no letter or digit; or, with it unset, `community.name` holds a control character, since the room is then named after it. Refused: it is rendered into one `.env` line and the room's alias is made from its letters and digits |
+| `engagement-forum-not-clustered` | the app links to a forum that is pinned. Refused: the service calls the forum's API on its own site's mesh address, where only a clustered forum runs beside it |
 | `engagement-welcome-limit-invalid` | `settings.welcome_email_daily_limit` is less than 1. Refused: the daily welcome email would reach nobody |
 | `engagement-not-gated` | the app links to a Matrix homeserver and is not `gated`. Warned: the bot's links to the web digest, which names the member by the gate's header, all answer not found |
 | `engagement-bot-display-name-invalid` | `settings.bot_display_name` is blank or holds a line break, tab or other control character. Refused: it is rendered into one `.env` line |

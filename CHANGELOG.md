@@ -14,10 +14,14 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Added
 
-- The `engagement` blueprint welcomes newcomers: it links to a `forum` provider with a shared Mbin agent client secret, takes `community_room_name` and `welcome_email_daily_limit` settings (validate refuses a blank or letterless room name and a limit under 1), renders the welcome variables and the operators' addresses, and shows providers its community room alias and agent client through a consumer's new `.Values`.
+- The `engagement` blueprint welcomes newcomers: it links to a `forum` provider with a shared Mbin agent client secret, takes `community_room_name` and `welcome_email_daily_limit` settings (validate refuses a blank or letterless room name, a community name that would put a control character in the derived one, a limit under 1, and a pinned forum), renders the welcome variables and the operators' addresses, and shows providers its community room alias and agent client through a consumer's new `.Values`.
 - The `ops-notifier` blueprint, beside the homeserver, gives each operator a Matrix room for their own Beszel alerts and deletes a departed operator's Beszel account; the hub makes it a superuser of its own.
 - Blueprint format `paisans.blueprint/v4` lets a consume declare `colocate: true`; validate's `colocated-app-elsewhere` then refuses the app placed anywhere but where its provider runs.
 - The `beszel` blueprint writes the hub's SMTP settings and sender from the `smtp` block, so alerts reach the addresses operators add in Beszel; validate checks the sender and warns about unenforceable `starttls`.
+
+### Changed
+
+- The engagement app's reader is also granted `"user".application_status`, `entry_vote.created_at` and `post_vote.created_at`, which the welcome loop and its activity ranking read.
 
 ## [0.3.0-rc.18] - 2026-10-29
 
