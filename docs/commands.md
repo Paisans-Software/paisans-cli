@@ -2101,7 +2101,10 @@ the commit its pseudo-version carries. A build with none prints the version
 alone, and refuses every command that writes a record. The version is the constant in `internal/version`: a release,
 or on `develop` the next one's pre-release, as `0.3.0-dev`, which orders after
 `0.2.0` and before `0.3.0`. A blueprint's `requires_toolkit` is checked
-against it. Every record paisans writes on a host or in the configuration's
+against it, ordered the same way, except that a `-dev` version also meets
+every pre-release of its own release (`0.3.0-dev` meets `>= 0.3.0-rc.14`, and
+not `>= 0.3.0`): `main` is an ancestor of `develop`, so `develop` holds every
+release candidate already cut. Every record paisans writes on a host or in the configuration's
 store names this build: the version, the commit, and whether the tree was
 modified.
 

@@ -252,9 +252,12 @@ func requirement(req string) error {
 
 // meets checks the requirement req, ">= MAJOR.MINOR[.PATCH[-<pre-release>]]",
 // against the toolkit version have, ordered as version.Compare orders them.
-// Every build counts as the version its commit holds, so a build of
-// develop, a -dev version, meets what the last release meets and not what
-// its own coming release does, and a release candidate meets what it names.
+// Every build counts as the version its commit holds, and a release
+// candidate meets what it names. A build of develop, X.Y.Z-dev, also meets
+// every pre-release of X.Y.Z: main is an ancestor of develop, so develop
+// holds every release candidate cut from it, and a catalog release that
+// needs one is usable from a build of develop. It never meets X.Y.Z
+// itself, which is not cut yet. Founder decision.
 func meets(req, have string) error {
 	if req == "" {
 		return nil
@@ -274,6 +277,9 @@ func meets(req, have string) error {
 	c, err := version.Compare(have, need)
 	if err != nil {
 		return fmt.Errorf("the toolkit's own version: %w", err)
+	}
+	if core, ok := strings.CutSuffix(have, "-dev"); ok && version.IsPreRelease(need) && strings.HasPrefix(need, core+"-") {
+		c = 0
 	}
 	if c < 0 {
 		return fmt.Errorf("requires_toolkit: needs Paisans %s, and this is %s", want, have)
