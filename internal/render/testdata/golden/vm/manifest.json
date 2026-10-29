@@ -48,7 +48,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/etc/Caddyfile",
-      "sha256": "963b782c9adeb6c5033ecc1df9ae44cd30c7c874af24dafbd556249d61f55657",
+      "sha256": "6abd35f3ae0c53a21114ff653a7be742b3e6622178271a2da9537df52a459964",
       "mode": "0644"
     },
     {
@@ -88,7 +88,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/etc/snippets/digest.caddy",
-      "sha256": "d58890182cc416caa6b2328cea8039a5fdc8d44f54cfd1a1a84ab8574798d8f2",
+      "sha256": "2dbb812dc2239863076e84c67a72998587c6c5a3a4a94f623a4b212936aee3b2",
       "mode": "0644"
     },
     {

@@ -188,6 +188,9 @@ apps:
     blueprint: engagement
     hostname: digest.example.org
     placement: cluster
+    # Gated, as the web digest the bot links to needs: /u/ and /healthz stay
+    # open.
+    gated: true
   health:
     blueprint: uptime
     hostname: health.example.org

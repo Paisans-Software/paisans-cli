@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
@@ -59,6 +60,11 @@ func (c *checker) engagement() {
 				"the bot's display name is empty or holds a control character",
 				"is %q. Members see the bot by this name, and it is rendered into one .env line, so it must hold something besides spaces and no line break, tab or other control character. Write one line, or leave it unset for Community Bot.", display)
 		}
+		if !c.cfg.Apps[name].Gated && c.linksHomeserver(name) {
+			c.warn("engagement-not-gated", fmt.Sprintf("apps.%s.gated", name),
+				"the web digest needs the gate",
+				"is not true, and the app links to a Matrix homeserver. The bot's messages link to the web digest, /d/<week>, which names the member by the gate's X-Auth-Request-User, so ungated every link answers not found. Set gated: true; the unsubscribe links stay open.")
+		}
 		if !c.cfg.CanMail(name) {
 			c.warn("engagement-without-smtp", fmt.Sprintf("apps.%s", name),
 				"engagement needs mail",
@@ -88,4 +94,18 @@ func (c *checker) engagement() {
 				"is pinned. The engagement digest reads Mbin only when Mbin has cluster placement, because its read only role is created in the cluster's Postgres.")
 		}
 	}
+}
+
+// linksHomeserver reports whether app links to a matrix-homeserver, which is
+// when its bot sends members links to the web digest.
+func (c *checker) linksHomeserver(app string) bool {
+	for _, consume := range blueprints.Consumes(c.cfg.Apps[app].Blueprint) {
+		if consume.Role != "matrix-homeserver" {
+			continue
+		}
+		if link, err := blueprints.LinkOf(c.cfg, app, consume); err == nil && link.Linked {
+			return true
+		}
+	}
+	return false
 }
