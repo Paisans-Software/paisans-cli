@@ -23,6 +23,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Fixed
 
+- A gated hostname runs the gate before its app's snippet, in a `route` of its own: Caddy ordered the snippet's `handle` ahead of the gate, so engagement's web digest reached the app ungated.
 - `site admit` turns on forwarding on the relay, the first site by name dialled on its `public_address` or `endpoint`, and no other site, matching the WireGuard render; apply refuses only a relay without it.
 - A build of `develop`, `X.Y.Z-dev`, meets a blueprint's `requires_toolkit` of any `X.Y.Z` pre-release, and `site evict` and `site remove` accept it on hosts a release candidate set up.
 - `site admit` gives a relay `ufw route allow in on psns-<token> out on psns-<token>`, since ufw's default DROP forward policy otherwise drops the mesh traffic it relays, and `site evict` removes it.
