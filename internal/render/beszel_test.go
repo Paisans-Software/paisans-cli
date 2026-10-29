@@ -436,3 +436,18 @@ func beszelAgentImage(t *testing.T, plan *Plan, site string) ComposeImage {
 	t.Fatalf("%s runs no beszel-agent image: %+v", site, plan.Images[site])
 	return ComposeImage{}
 }
+
+// A hub not pinned to a site, which validate refuses first
+// (cluster-placement-without-a-cluster), is refused by name at render too
+// rather than rendering an agent that dials http://:8084. A hub pinned to an
+// undeclared site is already refused by placement.
+func TestBeszelHubWithoutASiteIsRefused(t *testing.T) {
+	cfg, secrets := beszelFixture(t)
+	stats := cfg.Apps["stats"]
+	stats.Placement = config.Placement{Mode: config.PlacementCluster}
+	cfg.Apps["stats"] = stats
+	_, err := Build(cfg, secrets)
+	if err == nil || !strings.Contains(err.Error(), "apps.stats.placement: a beszel app is pinned to a declared site") {
+		t.Errorf("a hub on the cluster: %v", err)
+	}
+}

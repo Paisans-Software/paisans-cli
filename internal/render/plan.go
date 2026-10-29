@@ -130,9 +130,9 @@ type siteView struct {
 	// heartbeat to from its infrastructure stack. See heartbeat.go.
 	Heartbeats []heartbeatTarget
 	// Beszel is this site's Beszel agent, set on every site while the
-	// deployment declares a beszel app: the hub it reports to and the name
-	// it reports as. Its Token and Key are the secrets', filled in by
-	// beszelAgentFor where the secrets are read. See beszel.go.
+	// deployment declares a beszel app, with the name it reports as. Its
+	// HubURL, Token and Key are filled in by beszelAgentFor where the
+	// secrets are read. See beszel.go.
 	Beszel     *beszelAgent
 	Apps       []plannedApp
 	NeedsProxy bool

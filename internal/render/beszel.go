@@ -134,21 +134,32 @@ var beszelTokenShape = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // beszelAgentOf is a site's agent as the configuration alone decides it, nil
 // while the deployment declares no beszel app. Every site runs one, whatever
-// its roles, since the hub lists every site (beszelSystems).
-//
-// It dials the hub over plain HTTP at the mesh address of the site the hub is
-// pinned to, on the port the beszel blueprint publishes it on there, as
-// every service talks across sites (Rule 2).
+// its roles, since the hub lists every site (beszelSystems). The hub's URL,
+// token and key are filled in by beszelAgentFor.
 func beszelAgentOf(cfg *config.Config, site string) *beszelAgent {
-	hub := cfg.BeszelApp()
-	if hub == "" {
+	if cfg.BeszelApp() == "" {
 		return nil
 	}
-	address := cfg.Sites[cfg.Apps[hub].Placement.Site].Address
-	return &beszelAgent{
-		HubURL: fmt.Sprintf("http://%s:%d", address, blueprints.Port(config.BlueprintBeszel)),
-		Name:   site,
+	return &beszelAgent{Name: site}
+}
+
+// beszelHubURL is where every agent dials the hub: over plain HTTP at the mesh
+// address of the site the hub is pinned to, on the port the beszel blueprint
+// publishes it on there, as every service talks across sites (Rule 2).
+//
+// A hub pinned to no declared site is refused by name. `paisans` runs
+// validate first, where cluster-placement-without-a-cluster and
+// undeclared-site refuse it with a message written for an operator; this is
+// the library level guard for a caller that reaches render.Build without
+// validating, which would otherwise render HUB_URL=http://:8084 and an agent
+// that dials nothing.
+func beszelHubURL(cfg *config.Config, hub string) (string, error) {
+	placement := cfg.Apps[hub].Placement
+	site, ok := cfg.Sites[placement.Site]
+	if placement.Mode != config.PlacementPinned || !ok || site.Address == "" {
+		return "", fmt.Errorf("apps.%s.placement: a beszel app is pinned to a declared site with a mesh address, which every site's agent dials the hub at. Pin it to the monitor's site", hub)
 	}
+	return fmt.Sprintf("http://%s:%d", site.Address, blueprints.Port(config.BlueprintBeszel)), nil
 }
 
 // beszelToken is a site's token from the secrets, refused by name when it is
@@ -174,10 +185,14 @@ func (p *planner) beszelAgentFor(site *siteView) (beszelAgent, error) {
 		return beszelAgent{}, err
 	}
 	hub := p.cfg.BeszelApp()
+	url, err := beszelHubURL(p.cfg, hub)
+	if err != nil {
+		return beszelAgent{}, err
+	}
 	key := p.appSecret(hub, "hub_key_public")
 	if key == "" {
 		return beszelAgent{}, fmt.Errorf("secrets apps.%s.hub_key_public: required for every site's Beszel agent, which accepts only the hub holding this key. Run `%s init` to generate it", hub, progname.Cmd())
 	}
-	agent.Token, agent.Key = token, key
+	agent.HubURL, agent.Token, agent.Key = url, token, key
 	return agent, nil
 }
