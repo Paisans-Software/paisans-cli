@@ -11,8 +11,8 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 )
 
-// VolumePrune is what `paisans prune` would do on one site: every dangling
-// volume, and whether it goes.
+// VolumePrune is what `paisans site prune` would do to one site's volumes:
+// every dangling volume, and whether it goes.
 //
 // A dangling volume is one no container, running or stopped, mounts. On a
 // site host that is almost always an anonymous volume a replaced container
