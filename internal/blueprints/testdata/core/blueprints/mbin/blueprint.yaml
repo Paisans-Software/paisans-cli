@@ -32,6 +32,14 @@ services:
   - {name: "valkey", image: "docker.io/valkey/valkey:9.*.*-trixie", purpose: "the cache"}
   - {name: "postgres", purpose: "its own database, when the app is pinned"}
 database: {engine: postgres}
+# An engagement app links to it by this role to welcome newcomers through an
+# Mbin agent client. api_port is the port Mbin publishes on each site's mesh
+# address: an engagement app reads Mbin only when both are clustered, so it
+# calls the API on its own site's mesh address.
+provides:
+  - role: forum
+    values:
+      api_port: "'8080'"
 port: 8080
 config:
   format: env
