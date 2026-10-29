@@ -605,6 +605,11 @@ func rotatorFor(path string, w rotateWiring) (secretsrotate.Rotator, error) {
 				return secretsrotate.SourceReader(app), nil
 			}
 		case "admin_password":
+			// Beszel's hub sets its own from its stack's apply; every
+			// other admin_password is the uptime fork's.
+			if w.cfg != nil && w.cfg.Apps[app].Blueprint == config.BlueprintBeszel {
+				return secretsrotate.BeszelAdmin(app), nil
+			}
 			return secretsrotate.UptimeAdmin(app), nil
 		case "operators_heartbeat_token", "dns_super_admins_heartbeat_token", "dns_2fa_heartbeat_token":
 			return secretsrotate.ContinuityHeartbeat(app, last), nil
@@ -756,6 +761,11 @@ func rotateAll(cfg *config.Config, s *config.Secrets, w rotateWiring) ([]secrets
 	for _, app := range appsOf(config.BlueprintUptime) {
 		if has("apps." + app + ".admin_password") {
 			rs = append(rs, secretsrotate.UptimeAdmin(app))
+		}
+	}
+	for _, app := range appsOf(config.BlueprintBeszel) {
+		if has("apps." + app + ".admin_password") {
+			rs = append(rs, secretsrotate.BeszelAdmin(app))
 		}
 	}
 	if len(cfg.Cluster.Sites) > 0 {

@@ -248,6 +248,7 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 		"apps.talk.s3_secret_access_key",
 		"apps.auth.static_api_key",
 		"apps.health.admin_password",
+		"apps.stats.admin_password",
 		"cluster.superuser_password",
 		"cluster.admin_password",
 		"cluster.standby_password",
@@ -1438,5 +1439,37 @@ func TestSecretsRotateHandsTheMASAdminClientSecretToTheHomeserverFirst(t *testin
 	}
 	if want := []string{"vm:chat", "home-a:digest", "home-b:digest"}; !slices.Equal(users, want) {
 		t.Errorf("users %v, want %v", users, want)
+	}
+}
+
+// A beszel hub's admin_password is rotated by BeszelAdmin, which applies the
+// hub's own stack, and an uptime app's by UptimeAdmin, each refusing the
+// other's app.
+func TestSecretsRotateRoutesABeszelAdminPassword(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := secretsrotate.Env{Cfg: cfg}
+	r, err := rotatorFor("apps.stats.admin_password", rotateWiring{cfg: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.(secretsrotate.Prechecker).Precheck(e); err != nil {
+		t.Fatalf("the hub's admin_password is refused: %v", err)
+	}
+	var users []string
+	for _, u := range r.Users(e) {
+		users = append(users, u.Site+":"+strings.Join(u.Stacks, ","))
+	}
+	if want := []string{"watch:stats"}; !slices.Equal(users, want) {
+		t.Errorf("users %v, want %v", users, want)
+	}
+	r, err = rotatorFor("apps.health.admin_password", rotateWiring{cfg: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.(secretsrotate.Prechecker).Precheck(e); err != nil {
+		t.Fatalf("the monitor's admin_password is refused: %v", err)
 	}
 }
