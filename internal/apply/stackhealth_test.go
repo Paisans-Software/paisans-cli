@@ -3,6 +3,7 @@ package apply_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 )
@@ -77,5 +78,72 @@ func TestAFinishedOneShotIsDone(t *testing.T) {
 	}
 	if err := apply.StackHealthy(apply.Fixture, "stats", policyHost{hub, policies}); err != nil {
 		t.Errorf("a running service without a healthcheck: %v", err)
+	}
+}
+
+// restartHost answers each `ps` with the next of polls, the last one
+// repeating, and `docker inspect` of a restart count with counts' next,
+// likewise.
+type restartHost struct {
+	polls, counts []string
+	ps, inspects  *int
+}
+
+func (h restartHost) Run(cmd string) (string, error) {
+	if strings.HasPrefix(cmd, "docker inspect ") && strings.Contains(cmd, ".RestartCount") {
+		out := h.counts[min(*h.inspects, len(h.counts)-1)]
+		*h.inspects++
+		return out + "\n", nil
+	}
+	if strings.HasPrefix(cmd, "docker inspect ") {
+		return "unless-stopped\n", nil
+	}
+	if strings.Contains(cmd, " ps --all --format json") {
+		out := h.polls[min(*h.ps, len(h.polls)-1)]
+		*h.ps++
+		return out, nil
+	}
+	return "", nil
+}
+func (h restartHost) RunInput(cmd, _ string) (string, error) { return h.Run(cmd) }
+func (h restartHost) ReadFile(string) (string, bool, error)  { return "", false, nil }
+func (h restartHost) WriteFile(string, string, uint32) error { return nil }
+func (h restartHost) Describe() string                       { return "fake" }
+
+// One restart is a start that lost a race, as MAS did when it looked its
+// database up before Docker's DNS had the name and was up half a second
+// later: the gate waits on it. Docker restarting a container again and again
+// is a crash loop, and fails at once; one still restarting when the wait ends
+// fails then.
+func TestTheHealthGateWaitsOnOneRestart(t *testing.T) {
+	const (
+		restarting = `{"ID":"aaaaaaaaaaaa","Service":"mas","State":"restarting","ExitCode":1}`
+		running    = `{"ID":"aaaaaaaaaaaa","Service":"mas","State":"running","Health":""}`
+	)
+	for _, c := range []struct {
+		name          string
+		polls, counts []string
+		fails         string
+		sleeps        int
+	}{
+		{"one restart, then up", []string{restarting, running}, []string{"1"}, "", 1},
+		{"a crash loop", []string{restarting}, []string{"3"}, "is not healthy: mas (restarting, exit code 1)", 0},
+		{"restarting to the end", []string{restarting}, []string{"1"}, "did not come up healthy within 15s: mas (restarting", 2},
+		{"count unreadable", []string{restarting}, []string{"no such container"}, "is not healthy: mas (restarting", 0},
+	} {
+		slept := 0
+		restore := apply.SetHealthWait(15*time.Second, 5*time.Second, func(time.Duration) { slept++ })
+		ps, inspects := 0, 0
+		err := apply.WaitHealthy(apply.Fixture, "home-a", "matrix", restartHost{c.polls, c.counts, &ps, &inspects}, "The apply stopped here")
+		restore()
+		if c.fails == "" && err != nil {
+			t.Errorf("%s: %v", c.name, err)
+		}
+		if c.fails != "" && (err == nil || !strings.Contains(err.Error(), c.fails)) {
+			t.Errorf("%s: got %v, want %q", c.name, err, c.fails)
+		}
+		if slept != c.sleeps {
+			t.Errorf("%s: slept %d times, want %d", c.name, slept, c.sleeps)
+		}
 	}
 }

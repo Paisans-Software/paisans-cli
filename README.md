@@ -1588,8 +1588,9 @@ break glass user's password. Setting it on every start gives the user a new
 token key, as PocketBase does on any password change, so a break glass
 session ends at the stack's next start, which is intended. It carries `env_file: .env`, so a rotated
 password recreates it; without that it would sleep through the rotation.
-`deployment apply`'s health gate, and its probe of a stopped stack, treat a
-service with `restart: "no"` that exited 0 as done, which is what `admin` is.
+`deployment apply`'s health gate, its probe of a stopped stack, and doctor's
+containers check treat a service with `restart: "no"` that exited 0 as done,
+which is what `admin` is.
 
 **The Caddy snippet refuses the superuser's panel and API.** It answers 404
 to `/_/` and everything under it, PocketBase's superuser panel, and to
@@ -7775,8 +7776,15 @@ does not ship, and refusing such a stack would refuse most of them.
 |-----------------|-------------------|
 | every container running, healthchecks `healthy` | moves on to the next stack |
 | a container still `created`, or a healthcheck `starting` | keeps polling |
-| a container `exited`, `dead` or `restarting`, or a healthcheck `unhealthy` | stops now |
+| a container `restarting` that Docker has restarted once or twice | keeps polling |
+| a container `exited` or `dead`, one `restarting` for the third time or whose restart count `docker inspect` cannot read, or a healthcheck `unhealthy` | stops now |
 | still polling after five minutes | stops |
+
+A restart or two is a start that lost a race, such as MAS looking its
+database up before Docker's DNS had the name and coming up half a second
+later. Docker restarts a container that keeps exiting after 100ms, then twice
+as long each time, so a crash loop reaches its third restart within seconds.
+The count is `RestartCount`, which a start by the action itself sets back to 0.
 
 A stop names the stack and the services, with one line of cause for each read
 from its last 30 log lines (`docker compose logs --tail 30`), and starts
@@ -10980,7 +10988,7 @@ closing list is usually the cause of those after it:
 | etcd quorum | `etcdctl endpoint health -w json` in the etcd container of the first member that answers, naming every member of `etcd.members` by its mesh address | fewer than half the members plus one are healthy. One member down with quorum intact is a `WARN` |
 | etcd version | `curl` on the host to the member's `http://<mesh address>:2379/version`; skipped, and said so, where the host has no `curl` | the cluster version is `3.0.0` under a 3.5 server |
 | Patroni | `/cluster` from every database site's Patroni, through `curl` in its container as `deployment apply` asks it, and Patroni's `/sync` key from etcd | there is no running leader. A replica that is not `streaming`, or more than 16 MiB behind, is a `WARN`, and so is a leader with no Sync Standby while `cluster.synchronous` is true |
-| Containers | `docker ps -a --filter label=community.paisans.deployment=<id>` on every site, then `docker inspect` and the end of `docker logs` for each container not running or unhealthy | any container is not running, or runs while its healthcheck reports `unhealthy`, shown with the last lines its healthchecks printed. A healthcheck still `starting` is a `WARN`, since it has not failed but the container is not yet known to work; a container with no healthcheck is judged by running alone |
+| Containers | `docker ps -a --filter label=community.paisans.deployment=<id>` on every site, then `docker inspect` and the end of `docker logs` for each container not running or unhealthy | any container is not running, other than a one shot that finished (exited 0 under restart policy `no`), or runs while its healthcheck reports `unhealthy`, shown with the last lines its healthchecks printed. A healthcheck still `starting` is a `WARN`, since it has not failed but the container is not yet known to work; a container with no healthcheck is judged by running alone |
 | Settings | for each app setting `gated`, the read its kind records, run in the app's running container on each site it runs on: Mbin's environment and `MBIN_LOCKED_SETTINGS`, WriteFreely's `writefreely settings list` | a setting the gate leaves to the app (private instance mode, the allow list, authorized fetch, WriteFreely's private mode) is off or not locked. The advice is `paisans deployment apply --site <site>`, which renders the file that writes and locks it and recreates the stack, or a newer image when the app does not honour the lock. See *The settings gating needs are checked on both sides* |
 | Pocket ID | the same question `deployment apply` asks after acting on a Pocket ID stack on more than one site, asked once | no site, or more than one, has an active instance |
 | Clocks | `date +%s.%N` on each site, against the workstation's clock taken on either side of the call, less half the round trip | never; more than 1 s off is a `WARN` |
