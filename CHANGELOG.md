@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Fixed
+
+- The apply health gate waits on a container Docker has restarted once or twice, a start that lost a race, and fails it only at three restarts or when the wait ends.
+
 ## [0.3.0-rc.20] - 2026-10-29
 
 ### Added

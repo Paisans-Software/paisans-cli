@@ -7775,8 +7775,15 @@ does not ship, and refusing such a stack would refuse most of them.
 |-----------------|-------------------|
 | every container running, healthchecks `healthy` | moves on to the next stack |
 | a container still `created`, or a healthcheck `starting` | keeps polling |
-| a container `exited`, `dead` or `restarting`, or a healthcheck `unhealthy` | stops now |
+| a container `restarting` that Docker has restarted once or twice | keeps polling |
+| a container `exited` or `dead`, one `restarting` for the third time or whose restart count `docker inspect` cannot read, or a healthcheck `unhealthy` | stops now |
 | still polling after five minutes | stops |
+
+A restart or two is a start that lost a race, such as MAS looking its
+database up before Docker's DNS had the name and coming up half a second
+later. Docker restarts a container that keeps exiting after 100ms, then twice
+as long each time, so a crash loop reaches its third restart within seconds.
+The count is `RestartCount`, which a start by the action itself sets back to 0.
 
 A stop names the stack and the services, with one line of cause for each read
 from its last 30 log lines (`docker compose logs --tail 30`), and starts

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -79,11 +80,19 @@ const (
 	waiting verdict = iota
 	// healthy means every container runs and every healthcheck passes.
 	healthy
-	// failed means a container exited, is being restarted, or reports
-	// unhealthy. Waiting longer would not help: Docker is already restarting
-	// it, or its own check has given up.
+	// failed means a container exited, is in a crash loop, or reports
+	// unhealthy. Waiting longer would not help: Docker keeps restarting it,
+	// or its own check has given up.
 	failed
 )
+
+// crashLoop is the restart count at which a restarting container has failed.
+// Below it, a restart is a start that lost a race, such as MAS looking its
+// database up before Docker's DNS had the name, and up half a second later;
+// the gate waits on it as on any container still starting. Docker restarts a
+// container that keeps exiting after 100ms, then twice as long each time,
+// so a crash loop reaches this count within seconds.
+const crashLoop = 3
 
 // judge decides a stack's state, and names the services behind anything
 // other than healthy. A stack with no containers at all is waiting: after an
@@ -96,7 +105,11 @@ const (
 // unless-stopped or always would have restarted it, so it was stopped, and
 // on-failure leaves exited 0 only for a service meant to keep running.
 // restartPolicy reads the policy, and is asked only about such a container.
-func judge(list []container, restartPolicy func(container) string) (verdict, []string) {
+//
+// A restarting container is waited on while restarts, its restart count,
+// is below crashLoop, and failed from then on, or when restarts cannot read
+// the count (-1).
+func judge(list []container, restartPolicy func(container) string, restarts func(container) int) (verdict, []string) {
 	if len(list) == 0 {
 		return waiting, nil
 	}
@@ -105,6 +118,8 @@ func judge(list []container, restartPolicy func(container) string) (verdict, []s
 		switch {
 		case c.State == "exited" && c.ExitCode == 0 && restartPolicy(c) == "no":
 			// A one shot that finished.
+		case c.State == "restarting" && waitOnRestart(restarts(c)):
+			slow = append(slow, fmt.Sprintf("%s (restarting, exit code %d)", c.Service, c.ExitCode))
 		case c.State == "exited" || c.State == "dead" || c.State == "restarting":
 			bad = append(bad, fmt.Sprintf("%s (%s, exit code %d)", c.Service, c.State, c.ExitCode))
 		case c.Health == "unhealthy":
@@ -126,6 +141,10 @@ func judge(list []container, restartPolicy func(container) string) (verdict, []s
 	return healthy, nil
 }
 
+// waitOnRestart reports whether a container restarted n times is still worth
+// waiting on: a count read, and below crashLoop.
+func waitOnRestart(n int) bool { return n >= 0 && n < crashLoop }
+
 // containerIDShape is a Docker container ID, full or short, which is all
 // restartPolicyOf puts on a command line.
 var containerIDShape = regexp.MustCompile(`^[0-9a-f]{12,64}$`)
@@ -145,6 +164,29 @@ func restartPolicyOf(t Transport) func(container) string {
 			return ""
 		}
 		return strings.TrimSpace(out)
+	}
+}
+
+// restartCountOf reads how many times Docker has restarted a container under
+// its restart policy, its RestartCount, which `compose ps` does not print. A
+// start that is not the policy's, such as the action's own `up` or
+// `restart`, sets it back to 0 (moby daemon/start.go, ResetRestartManager).
+// A container it cannot read answers -1, which judge counts as failed.
+func restartCountOf(t Transport) func(container) int {
+	return func(c container) int {
+		id := strings.TrimSpace(c.ID)
+		if !containerIDShape.MatchString(id) {
+			return -1
+		}
+		out, err := t.Run("docker inspect --format '{{.RestartCount}}' " + id)
+		if err != nil {
+			return -1
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(out))
+		if err != nil {
+			return -1
+		}
+		return n
 	}
 }
 
@@ -189,7 +231,7 @@ func waitStack(d deployment.Deployment, site, stack string, t Transport, stopped
 		} else if list, perr := parseContainers(out); perr != nil {
 			last = fmt.Sprintf("unreadable `ps` output: %v", perr)
 		} else {
-			v, names := judge(list, restartPolicyOf(t))
+			v, names := judge(list, restartPolicyOf(t), restartCountOf(t))
 			switch v {
 			case healthy:
 				return nil
@@ -343,7 +385,7 @@ func StackHealthy(d deployment.Deployment, stack string, t Transport) error {
 	if err != nil {
 		return fmt.Errorf("stack %s: unreadable `ps` output: %v", stack, err)
 	}
-	switch v, names := judge(list, restartPolicyOf(t)); {
+	switch v, names := judge(list, restartPolicyOf(t), restartCountOf(t)); {
 	case v == healthy:
 		return nil
 	case len(list) == 0:
