@@ -25,11 +25,12 @@ func ContainersCommand(d deployment.Deployment) string {
 
 // InspectCommand reads the state Docker recorded for one container: its
 // status, exit code, the error Docker itself hit starting it, and how often
-// it was restarted, and for a container with a healthcheck what its last
-// checks printed. The fields are the Engine API's ContainerState, its Health,
-// and RestartCount (moby v27.3.1, api/types/types.go).
+// it was restarted, its restart policy, and for a container with a
+// healthcheck what its last checks printed. The fields are the Engine API's
+// ContainerState, its Health, RestartCount and HostConfig.RestartPolicy.Name
+// (moby v27.3.1, api/types/types.go).
 func InspectCommand(name string) string {
-	return "docker inspect --format '{\"State\":{{json .State}},\"RestartCount\":{{.RestartCount}}}' " + shellQuote(name)
+	return "docker inspect --format '{\"State\":{{json .State}},\"RestartCount\":{{.RestartCount}},\"RestartPolicy\":{{json .HostConfig.RestartPolicy.Name}}}' " + shellQuote(name)
 }
 
 // LogCommand is the end of one container's log.
@@ -138,6 +139,17 @@ type Inspected struct {
 		} `json:"Health"`
 	} `json:"State"`
 	RestartCount int `json:"RestartCount"`
+	// RestartPolicy is "no", "always", "unless-stopped" or "on-failure".
+	RestartPolicy string `json:"RestartPolicy"`
+}
+
+// FinishedOneShot reports whether the container is a one shot that did its
+// work: exited with code 0 under the restart policy "no", which Docker will
+// never start again and whose exit the services after it wait for
+// (service_completed_successfully). The apply's health gate counts it done
+// on the same terms (internal/apply/health.go, judge).
+func (in Inspected) FinishedOneShot() bool {
+	return in.State.Status == "exited" && in.State.ExitCode == 0 && in.RestartPolicy == "no"
 }
 
 // HealthCheck is one healthcheck Docker ran: how it exited and what it
@@ -215,10 +227,16 @@ func Containers(d deployment.Deployment, sites []SiteContainers, primary string)
 			}
 		}
 		var down []ContainerProbe
+		finished := 0
 		for _, probe := range s.Down {
-			if probe.Entry.Owned(d) {
-				down = append(down, probe)
+			if !probe.Entry.Owned(d) {
+				continue
 			}
+			if in, err := ParseInspect(probe.Inspect); probe.InspectErr == "" && err == nil && in.FinishedOneShot() {
+				finished++
+				continue
+			}
+			down = append(down, probe)
 		}
 		level := OK
 		if len(down) > 0 {
@@ -229,7 +247,14 @@ func Containers(d deployment.Deployment, sites []SiteContainers, primary string)
 			continue
 		}
 		if level == OK {
-			out = append(out, Finding{Section: SectionContainers, Level: OK, Line: fmt.Sprintf("%s: %d paisans container(s), all running", s.Site, running)})
+			line := fmt.Sprintf("%s: %d paisans container(s), all running", s.Site, running)
+			switch {
+			case finished == 1:
+				line += ", and 1 one shot finished"
+			case finished > 1:
+				line += fmt.Sprintf(", and %d one shots finished", finished)
+			}
+			out = append(out, Finding{Section: SectionContainers, Level: OK, Line: line})
 		}
 		for _, probe := range down {
 			out = append(out, containerFinding(d, s.Site, probe, primary))
