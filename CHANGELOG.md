@@ -13,7 +13,7 @@ changes share a bullet. Detailed notes are on the corresponding
 ### Fixed
 
 - The apply health gate waits on a container Docker has restarted once or twice, a start that lost a race, and fails it only at three restarts or when the wait ends.
-- Doctor, and the check after an apply, count a one shot that exited 0 under restart policy `no` as finished, not down, as the health gate does; the beszel hub's `admin` no longer fails a site.
+- Doctor, and the check after an apply, count a one shot that exited 0 under restart policy `no` as finished, not down, as the health gate does; beszel's `admin` no longer fails a site.
 
 ## [0.3.0-rc.20] - 2026-10-29
 
