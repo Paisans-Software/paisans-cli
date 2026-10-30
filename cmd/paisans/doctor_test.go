@@ -99,7 +99,7 @@ func readOnly(cfg *config.Config) (exact []string, prefixes []string) {
 		doctor.MemoryCommand,
 	}
 	prefixes = []string{
-		"docker inspect --format '{\"State\":{{json .State}},\"RestartCount\":{{.RestartCount}}}' ",
+		"docker inspect --format '{\"State\":{{json .State}},\"RestartCount\":{{.RestartCount}},\"RestartPolicy\":{{json .HostConfig.RestartPolicy.Name}}}' ",
 		"docker logs --tail 20 ",
 		"if [ ! -f '/srv/paisans/f2a9/auth/compose.yaml' ]; then echo absent; ",
 	}

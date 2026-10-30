@@ -491,6 +491,45 @@ func TestOtherDownContainerShowsItsLastLines(t *testing.T) {
 	}
 }
 
+// The beszel hub's admin service is a one shot, restart "no": exited with
+// code 0 it is done, as the apply's health gate counts it, and the site
+// reads as healthy. Exited 1, or exited 0 under another policy, it is down.
+func TestAFinishedOneShotIsNotDown(t *testing.T) {
+	const labels = "community.paisans.deployment=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
+	for _, c := range []struct {
+		name, inspect string
+		down          bool
+	}{
+		{"restart no, exit 0", `{"State":{"Status":"exited","ExitCode":0,"Error":""},"RestartCount":0,"RestartPolicy":"no"}`, false},
+		{"restart no, exit 1", `{"State":{"Status":"exited","ExitCode":1,"Error":""},"RestartCount":0,"RestartPolicy":"no"}`, true},
+		{"unless-stopped, exit 0", `{"State":{"Status":"exited","ExitCode":0,"Error":""},"RestartCount":0,"RestartPolicy":"unless-stopped"}`, true},
+		{"policy unread, exit 0", `{"State":{"Status":"exited","ExitCode":0,"Error":""},"RestartCount":0}`, true},
+	} {
+		sites := []SiteContainers{{
+			Site: "vm",
+			PS: `{"Names":"paisans-f2a9-stats-app-1","State":"running","Status":"Up 2 hours (healthy)","Labels":"` + labels + `"}` + "\n" +
+				`{"Names":"paisans-f2a9-stats-admin-1","State":"exited","Status":"Exited (0) 2 hours ago","Labels":"` + labels + `"}`,
+			Down: []ContainerProbe{{
+				Entry:   PSEntry{Names: "paisans-f2a9-stats-admin-1", State: "exited", Labels: labels},
+				Inspect: c.inspect,
+			}},
+		}}
+		got := Containers(fixture(t).Deployment(), sites, "")
+		failed := false
+		for _, f := range got {
+			if f.Level == Fail {
+				failed = true
+			}
+		}
+		if failed != c.down {
+			t.Errorf("%s: down %v, want %v: %+v", c.name, failed, c.down, got)
+		}
+		if !c.down {
+			find(t, got, SectionContainers, "vm: 1 paisans container(s), all running, and 1 one shot finished")
+		}
+	}
+}
+
 // Docker reports health in `docker ps` two ways: Docker 29.5 and later in
 // HealthStatus, earlier releases only in Status. Both read the same, and a
 // container with no healthcheck has none.
