@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Fixed
+
+- The postgres listener's HAProxy check reads Patroni's whole answer before closing, so Patroni no longer logs a `Connection reset by peer` traceback for a passing health check.
+
 ### Changed
 
 - The site and operators heartbeats hold curl's errors until a push's retries are spent, so a push that recovers logs nothing and one that fails logs each attempt's error under its failure.

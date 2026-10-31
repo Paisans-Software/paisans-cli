@@ -93,7 +93,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/haproxy/haproxy.cfg",
-      "sha256": "4f2a38333f12c9092ea29903afe41d7da0ca0c86561ce855a73fb07131de0139",
+      "sha256": "3973cfcbe55825fac625ff1b3185c64a050cf6bea1990ba0a02df67ae1176aa2",
       "mode": "0644"
     },
     {
