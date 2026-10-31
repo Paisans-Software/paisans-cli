@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Changed
+
+- The site and operators heartbeats hold curl's errors until a push's retries are spent, so a push that recovers logs nothing and one that fails logs each attempt's error under its failure.
+
 ## [0.3.0-rc.21] - 2026-10-29
 
 ### Fixed
