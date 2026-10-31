@@ -191,7 +191,10 @@ func TestAMissingOrMalformedOperatorsHeartbeatTokenIsRefused(t *testing.T) {
 // ordered, which no count kept by sleep could promise, since the script
 // starts sleep in the background before it calls curl. Every other request
 // is a push: its arguments and whatever it
-// was sent on stdin are appended to $FAKE_LOG, one push per line.
+// was sent on stdin are appended to $FAKE_LOG, one push per line. FAKE_PUSH
+// sets how a push ends, as curl -fsS --retry 2 does, which writes an error for
+// every attempt that fails: recovered fails once and then succeeds, failed
+// fails all three attempts, and anything else succeeds at once.
 const fakePusherCurl = `#!/bin/sh
 for last; do :; done
 case "$last" in
@@ -207,6 +210,14 @@ case " $* " in
 *" --data-binary @- "*) data=$(cat) ;;
 esac
 echo "$* <$data>" >> "$FAKE_LOG"
+case "$FAKE_PUSH" in
+recovered)
+	echo "curl: (28) Connection timed out after 10001 milliseconds" >&2 ;;
+failed)
+	for attempt in 1 2 3; do echo "curl: (22) The requested URL returned error: 502" >&2; done
+	exit 22 ;;
+esac
+exit 0
 `
 
 // fakePusherSleep counts the script's cycles, and ends the script at the
@@ -226,18 +237,30 @@ func runAdminsPusher(t *testing.T, code, body string) []string {
 	return runPusher(t, cfg, secrets, []string{"OPERATORS_HEARTBEAT_URLS=https://one.example.org/ping/t1 https://two.example.org/ping/t1"}, code, body)
 }
 
-// runPusher runs home-a's rendered push.sh for cfg for one cycle against the
-// fakes, with env added to its environment, and returns the pushes it made.
-// Every path of the reconciler's answers with code and body.
+// operatorsPusher is home-a's operators heartbeat script.
+const operatorsPusher = "home-a/srv/paisans/f2a9/auth/operators-heartbeat/push.sh"
+
+// runPusher runs home-a's rendered operators heartbeat script for cfg for one
+// cycle against the fakes, with env added to its environment, and returns the
+// pushes it made. Every path of the reconciler's answers with code and body.
 func runPusher(t *testing.T, cfg *config.Config, secrets *config.Secrets, env []string, code, body string) []string {
+	t.Helper()
+	pushes, _ := runScript(t, cfg, secrets, operatorsPusher, env, code, body)
+	return pushes
+}
+
+// runScript runs the rendered script at path for cfg for one cycle against
+// the fakes, with env added to its environment, and returns the pushes it
+// made and what it wrote to stderr.
+func runScript(t *testing.T, cfg *config.Config, secrets *config.Secrets, path string, env []string, code, body string) ([]string, string) {
 	t.Helper()
 	plan, err := render.Build(cfg, secrets)
 	if err != nil {
 		t.Fatal(err)
 	}
-	script, ok := planFiles(plan)["home-a/srv/paisans/f2a9/auth/operators-heartbeat/push.sh"]
+	script, ok := planFiles(plan)[path]
 	if !ok {
-		t.Fatal("home-a renders no operators heartbeat script")
+		t.Fatalf("renders no %s", path)
 	}
 	root := t.TempDir()
 	bin := filepath.Join(root, "bin")
@@ -265,9 +288,11 @@ func runPusher(t *testing.T, cfg *config.Config, secrets *config.Secrets, env []
 		"PATH=" + bin + ":/usr/bin:/bin",
 		"FAKE_CODE=" + code, "FAKE_BODY=" + body, "FAKE_CYCLES=" + cycles, "FAKE_LOG=" + log, "FAKE_SERVED=" + served,
 	}, env...)
-	out, _ := cmd.CombinedOutput()
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	_ = cmd.Run()
 	if ctx.Err() != nil {
-		t.Fatalf("the script ran past one cycle: %s", out)
+		t.Fatalf("the script ran past one cycle: %s", stderr.String())
 	}
 	recorded, err := os.ReadFile(log)
 	if err != nil {
@@ -279,7 +304,48 @@ func runPusher(t *testing.T, cfg *config.Config, secrets *config.Secrets, env []
 			pushes = append(pushes, line)
 		}
 	}
-	return pushes
+	return pushes, stderr.String()
+}
+
+// Both pushers hold curl's errors until its retries are spent: a push that
+// recovers on a retry logs nothing, and one that fails every attempt logs
+// that it failed and then each attempt's error, so a transient fault is not
+// read as a missed heartbeat and a real one still says why.
+func TestPushersLogCurlErrorsOnlyWhenEveryRetryFails(t *testing.T) {
+	cfg, secrets := withTwoMonitors(t)
+	urls := "https://one.example.org/ping/t1"
+	for _, s := range []struct{ path, env, prefix string }{
+		{operatorsPusher, "OPERATORS_HEARTBEAT_URLS=" + urls, "operators-heartbeat"},
+		{"home-a/srv/paisans/f2a9/infra/heartbeat/push.sh", "HEARTBEAT_URLS=" + urls, "heartbeat"},
+	} {
+		// The site heartbeat pushes every cycle, so the fake sleep that ends
+		// the script may let a second cycle's push start: count failures,
+		// not cycles.
+		pushes, stderr := runScript(t, cfg, secrets, s.path, []string{s.env, "FAKE_PUSH=recovered"}, "200", "ok")
+		if len(pushes) == 0 {
+			t.Fatalf("%s: no push", s.path)
+		}
+		if stderr != "" {
+			t.Errorf("%s: a push that recovered on a retry logged %q", s.path, stderr)
+		}
+		_, stderr = runScript(t, cfg, secrets, s.path, []string{s.env, "FAKE_PUSH=failed"}, "200", "ok")
+		lines := strings.Split(strings.TrimSuffix(stderr, "\n"), "\n")
+		if len(lines) == 0 || len(lines)%4 != 0 {
+			t.Fatalf("%s: a push that failed every attempt logged %q, want the failure and then each attempt's error", s.path, stderr)
+		}
+		for i, l := range lines {
+			if i%4 == 0 {
+				if !strings.HasPrefix(l, s.prefix+": push failed at ") {
+					t.Errorf("%s: line %d is %q, want the failure", s.path, i, l)
+				}
+			} else if l != "curl: (22) The requested URL returned error: 502" {
+				t.Errorf("%s: line %d is %q, want an attempt's error", s.path, i, l)
+			}
+		}
+		if strings.Contains(stderr, "ping/t1") {
+			t.Errorf("%s: the log names the URL: %q", s.path, stderr)
+		}
+	}
 }
 
 // pushedTo is the push to url among pushes, empty when there is none.

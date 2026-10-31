@@ -23,26 +23,35 @@
 # 503 is the answer. Each push is the site heartbeat's (infra/heartbeat/
 # push.sh): it gives up after 10 s and retries twice, and the pushes run beside
 # each other and beside the minute's sleep, so a slow monitor delays no other
-# and the cadence holds. Only errors are logged, naming the host but never the
-# URL, so the token stays out of the log.
+# and the cadence holds. A push's errors are held until its retries are spent:
+# one that recovers on a retry logs nothing, and one that fails every attempt
+# logs that it failed and then curl's error for each attempt, which names the
+# host but never the URL, so the token stays out of the log.
 set -u
 reconciler=http://reconciler:1412
 agent="paisans-operators-heartbeat (auth@home-b)"
+
+# failed logs a push that failed every attempt, with curl's errors in $1, in
+# one write so that pushes failing together do not interleave their lines.
+failed() {
+	printf 'operators-heartbeat: push failed at %s\n%s' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${1:+$1
+}" >&2
+}
 
 # push sends one push to every monitor in $1: $2 is the status segment, empty
 # for success, and $3 the body of a failure.
 push() {
 	for url in $1; do
 		if [ -z "$2" ]; then
-			curl -fsS -o /dev/null -m 10 --retry 2 -A "$agent" "$url" \
-				|| echo "operators-heartbeat: push failed at $(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2 &
+			err=$(curl -fsS -o /dev/null -m 10 --retry 2 -A "$agent" "$url" 2>&1) \
+				|| failed "$err" &
 		else
 			# Plain text, so the monitor's form and JSON parsers leave the
 			# body alone and it is kept as sent; from stdin, so a reason
 			# starting with @ is never read as a file name.
-			printf '%s' "$3" | curl -fsS -o /dev/null -m 10 --retry 2 -A "$agent" \
-				-H 'Content-Type: text/plain' --data-binary @- "$url/$2" \
-				|| echo "operators-heartbeat: push failed at $(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2 &
+			err=$(printf '%s' "$3" | curl -fsS -o /dev/null -m 10 --retry 2 -A "$agent" \
+				-H 'Content-Type: text/plain' --data-binary @- "$url/$2" 2>&1) \
+				|| failed "$err" &
 		fi
 	done
 }

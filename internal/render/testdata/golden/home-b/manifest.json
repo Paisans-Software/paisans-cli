@@ -33,7 +33,7 @@
     },
     {
       "path": "srv/paisans/f2a9/auth/operators-heartbeat/push.sh",
-      "sha256": "b29545b79cb1f815e9948cba66690b3a3804128405341d2b9de520a89d3bd558",
+      "sha256": "44f4603788b53798ea396b87b42dba62ed671f13ab13454ed4dcf52a606ba9fb",
       "mode": "0644"
     },
     {
@@ -78,7 +78,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/haproxy/haproxy.cfg",
-      "sha256": "73764e4adac34332632e8201646bdd9d4bddade7ce5bd1f7f91127f2541b9fa2",
+      "sha256": "000fee8539bc84281222fe739f658d761ff6de00d209736249a70c62e6993932",
       "mode": "0644"
     },
     {
@@ -88,7 +88,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/heartbeat/push.sh",
-      "sha256": "9f727823247779f8685fba354c3fe3517ff2fcd69e8a89c718eb72b5c7dff011",
+      "sha256": "87d7ac1f9306e501e0e50b9caa735aec624a58791e88bb16eaf18ce073c0e422",
       "mode": "0644"
     },
     {

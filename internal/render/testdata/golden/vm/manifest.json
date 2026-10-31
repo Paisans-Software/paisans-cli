@@ -148,7 +148,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/heartbeat/push.sh",
-      "sha256": "03aefb206c52fc31cd9c4735a9720fb308b3b1e58aba6991799e08465c2d2702",
+      "sha256": "e21182166cd5cfb62927ffae5ee75e62f4747f5717ff48f9b0d63b47b649cd15",
       "mode": "0644"
     },
     {
