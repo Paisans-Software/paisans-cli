@@ -10,6 +10,8 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+## [0.3.0-rc.22] - 2026-10-31
+
 ### Fixed
 
 - The postgres listener's HAProxy check reads Patroni's whole answer before closing, so Patroni no longer logs a `Connection reset by peer` traceback for a passing health check.
@@ -436,7 +438,8 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.
 - The gateway refuses any request to Pocket ID that carries an `X-API-Key` header with 403, so Pocket ID's API keys work only on the mesh.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.21...develop
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.22...develop
+[0.3.0-rc.22]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.21...v0.3.0-rc.22
 [0.3.0-rc.21]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.20...v0.3.0-rc.21
 [0.3.0-rc.20]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.19...v0.3.0-rc.20
 [0.3.0-rc.19]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.18...v0.3.0-rc.19
